@@ -125,3 +125,53 @@ Before declaring completion:
 2. `uv run python -m engine.capture_rungs --offline-fixture` MUST exit `0` and validate `web/data/rungs_bundle.js` against `schemas/rung_v2.schema.json`.
 3. When sandbox GCP credentials are active (configured via untracked `.env`), `scripts/provision_pack.sh`, `uv run python -m engine.capture_rungs --dry-run`, and `uv run python -m engine.capture_rungs --live-gcp` MUST execute cleanly in `asia-southeast1` and sanitize any project IDs before writing `web/data/rungs_bundle.js`.
 4. Deterministic PCRE zero-leak scan (`engine/leak_check.py` + `tests/test_zero_leak.py`) MUST return `0` matches across all tracked and untracked-but-not-ignored files for corporate internal domains, internal shortlinks, internal monorepo paths, non-placeholder GCP project IDs, and real customer or account names.
+
+
+---
+
+## 8. Phase 2 Core Completion Architecture (Live Knowledge Catalog, Zero-Trust Agent & Empirical `N=5` Eval)
+
+### 8.1 Regional & Endpoint Honesty Contract
+- **Storage, Graph, Governance & Catalog (`asia-southeast1`):** All BigQuery datasets (`meridian_commerce` and `meridian_blind`), BigQuery Property Graph (`meridian_supply_graph`), Row-Level Security policies, Knowledge Catalog Business Glossaries/EntryLinks/AspectTypes/Auto Data Quality scans, GCS contract bucket, and BigQuery Object Tables reside strictly in **`asia-southeast1` (Singapore)**.
+- **Gemini PayGo Inference (`global` Endpoint):** Standard PayGo Vertex Gemini (`AGENT_MODEL_ID`, default `gemini-3.8-flash` with fallback `gemini-3.5-flash`) and BigQuery `AI.GENERATE` execute inference via the **`global` Vertex endpoint**. UI badges and X-Ray metadata MUST state this distinction transparently (*"Data, Graph, Catalog & RLS in `asia-southeast1` · Gemini PayGo Inference via `global` Endpoint"*).
+
+### 8.2 Genuine Physical Schema Ambiguity (Eliminating Filename/Column Giveaways)
+To ensure a real Blind LLM agent faces authentic enterprise ambiguity without rigging prompts:
+1. **`orders` Revenue Columns (`Rung 1`):**
+   - Include realistic ERP columns (`gross_total_sgd` [includes 9% GST and unadjusted on `CANCELLED`/`RETURNED`], `gross_item_sgd` [ex-GST item subtotal BEFORE deducting returns/cancellations], and `settled_net_rev_sgd` / `net_realized_revenue_sgd` — specifically rename or alias in `01_tables.sql` & `meridian_blind` so `orders` uses `amt_gross_billed_sgd`, `amt_item_subtotal_sgd`, `amt_gst_sgd`, and `amt_settled_net_sgd` where `CANCELLED`/`RETURNED` rows retain their original billed `amt_gross_billed_sgd` and `amt_item_subtotal_sgd`, while `amt_settled_net_sgd` is `0.00` on non-completed orders and documented in `OPTIONS(description=...)` on `meridian_commerce.orders`).
+2. **Neutral Cold-Chain Candidate Tables (`Rung 4`):**
+   - Provide neutral table names `mart_coldchain_q3_r1` (uncertified Oct 11 snapshot, `24.3%`) and `mart_coldchain_q3_r2` (certified Knowledge Catalog Data Product protected by BigQuery RLS, `28.4%`)—keeping backward-compatible views or updating `r4_trust_access.yaml` cleanly—so a Blind agent scanning `meridian_blind` (`mart_coldchain_q3_r1`, `mart_coldchain_q3_r2`, plus `190` `shadow_auto_tbl_*` clones) cannot guess from `_gold` or `staging_` in the table name and genuinely requires Knowledge Catalog's `data-product-certification` Aspect (`CERTIFIED` vs `UNCERTIFIED_STALE`).
+3. **Physical `meridian_blind` Dataset (`M1`):**
+   - `meridian_blind` MUST be built as **physical BigQuery tables** (not views!) with identical rows and table names to `meridian_commerce` (excluding `sla_overlay`), stripped of all table/column `OPTIONS(description=...)`, `PRIMARY KEY`/`FOREIGN KEY` constraints, and Knowledge Catalog EntryLinks/Aspects.
+
+### 8.3 Declarative `context_layer.yaml` & Live GCP Provisioning (`scripts/provision_context_layer.py`)
+- Store all Meridian-specific catalog definitions inside `packs/meridian_q3_sgd/context_layer.yaml` so `engine/` and `scripts/` contain zero hardcoded Meridian terms.
+- `scripts/provision_context_layer.py` MUST support `--dry-run`, `--live-gcp`, and dependency-ordered `--teardown` (EntryLinks -> Glossary Terms -> Glossary, DataScans, AspectTypes, Object Table -> Connection -> GCS Bucket, `meridian_blind` dataset, and read-only agent SAs):
+  1. **Physical `meridian_blind` tables** (`asia-southeast1`).
+  2. **Knowledge Catalog Business Glossary** (`meridian-commerce-glossary` in `asia-southeast1`) + Term `Premier Customer` (`tier_code = 'PRM_HV'`) linked via `definition` `EntryLink` to `meridian_commerce.customers` (`Schema.tier_code`), initializing gRPC/REST clients safely (`grpc.max_metadata_size = 65536` when using gRPC).
+  3. **Knowledge Catalog Custom `AspectType`** (`data-product-certification` in `asia-southeast1`) attached to `@bigquery` table entries (`CERTIFIED` on the authoritative cold-chain table vs. `UNCERTIFIED_STALE` on the Oct 11 snapshot) + **Auto Data Quality (`DATA_QUALITY`) scan** (`rebate-settled-true`, `no-null-country-code`, `catalogPublishingEnabled: true`).
+  4. **GCS Contract Upload + BigQuery Object Table + Safe `AI.GENERATE` Staging (`Rung 6`):** Upload the 4 `.md` contracts as `text/plain` to `gs://<project>-meridian-contracts` (`asia-southeast1`), create dedicated BigQuery Connection `meridian_vertex_conn` (`asia-southeast1`) + Object Table `meridian_commerce.contract_docs_obj`, extract structured amendment parameters via `AI.GENERATE` into staging table `meridian_commerce.sla_overlay_extracted`, validate exact invariant match (`temp_threshold_c == 2.0`, `duration_threshold_min == 45`, `credit_rate == 0.12`, `quarterly_cap_sgd == 35000.0`), and keep `meridian_commerce.sla_overlay` intact as verified fallback.
+
+### 8.4 Zero-Trust Live Agent Engine (`engine/context_retriever.py`, `engine/live_agent.py`, `POST /api/run-agent`)
+1. **Strict SA Separation & `SELECT`-Only Dry-Run Gate:**
+   - Never execute LLM-generated SQL under `meridian-web-runner`!
+   - Provision two strictly read-only SAs:
+     - `meridian-blind-agent`: dataset `READER` (`roles/bigquery.dataViewer`) **only** on `meridian_blind` + `roles/bigquery.jobUser`.
+     - `meridian-governed-agent`: dataset `READER` **only** on `meridian_commerce` + `roles/dataplex.catalogViewer` + `roles/bigquery.jobUser` (for `sg_coldchain` persona on R4, execute the verified/generated `SELECT` via `meridian-sg-coldchain`).
+   - Before executing ANY agent-generated SQL/GQL, run a BigQuery `dry_run=True` AST check and reject any query where `statement_type != "SELECT"`, multiple statements are present, `total_bytes_processed > 100 MB`, or `referenced_tables` references any dataset outside the arm's allowed dataset (`meridian_blind` for Blind; `meridian_commerce` for Governed).
+2. **Symmetric Blind vs. Governed Agent Contract & Abuse Protection:**
+   - Both arms use identical `AGENT_MODEL_ID`, `AGENT_MODEL_LOCATION` (`global`), `temperature=0.0`, `max_turns=4`, `timeout_s=25`, and `100 MB` byte budget.
+   - Governed arm retrieves context dynamically via live GCP tools (`search_certified_tables`, `lookup_catalog_context` calling `CatalogService.LookupContext`, and `get_verified_metric_contract` exposing pack Verified Queries / Property Graph DDL).
+   - `POST /api/run-agent` accepts strictly `{pack_id, rung_id, arm: "blind"|"governed"|"both", persona_id}` (zero free-form prompt text), **requires `DEMO_SHARE_TOKEN`** (`X-Demo-Key` header or `?key=`) when `REQUIRE_TOKEN_FOR_LIVE_AGENT=true` (default `true`), keys rate-limiting on the **last** proxy hop in `X-Forwarded-For` + process concurrency semaphore (`max=2`) + daily call cap (`DAILY_AGENT_CALL_LIMIT`, default `200`), and respects `ENABLE_LIVE_AGENT=false` kill-switch.
+
+### 8.5 Empirical `N=5` Evaluation Harness (`engine/eval_harness.py` -> `results/live_eval_runs.jsonl`)
+- Per-rung grading rules live in `packs/meridian_q3_sgd/` (`grading` block supporting numeric tolerance, unit/percent normalization `31.8` vs `0.318`, string channel match on R2, multi-metric match on R5, and persona-scoped match on R4).
+- Runs `N=5` iterations per rung × arm, redacts 100% of project IDs/SA emails via `redact_bundle_data` before writing `results/live_eval_runs.jsonl` (scanned by `engine/leak_check.py`), populates `empirical_eval` on each rung in `web/data/rungs_bundle.js` using a deterministic median-token representative run rule, and keeps **Stage Mode** instant (`0ms` bundle + `~1s` `/api/run-rung` + slide-up Stage X-Ray Drawer `[X]`), while **Workbench Mode (`[W]`)** exposes **`🤖 Run Live Agent`** alongside empirical `N=5` telemetry!
+
+### 8.6 Phase 2 Disjoint File Ownership Table
+| Track / Worker | Owned Disjoint Paths |
+| :--- | :--- |
+| **`pack-context-v2`** | `packs/meridian_q3_sgd/**`, `tests/test_math_invariants.py` |
+| **`gcp-context-engine`** | `engine/**`, `server/**`, `scripts/provision_context_layer.py`, `scripts/deploy_cloud_run.sh`, `scripts/teardown_pack.sh`, `tests/test_schema_and_trust.py`, `tests/test_cloud_run_wiring.py`, `tests/test_live_agent_and_eval.py`, `tests/test_zero_leak.py` |
+| **`stage-workbench-v2`** | `web/index.html`, `web/css/**`, `web/js/**`, `README.md`, `tests/test_web_bundle_contract.py` |
+| **`cloud-runner` (Post-Approval)** | Merges approved SHAs onto `main`, runs `provision_context_layer.py --live-gcp`, executes `eval_harness.py --runs 5 --live-gcp` -> `results/live_eval_runs.jsonl` + `web/data/rungs_bundle.js`, redeploys Cloud Run, and captures `1600x1000` headless Chrome QA screenshots. |

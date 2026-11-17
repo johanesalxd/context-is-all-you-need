@@ -61,7 +61,8 @@
       "enum": [
         "offline_fixture",
         "dry_run_verified",
-        "live_gcp_verified"
+        "live_gcp_verified",
+        "live_agent_verified"
       ]
     },
     "personas": {
@@ -161,6 +162,10 @@
           }
         }
       }
+    },
+    "eval_methodology": {
+      "type": "object",
+      "additionalProperties": true
     }
   },
   "$defs": {
@@ -250,6 +255,9 @@
         "rationale": {
           "type": "string",
           "minLength": 5
+        },
+        "empirical_eval": {
+          "$ref": "#/$defs/EmpiricalEval"
         }
       }
     },
@@ -460,6 +468,67 @@
               "type": "string",
               "minLength": 5
             }
+          }
+        },
+        "grading": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "EmpiricalEval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_location",
+        "runs",
+        "pass_count",
+        "median_tokens",
+        "median_exploratory_queries",
+        "median_error_retries",
+        "median_latency_ms"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "minLength": 2
+        },
+        "model_location": {
+          "type": "string",
+          "minLength": 2
+        },
+        "runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_exploratory_queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_error_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_latency_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sample_sql_or_gql": {
+          "type": "string"
+        },
+        "observed_signals": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }
