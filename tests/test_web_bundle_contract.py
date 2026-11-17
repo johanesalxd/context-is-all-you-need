@@ -86,6 +86,17 @@ def test_fallback_bundle_guards_undefined_and_validates_against_schema() -> None
     assert len(bundle["personas"]) >= 2
     assert len(bundle["horizon_cards"]) >= 2
     assert "identity_variants" in bundle["rungs"][3]
+    assert isinstance(bundle.get("eval_methodology"), dict)
+    for rung in bundle["rungs"]:
+        for arm_name in ("blind", "governed"):
+            emp = rung[arm_name].get("empirical_eval")
+            assert isinstance(emp, dict)
+            assert emp["runs"] >= 1
+            assert 0 <= emp["pass_count"] <= emp["runs"]
+    assert "amt_gross_billed_usd" in fallback_text
+    assert "amt_net_settled_usd" in fallback_text
+    assert "mart_temp_margin_q4_r1" in fallback_text
+    assert "mart_temp_margin_q4_r2" in fallback_text
 
 
 def test_generated_bundle_if_present_also_validates_against_schema() -> None:
@@ -141,6 +152,16 @@ def test_web_and_readme_enforce_official_naming_and_zero_trust_pct() -> None:
     assert "--live-gcp" in readme_text
     assert "scripts/provision_pack.sh" in readme_text
     assert "uvicorn server.app:app" in readme_text
+    for marker in (
+        "scripts/provision_context_layer.py",
+        "engine/eval_harness.py",
+        "scripts/deploy_cloud_run.sh",
+        "/api/run-agent",
+        "KeyX",
+        "X-Demo-Key",
+        "meridian_blind",
+    ):
+        assert marker in readme_text
 
 
 def test_app_js_keyboard_url_params_file_safety_and_dom_security() -> None:
@@ -155,6 +176,7 @@ def test_app_js_keyboard_url_params_file_safety_and_dom_security() -> None:
         assert "insertAdjacentHTML" not in js_src
         assert "document.write" not in js_src
         assert not re.search(r"\beval\s*\(", js_src)
+        assert not re.search(r"\bFunction\s*\(", js_src)
 
     # file:// protocol guard prevents startup/click fetch() failures over file://
     assert 'window.location.protocol === "file:"' in app_js
@@ -182,8 +204,49 @@ def test_app_js_keyboard_url_params_file_safety_and_dom_security() -> None:
         "Negative Control Assertion",
         "Recorded Verified Run",
         "▶ Run Live Query",
+        # Phase 2 Stage X-Ray drawer, Regional Honesty, Live Agent, and WCAG Share Key markers
+        "KeyX",
+        "Escape",
+        "isEditableTarget",
+        'id: "stage-xray-toggle-btn"',
+        'id: "stage-xray-drawer"',
+        "Close [Esc]",
+        "aria-expanded",
+        "aria-controls",
+        "Data, Graph, Catalog & RLS in",
+        "Gemini PayGo Inference via",
+        "/api/health",
+        "/api/run-agent",
+        "X-Demo-Key",
+        "history.replaceState",
+        'params.delete("key")',
+        "live_agent_enabled === false",
+        "response.status === 401",
+        "🤖 Run Live Agent (Blind vs. Governed)",
+        "Compare Both",
+        "Blind Only",
+        "Governed Only",
+        "Empirical N=",
+        "Empirical N=5 vs. Authored Baseline Telemetry",
+        "live_agent_verified",
+        'for: "demo-key-input"',
+        'autocomplete: "off"',
+        "aria-describedby",
     ):
         assert marker in app_js
+
+    index_html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    assert 'content="no-referrer"' in index_html
+
+    styles_css = (WEB_DIR / "css" / "styles.css").read_text(encoding="utf-8")
+    for css_selector in (
+        ".badge-region",
+        ".badge-empirical",
+        ".xray-drawer",
+        ".live-agent-panel",
+        ".demo-key-bar",
+    ):
+        assert css_selector in styles_css
 
 
 def test_identity_variant_scoped_metric_never_formats_currency_as_percent() -> None:

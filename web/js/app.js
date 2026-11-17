@@ -5,7 +5,9 @@
   const VALID_BEATS = new Set(["question", "blind", "governed", "compare"]);
   const VALID_THEMES = new Set(["paper", "dark"]);
   const VALID_TABS = new Set(["context", "sql", "arch"]);
+  const VALID_AGENT_ARMS = new Set(["both", "blind", "governed"]);
   const BEAT_CYCLE_B = ["compare", "blind", "governed"];
+  const DEMO_KEY_STORAGE = "context_demo_key";
 
   const SQL_KEYWORDS = new Set([
     "SELECT", "FROM", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER",
@@ -132,6 +134,8 @@
 
   function formatGeneratedMode(mode) {
     switch (mode) {
+      case "live_agent_verified":
+        return "Live Agent Verified";
       case "live_gcp_verified":
         return "Live GCP Verified";
       case "dry_run_verified":
@@ -172,6 +176,38 @@
       return "badge badge-tier-2";
     }
     return "badge badge-tier-3";
+  }
+
+  function getSavedDemoKey() {
+    try {
+      return (window.sessionStorage && window.sessionStorage.getItem(DEMO_KEY_STORAGE)) || "";
+    } catch (_e) {
+      return "";
+    }
+  }
+
+  function saveDemoKey(value) {
+    try {
+      if (!window.sessionStorage) {
+        return;
+      }
+      const trimmed = String(value || "").trim();
+      if (trimmed) {
+        window.sessionStorage.setItem(DEMO_KEY_STORAGE, trimmed);
+      } else {
+        window.sessionStorage.removeItem(DEMO_KEY_STORAGE);
+      }
+    } catch (_e) {}
+  }
+
+  function extractErrorMessage(data, status) {
+    if (data && data.detail !== undefined && data.detail !== null) {
+      return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    }
+    if (data && data.error !== undefined && data.error !== null) {
+      return typeof data.error === "string" ? data.error : JSON.stringify(data.error);
+    }
+    return `HTTP ${status}`;
   }
 
   /**
@@ -307,8 +343,45 @@
     return ordered;
   }
 
+  function getEmpiricalPair(rung) {
+    const blindEmp = rung && rung.blind && rung.blind.empirical_eval ? rung.blind.empirical_eval : null;
+    const govEmp = rung && rung.governed && rung.governed.empirical_eval ? rung.governed.empirical_eval : null;
+    return {
+      hasAny: Boolean(blindEmp || govEmp),
+      blindEmp,
+      govEmp
+    };
+  }
+
+  function formatEmpiricalHeadline(rung) {
+    const { hasAny, blindEmp, govEmp } = getEmpiricalPair(rung);
+    if (!hasAny) {
+      return null;
+    }
+    const runs = Number((govEmp && govEmp.runs) || (blindEmp && blindEmp.runs) || 5);
+    const blindStr = blindEmp ? `${blindEmp.pass_count}/${blindEmp.runs}` : "—";
+    const govStr = govEmp ? `${govEmp.pass_count}/${govEmp.runs}` : "—";
+    return `Empirical N=${runs}: ${blindStr} → ${govStr}`;
+  }
+
   function initApp() {
     const root = document.getElementById("app-root");
+    const params = new URLSearchParams(window.location.search);
+    const urlDemoKey = params.get("key");
+    if (urlDemoKey) {
+      saveDemoKey(urlDemoKey);
+      params.delete("key");
+      try {
+        const cleanedQuery = params.toString();
+        const cleanedUrl = cleanedQuery
+          ? `${window.location.pathname}?${cleanedQuery}`
+          : window.location.pathname;
+        window.history.replaceState(null, "", cleanedUrl);
+      } catch (_err) {
+        // Ignore history restrictions on strict file:// sandboxes.
+      }
+    }
+
     const bundle = normalizeBundle(window.CONTEXT_PACK_BUNDLE);
 
     if (!root) {
@@ -326,15 +399,6 @@
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    const urlDemoKey = params.get("key");
-    if (urlDemoKey) {
-      try {
-        if (window.sessionStorage) {
-          window.sessionStorage.setItem("context_demo_key", urlDemoKey);
-        }
-      } catch (_e) {}
-    }
     const initMode = VALID_MODES.has(params.get("mode")) ? params.get("mode") : "stage";
     const initTheme = VALID_THEMES.has(params.get("theme")) ? params.get("theme") : "paper";
     const initBeat = VALID_BEATS.has(params.get("beat")) ? params.get("beat") : "compare";
@@ -352,9 +416,21 @@
       pollOpen: false,
       pollSelectedKey: null,
       pollRevealed: false,
+      stageXrayOpen: false,
       liveTargetMode: "governed",
       liveLoading: false,
       liveResult: null,
+      health: null,
+      healthLoaded: false,
+      agentArm: "both",
+      agentLoading: false,
+      agentError: null,
+      agentResult: null,
+      authDialogOpen: false,
+      authDialogError: null,
+      authKeyVisible: false,
+      authInputDraft: "",
+      pendingAgentAction: false,
       copiedPane: null
     };
 
@@ -367,6 +443,18 @@
         return null;
       }
       return resolvePersonaForRung(activeRung(), state.preferredPersona, bundle);
+    }
+
+    function activeContextKey() {
+      const rung = activeRung();
+      const pid = activePersonaId();
+      return `${rung.id}:${pid || ""}`;
+    }
+
+    function getRegionalHonestyText() {
+      const dataRegion = (state.health && state.health.bq_location) || bundle.region || "asia-southeast1";
+      const inferRegion = (state.health && state.health.agent_model_location) || "global";
+      return `Data, Graph, Catalog & RLS in ${dataRegion} · Gemini PayGo Inference via ${inferRegion} Endpoint`;
     }
 
     function syncUrlAndDocument() {
@@ -408,7 +496,9 @@
         beat: "compare",
         pollSelectedKey: null,
         pollRevealed: false,
-        liveResult: null
+        liveResult: null,
+        agentError: null,
+        agentResult: null
       });
     }
 
@@ -416,7 +506,10 @@
       setState({
         isHorizon: true,
         pollOpen: false,
-        liveResult: null
+        stageXrayOpen: false,
+        liveResult: null,
+        agentError: null,
+        agentResult: null
       });
     }
 
@@ -432,14 +525,15 @@
         setState({ beat: "governed" });
         return;
       }
-      // From "governed" or "compare", move to next rung's opening beat (or Horizon after last rung).
       if (state.rungIndex < bundle.rungs.length - 1) {
         setState({
           rungIndex: state.rungIndex + 1,
           beat: "question",
           pollSelectedKey: null,
           pollRevealed: false,
-          liveResult: null
+          liveResult: null,
+          agentError: null,
+          agentResult: null
         });
       } else {
         selectHorizon();
@@ -452,7 +546,9 @@
           isHorizon: false,
           rungIndex: bundle.rungs.length - 1,
           beat: "governed",
-          liveResult: null
+          liveResult: null,
+          agentError: null,
+          agentResult: null
         });
         return;
       }
@@ -470,7 +566,9 @@
           beat: "governed",
           pollSelectedKey: null,
           pollRevealed: false,
-          liveResult: null
+          liveResult: null,
+          agentError: null,
+          agentResult: null
         });
       }
     }
@@ -491,7 +589,8 @@
     function toggleMode() {
       setState({
         mode: state.mode === "stage" ? "workbench" : "stage",
-        pollOpen: false
+        pollOpen: false,
+        stageXrayOpen: false
       });
     }
 
@@ -503,10 +602,39 @@
 
     function togglePoll() {
       if (state.isHorizon && !state.pollOpen) {
-        setState({ isHorizon: false, pollOpen: true });
+        setState({ isHorizon: false, pollOpen: true, stageXrayOpen: false });
         return;
       }
-      setState({ pollOpen: !state.pollOpen });
+      setState({ pollOpen: !state.pollOpen, stageXrayOpen: false });
+    }
+
+    function toggleStageXray() {
+      if (state.mode !== "stage" || state.isHorizon || state.pollOpen) {
+        return;
+      }
+      setState({ stageXrayOpen: !state.stageXrayOpen });
+    }
+
+    async function fetchHealth() {
+      if (window.location.protocol === "file:") {
+        return;
+      }
+      try {
+        const res = await fetch("/api/health", { method: "GET" });
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json().catch(() => null);
+        if (data && typeof data === "object") {
+          state.health = data;
+          state.healthLoaded = true;
+          if (!state.authDialogOpen && !state.pollOpen && !isEditableTarget(document.activeElement)) {
+            render();
+          }
+        }
+      } catch (_err) {
+        // Silent fallback when static file server has no /api/health endpoint.
+      }
     }
 
     async function handleRunLiveQuery() {
@@ -539,12 +667,10 @@
 
       try {
         const reqHeaders = { "Content-Type": "application/json" };
-        try {
-          const savedKey = window.sessionStorage && window.sessionStorage.getItem("context_demo_key");
-          if (savedKey) {
-            reqHeaders["X-Demo-Key"] = savedKey;
-          }
-        } catch (_e) {}
+        const savedKey = getSavedDemoKey();
+        if (savedKey) {
+          reqHeaders["X-Demo-Key"] = savedKey;
+        }
         const response = await fetch("/api/run-rung", {
           method: "POST",
           headers: reqHeaders,
@@ -553,10 +679,7 @@
         const elapsedMs = Math.round(performance.now() - startedAt);
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          const rawDetail = data.detail !== undefined && data.detail !== null
-            ? data.detail
-            : (data.error !== undefined && data.error !== null ? data.error : `HTTP ${response.status}`);
-          const detail = typeof rawDetail === "string" ? rawDetail : JSON.stringify(rawDetail);
+          const detail = extractErrorMessage(data, response.status);
           setState({
             liveLoading: false,
             liveResult: {
@@ -595,6 +718,122 @@
       }
     }
 
+    function openAuthPrompt(errorMsg, retryAgentAfterSave) {
+      setState({
+        authDialogOpen: true,
+        authDialogError: errorMsg || null,
+        authInputDraft: "",
+        pendingAgentAction: Boolean(retryAgentAfterSave)
+      });
+      window.requestAnimationFrame(() => {
+        const input = document.getElementById("demo-key-input");
+        if (input) {
+          input.focus();
+        }
+      });
+    }
+
+    async function handleRunLiveAgent() {
+      if (state.isHorizon) {
+        return;
+      }
+      if (window.location.protocol === "file:") {
+        setState({
+          agentError: "Offline file:// mode active — live Gemini agent execution is disabled. Serve via uvicorn server.app:app over http:// or Cloud Run."
+        });
+        return;
+      }
+      if (state.health && state.health.live_agent_enabled === false) {
+        setState({
+          agentError: "Live agent runner is disabled by server configuration (ENABLE_LIVE_AGENT=false)."
+        });
+        return;
+      }
+
+      const savedKey = getSavedDemoKey();
+      const tokenRequired = state.health ? state.health.live_agent_token_required === true : false;
+      if (tokenRequired && !savedKey) {
+        openAuthPrompt("A Demo Share Key (X-Demo-Key) is required to run the live Gemini agent.", true);
+        return;
+      }
+
+      const rung = activeRung();
+      const personaId = activePersonaId();
+      const contextKey = activeContextKey();
+      const arm = VALID_AGENT_ARMS.has(state.agentArm) ? state.agentArm : "both";
+      const payload = {
+        pack_id: bundle.pack_id,
+        rung_id: rung.id,
+        arm
+      };
+      if (personaId) {
+        payload.persona_id = personaId;
+      }
+
+      setState({
+        agentLoading: true,
+        agentError: null,
+        authDialogOpen: false,
+        authDialogError: null,
+        pendingAgentAction: false
+      });
+
+      const startedAt = performance.now();
+      try {
+        const reqHeaders = { "Content-Type": "application/json" };
+        if (savedKey) {
+          reqHeaders["X-Demo-Key"] = savedKey;
+        }
+        const response = await fetch("/api/run-agent", {
+          method: "POST",
+          headers: reqHeaders,
+          body: JSON.stringify(payload)
+        });
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        const data = await response.json().catch(() => ({}));
+
+        if (response.status === 401) {
+          const detail = extractErrorMessage(data, response.status);
+          setState({
+            agentLoading: false,
+            agentError: null
+          });
+          openAuthPrompt(`Authentication failed (401): ${detail}. Paste a valid X-Demo-Key to retry.`, true);
+          return;
+        }
+
+        if (!response.ok) {
+          const detail = extractErrorMessage(data, response.status);
+          setState({
+            agentLoading: false,
+            agentError: `Live agent request failed (${elapsedMs} ms, HTTP ${response.status}): ${detail}`
+          });
+          return;
+        }
+
+        if (activeContextKey() !== contextKey) {
+          setState({ agentLoading: false });
+          return;
+        }
+
+        setState({
+          agentLoading: false,
+          agentError: null,
+          agentResult: {
+            contextKey,
+            elapsedMs,
+            data
+          }
+        });
+      } catch (err) {
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        setState({
+          agentLoading: false,
+          agentError: `Live agent endpoint unreachable (${elapsedMs} ms): ${err && err.message ? err.message : "Network error"}`
+        });
+      }
+    }
+
     function copyTextToClipboard(paneKey, text) {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
         navigator.clipboard.writeText(text).then(() => {
@@ -611,6 +850,14 @@
     /* ----------------------------------------------------------------------
        Shared UI Fragment Builders (100% safe DOM construction)
        ---------------------------------------------------------------------- */
+
+    function buildRegionalHonestyBadge() {
+      return el("span", {
+        className: "badge badge-region",
+        attrs: { "data-regional-honesty": "true" },
+        text: getRegionalHonestyText()
+      });
+    }
 
     function buildRungStepper() {
       const group = el("nav", {
@@ -660,12 +907,12 @@
         el("button", {
           className: `seg-btn${state.mode === "stage" ? " is-active" : ""}`,
           attrs: { type: "button", "aria-pressed": state.mode === "stage" ? "true" : "false" },
-          onClick: () => setState({ mode: "stage", pollOpen: false })
+          onClick: () => setState({ mode: "stage", pollOpen: false, stageXrayOpen: false })
         }, "Stage ", el("span", { className: "kbd-hint", text: "W" })),
         el("button", {
           className: `seg-btn${state.mode === "workbench" ? " is-active" : ""}`,
           attrs: { type: "button", "aria-pressed": state.mode === "workbench" ? "true" : "false" },
-          onClick: () => setState({ mode: "workbench", pollOpen: false })
+          onClick: () => setState({ mode: "workbench", pollOpen: false, stageXrayOpen: false })
         }, "Workbench")
       );
 
@@ -715,7 +962,7 @@
               "data-persona-id": pid,
               "aria-pressed": isActive ? "true" : "false"
             },
-            onClick: () => setState({ preferredPersona: pid })
+            onClick: () => setState({ preferredPersona: pid, agentResult: null, agentError: null })
           })
         );
       }
@@ -814,16 +1061,90 @@
       );
     }
 
+    function buildEmpiricalSummaryBlock(rung, copyKeyPrefix) {
+      const { hasAny, blindEmp, govEmp } = getEmpiricalPair(rung);
+      if (!hasAny) {
+        return el("div", { className: "empirical-empty-note" },
+          el("span", {
+            text: `Empirical N=5 telemetry has not been attached to this bundle yet (Target: Blind ${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → Governed ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}). Run eval_harness.py --runs 5 --live-gcp to populate live N=5 metrics.`
+          })
+        );
+      }
+
+      const arms = [
+        { key: "blind", label: "Blind Arm (Raw Schema Only)", outcome: rung.blind, emp: blindEmp },
+        { key: "governed", label: "Governed Arm (Catalog + Contracts)", outcome: rung.governed, emp: govEmp }
+      ];
+
+      return el("div", { className: "empirical-cards-grid" },
+        ...arms.map(({ key, label, outcome, emp }) =>
+          el("div", { className: `empirical-arm-card is-${key}` },
+            el("div", { className: "outcome-card-head" },
+              el("strong", { className: "outcome-role-title", text: label }),
+              emp
+                ? el("span", {
+                    className: emp.pass_count === emp.runs ? "badge badge-ga badge-mono" : "badge badge-tier-3 badge-mono",
+                    text: `Empirical N=${emp.runs}: ${emp.pass_count}/${emp.runs} · Target: ${outcome.eval_pass_count}/${outcome.eval_total_runs}`
+                  })
+                : el("span", {
+                    className: "badge badge-mono",
+                    text: `Target: ${outcome.eval_pass_count}/${outcome.eval_total_runs}`
+                  })
+            ),
+            emp
+              ? [
+                  el("div", { className: "empirical-meta-row" },
+                    el("span", { className: "badge badge-mono", text: `${emp.model_id} (${emp.model_location})` }),
+                    el("span", { className: "badge badge-mono", text: `Median Tokens: ${formatNumber(emp.median_tokens)}` }),
+                    el("span", { className: "badge badge-mono", text: `Queries: ${emp.median_exploratory_queries}` }),
+                    el("span", { className: "badge badge-mono", text: `Retries: ${emp.median_error_retries}` }),
+                    el("span", { className: "badge badge-mono", text: `Latency: ${Math.round(emp.median_latency_ms)} ms` })
+                  ),
+                  Array.isArray(emp.observed_signals) && emp.observed_signals.length > 0
+                    ? el("div", { className: "signal-chips" },
+                        ...emp.observed_signals.map((sig) =>
+                          el("span", { className: "badge badge-mono", text: sig })
+                        )
+                      )
+                    : null,
+                  emp.sample_sql_or_gql
+                    ? el("div", { className: "code-pane" },
+                        el("div", { className: "code-pane-head" },
+                          el("span", { className: "badge badge-mono", text: "Median-Token Representative SQL / GQL" }),
+                          el("button", {
+                            className: "btn",
+                            text: state.copiedPane === `${copyKeyPrefix}_${key}_emp` ? "Copied" : "Copy",
+                            attrs: { type: "button" },
+                            onClick: () => copyTextToClipboard(`${copyKeyPrefix}_${key}_emp`, emp.sample_sql_or_gql)
+                          })
+                        ),
+                        buildHighlightedCodeNodes(emp.sample_sql_or_gql)
+                      )
+                    : null
+                ]
+              : el("p", { className: "outcome-detail", text: "Empirical runs not recorded for this arm." })
+          )
+        )
+      );
+    }
+
     /* ----------------------------------------------------------------------
-       Stage Mode Renderer (10% / 80% / 10% Quiet Stage V2)
+       Stage Mode Renderer (10% / 80% / 10% Quiet Stage V2 + [X] X-Ray Drawer)
        ---------------------------------------------------------------------- */
 
     function buildMetricsStrip(outcome) {
+      const emp = outcome.empirical_eval;
       return el("div", { className: "outcome-metrics-strip" },
         el("div", { className: "metric-chip" },
-          el("span", { className: "metric-chip-label", text: "Golden Eval" }),
+          el("span", { className: "metric-chip-label", text: emp ? "Target Eval" : "Golden Eval" }),
           el("span", { className: "metric-chip-value", text: `${outcome.eval_pass_count}/${outcome.eval_total_runs}` })
         ),
+        emp
+          ? el("div", { className: "metric-chip is-empirical" },
+              el("span", { className: "metric-chip-label", text: `Empirical N=${emp.runs}` }),
+              el("span", { className: "metric-chip-value", text: `${emp.pass_count}/${emp.runs}` })
+            )
+          : null,
         el("div", { className: "metric-chip" },
           el("span", { className: "metric-chip-label", text: "Queries" }),
           el("span", { className: "metric-chip-value", text: String(outcome.exploratory_queries) })
@@ -837,6 +1158,139 @@
           el("span", { className: "metric-chip-value", text: formatNumber(outcome.tokens_used) })
         )
       );
+    }
+
+    function buildStageXrayDrawer() {
+      if (state.mode !== "stage" || state.isHorizon || !state.stageXrayOpen) {
+        return null;
+      }
+      const rung = activeRung();
+
+      const backdrop = el("div", {
+        className: "xray-drawer-backdrop",
+        attrs: { role: "presentation" },
+        onClick: (e) => {
+          if (e.target === backdrop) {
+            setState({ stageXrayOpen: false });
+          }
+        }
+      },
+        el("section", {
+          className: "xray-drawer",
+          attrs: {
+            id: "stage-xray-drawer",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "stage-xray-drawer-title"
+          }
+        },
+          el("header", { className: "xray-drawer-head" },
+            el("div", { className: "xray-drawer-title-block" },
+              el("div", { className: "outcome-label-group" },
+                el("span", { className: "badge badge-mono", text: `Stage X-Ray · ${rung.short_label}` }),
+                buildRegionalHonestyBadge()
+              ),
+              el("h2", {
+                className: "xray-drawer-title",
+                attrs: { id: "stage-xray-drawer-title" },
+                text: `${rung.title} — Live Governance & Telemetry Proof`
+              })
+            ),
+            el("div", { className: "stage-actions" },
+              el("button", {
+                className: "btn",
+                text: "Open Full Workbench [W]",
+                attrs: { type: "button" },
+                onClick: () => setState({ mode: "workbench", stageXrayOpen: false })
+              }),
+              el("button", {
+                className: "btn btn-primary",
+                text: "Close [Esc]",
+                attrs: { type: "button", "aria-label": "Close Stage X-Ray drawer" },
+                onClick: () => setState({ stageXrayOpen: false })
+              })
+            )
+          ),
+          el("div", { className: "xray-drawer-body" },
+            el("section", { className: "xray-drawer-section", attrs: { "aria-label": "Injected Knowledge Catalog and Governance Context" } },
+              el("h3", { className: "progression-title", text: "1. Injected Knowledge Catalog & Governance Context" }),
+              el("div", { className: "context-callout" },
+                el("span", { className: "context-callout-label", text: "Context Mechanism:" }),
+                el("span", { text: rung.governed.context_mechanism || rung.xray_summary.context_added })
+              ),
+              el("p", { className: "outcome-detail", text: `Context Added: ${rung.xray_summary.context_added}` }),
+              el("div", { className: "release-badges-row" },
+                ...rung.release_badges.map((rb) =>
+                  el("span", {
+                    className: stageBadgeClass(rb.stage),
+                    text: `${rb.capability} · ${rb.stage} (${rb.region_scope})`
+                  })
+                ),
+                ...rung.xray_summary.gcp_primitives.map((prim) =>
+                  el("span", { className: "primitive-chip", text: prim })
+                )
+              ),
+              el("div", { className: "code-pane" },
+                el("div", { className: "code-pane-head" },
+                  el("span", { className: "badge badge-mono", text: "Injected Context Payload" }),
+                  el("button", {
+                    className: "btn",
+                    text: state.copiedPane === "drawer_context" ? "Copied" : "Copy Payload",
+                    attrs: { type: "button" },
+                    onClick: () => copyTextToClipboard("drawer_context", prettyJsonOrText(rung.governed.context_payload))
+                  })
+                ),
+                el("pre", { className: "code-pre", text: prettyJsonOrText(rung.governed.context_payload) })
+              ),
+              el("div", { className: "neg-control-box" },
+                el("h4", { className: "neg-control-title", text: "Negative Control Assertion" }),
+                el("p", { className: "outcome-detail", text: rung.xray_summary.negative_control_assertion })
+              )
+            ),
+            el("section", { className: "xray-drawer-section", attrs: { "aria-label": "Compiled Blind vs Governed SQL and ISO GQL" } },
+              el("h3", { className: "progression-title", text: "2. Compiled Blind vs. Governed SQL / ISO GQL" }),
+              el("div", { className: "code-diff-grid" },
+                el("div", { className: "code-pane" },
+                  el("div", { className: "code-pane-head" },
+                    el("div", { className: "outcome-label-group" },
+                      el("span", { className: "badge badge-tier-3", text: `Blind · ${rung.blind.query_language}` }),
+                      el("span", { className: "badge badge-mono", text: `${formatNumber(rung.blind.tokens_used)} tok · ${rung.blind.error_retries} retries` })
+                    ),
+                    el("button", {
+                      className: "btn",
+                      text: state.copiedPane === "drawer_blind_sql" ? "Copied" : "Copy",
+                      attrs: { type: "button" },
+                      onClick: () => copyTextToClipboard("drawer_blind_sql", rung.blind.sql_or_gql)
+                    })
+                  ),
+                  buildHighlightedCodeNodes(rung.blind.sql_or_gql)
+                ),
+                el("div", { className: "code-pane" },
+                  el("div", { className: "code-pane-head" },
+                    el("div", { className: "outcome-label-group" },
+                      el("span", { className: "badge badge-ga", text: `Governed · ${rung.governed.query_language}` }),
+                      el("span", { className: "badge badge-mono", text: `${formatNumber(rung.governed.tokens_used)} tok · ${rung.governed.error_retries} retries` })
+                    ),
+                    el("button", {
+                      className: "btn",
+                      text: state.copiedPane === "drawer_gov_sql" ? "Copied" : "Copy",
+                      attrs: { type: "button" },
+                      onClick: () => copyTextToClipboard("drawer_gov_sql", rung.governed.sql_or_gql)
+                    })
+                  ),
+                  buildHighlightedCodeNodes(rung.governed.sql_or_gql)
+                )
+              )
+            ),
+            el("section", { className: "xray-drawer-section", attrs: { "aria-label": "Empirical N=5 Telemetry Summary" } },
+              el("h3", { className: "progression-title", text: "3. Empirical N=5 Telemetry Summary" }),
+              buildEmpiricalSummaryBlock(rung, "drawer")
+            )
+          )
+        )
+      );
+
+      return backdrop;
     }
 
     function buildStageView() {
@@ -893,6 +1347,7 @@
             el("div", { className: "brand-title-row" },
               el("p", { className: "brand-title", text: bundle.title }),
               el("span", { className: "badge badge-mono", text: `${bundle.closed_period_label} · ${bundle.region}` }),
+              buildRegionalHonestyBadge(),
               el("span", { className: "brand-tagline", text: bundle.hero_tagline })
             )
           ),
@@ -1081,6 +1536,11 @@
         }
       }
 
+      const empiricalBadgeText = state.isHorizon ? null : formatEmpiricalHeadline(rung);
+      const targetRateText = state.isHorizon
+        ? ""
+        : `${empiricalBadgeText ? "Target: " : ""}${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}`;
+
       const footer = el("footer", { className: "stage-footer" },
         state.isHorizon
           ? el("div", { className: "eval-trust-group" },
@@ -1093,8 +1553,15 @@
                 evalDots,
                 el("span", {
                   className: "badge badge-mono",
-                  text: `${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}`
-                })
+                  text: targetRateText
+                }),
+                empiricalBadgeText
+                  ? el("span", {
+                      className: "badge badge-empirical badge-mono",
+                      attrs: { "data-empirical-badge": "true" },
+                      text: empiricalBadgeText
+                    })
+                  : null
               ),
               el("div", { className: "eval-block" },
                 el("span", { className: "eval-label", text: "TrustTier" }),
@@ -1114,10 +1581,24 @@
           el("div", { className: "shortcut-legend", attrs: { "aria-label": "Keyboard shortcuts" } },
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Advance"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "P" }), "Poll"),
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "X" }), "X-Ray"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "B" }), "Focus"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme")
           ),
+          !state.isHorizon
+            ? el("button", {
+                className: `btn ${state.stageXrayOpen ? "btn-primary" : "btn-accent"}`,
+                attrs: {
+                  type: "button",
+                  id: "stage-xray-toggle-btn",
+                  "aria-expanded": state.stageXrayOpen ? "true" : "false",
+                  "aria-controls": "stage-xray-drawer",
+                  title: "Open Slide-Up Stage X-Ray Drawer (Key X)"
+                },
+                onClick: () => toggleStageXray()
+              }, el("span", { className: "kbd-hint", text: "X" }), " X-Ray")
+            : null,
           el("button", {
             className: "btn",
             text: "← Prev",
@@ -1140,7 +1621,7 @@
     }
 
     /* ----------------------------------------------------------------------
-       Workbench Mode Renderer (Progression Bar + 3-Tab Engineering X-Ray)
+       Workbench Mode Renderer (Progression Bar + Live Agent + 3-Tab X-Ray)
        ---------------------------------------------------------------------- */
 
     function buildProgressionBar() {
@@ -1149,6 +1630,9 @@
       let totalRunsSum = 0;
       let blindRetrySum = 0;
       let govRetrySum = 0;
+      let empBlindSum = 0;
+      let empGovSum = 0;
+      let empTotalSum = 0;
 
       for (const r of bundle.rungs) {
         blindPassSum += Number(r.blind.eval_pass_count || 0);
@@ -1156,12 +1640,21 @@
         totalRunsSum += Number(r.governed.eval_total_runs || 0);
         blindRetrySum += Number(r.blind.error_retries || 0);
         govRetrySum += Number(r.governed.error_retries || 0);
+        const { blindEmp, govEmp } = getEmpiricalPair(r);
+        if (blindEmp) {
+          empBlindSum += Number(blindEmp.pass_count || 0);
+        }
+        if (govEmp) {
+          empGovSum += Number(govEmp.pass_count || 0);
+          empTotalSum += Number(govEmp.runs || 0);
+        }
       }
 
       const cardsWrap = el("div", { className: "progression-cards" });
       bundle.rungs.forEach((rung, idx) => {
         const isActive = !state.isHorizon && state.rungIndex === idx;
         const pct = Math.round((rung.governed.eval_pass_count / Math.max(1, rung.governed.eval_total_runs)) * 100);
+        const empLine = formatEmpiricalHeadline(rung);
         cardsWrap.appendChild(
           el("button", {
             className: `prog-card${isActive ? " is-active" : ""}`,
@@ -1184,9 +1677,14 @@
               })
             ),
             el("div", { className: "prog-card-stats" },
-              el("span", { text: `Eval ${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}` }),
+              el("span", { text: `${empLine ? "Target " : "Eval "}${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}` }),
               el("span", { text: `Retries ${rung.blind.error_retries} → ${rung.governed.error_retries}` })
-            )
+            ),
+            empLine
+              ? el("div", { className: "prog-card-emp" },
+                  el("span", { className: "badge badge-empirical badge-mono", text: empLine })
+                )
+              : null
           )
         );
       });
@@ -1200,12 +1698,18 @@
           el("div", { className: "release-badges-row" },
             el("span", {
               className: "badge badge-tier-3 badge-mono",
-              text: `Blind Cumulative: ${blindPassSum}/${totalRunsSum}`
+              text: `Target Blind: ${blindPassSum}/${totalRunsSum}`
             }),
             el("span", {
               className: "badge badge-ga badge-mono",
-              text: `Governed Cumulative: ${govPassSum}/${totalRunsSum}`
+              text: `Target Governed: ${govPassSum}/${totalRunsSum}`
             }),
+            empTotalSum > 0
+              ? el("span", {
+                  className: "badge badge-empirical badge-mono",
+                  text: `Empirical Cumulative: ${empBlindSum}/${empTotalSum} → ${empGovSum}/${empTotalSum}`
+                })
+              : null,
             el("span", {
               className: "badge badge-mono",
               text: `Error Retries: ${blindRetrySum} → ${govRetrySum}`
@@ -1213,6 +1717,487 @@
           )
         ),
         cardsWrap
+      );
+    }
+
+    function buildRowsPreviewTable(rowsPreview) {
+      if (!Array.isArray(rowsPreview) || rowsPreview.length === 0) {
+        return null;
+      }
+      const firstRow = rowsPreview[0];
+      if (!firstRow || typeof firstRow !== "object" || Array.isArray(firstRow)) {
+        return el("div", { className: "code-pane" },
+          el("div", { className: "code-pane-head" },
+            el("span", { className: "badge badge-mono", text: `Rows Preview (${rowsPreview.length})` })
+          ),
+          el("pre", { className: "code-pre", text: JSON.stringify(rowsPreview, null, 2) })
+        );
+      }
+
+      const columns = Object.keys(firstRow);
+      return el("div", { className: "rls-table-wrap" },
+        el("table", { className: "rls-table rows-preview-table" },
+          el("thead", null,
+            el("tr", null, ...columns.map((col) => el("th", { text: col })))
+          ),
+          el("tbody", null,
+            ...rowsPreview.map((row) =>
+              el("tr", null,
+                ...columns.map((col) => {
+                  const val = row[col];
+                  const rendered = val === null || val === undefined
+                    ? "null"
+                    : (typeof val === "object" ? JSON.stringify(val) : String(val));
+                  return el("td", { className: "badge-mono", text: rendered });
+                })
+              )
+            )
+          )
+        )
+      );
+    }
+
+    function buildAgentArmCard(armKey, result, rungId) {
+      if (!result || typeof result !== "object") {
+        return null;
+      }
+      const isBlind = armKey === "blind";
+      const passBadge = el("span", {
+        className: result.passed_grading ? "badge badge-ga badge-mono" : "badge badge-tier-3 badge-mono",
+        text: result.passed_grading ? "PASS · Grading Verified" : "FAIL · Grading Mismatch"
+      });
+      const copyKey = `agent_${rungId}_${armKey}`;
+      const latencyText = typeof result.latency_ms === "number" ? `${Math.round(result.latency_ms)} ms` : "—";
+      const numericText = typeof result.numeric_value === "number"
+        ? formatNumber(result.numeric_value)
+        : null;
+
+      return el("article", {
+        className: `agent-result-card ${isBlind ? "is-blind" : "is-governed"}`,
+        attrs: { "data-agent-arm": armKey }
+      },
+        el("div", { className: "outcome-card-head" },
+          el("div", { className: "outcome-label-group" },
+            el("span", {
+              className: "outcome-role-title",
+              text: isBlind ? "Blind Agent (Raw Schema Only)" : "Governed Agent (Knowledge Catalog + Verified Context)"
+            }),
+            result.query_language
+              ? el("span", { className: "badge badge-mono", text: result.query_language })
+              : null
+          ),
+          el("div", { className: "outcome-label-group" },
+            passBadge,
+            result.trust_tier
+              ? el("span", { className: trustBadgeClass(result.trust_tier), text: result.trust_tier })
+              : null
+          )
+        ),
+        el("div", { className: "agent-answer-block" },
+          el("p", { className: "outcome-kpi", text: result.answer_summary || "No answer summary returned." }),
+          numericText !== null
+            ? el("span", { className: "badge badge-mono", text: `Numeric Output: ${numericText}` })
+            : null
+        ),
+        result.grading_reason
+          ? el("p", { className: "outcome-detail", text: `Grading: ${result.grading_reason}` })
+          : null,
+        el("div", { className: "outcome-metrics-strip" },
+          el("div", { className: "metric-chip" },
+            el("span", { className: "metric-chip-label", text: "Latency" }),
+            el("span", { className: "metric-chip-value", text: latencyText })
+          ),
+          el("div", { className: "metric-chip" },
+            el("span", { className: "metric-chip-label", text: "Tokens" }),
+            el("span", { className: "metric-chip-value", text: formatNumber(result.tokens_used) })
+          ),
+          el("div", { className: "metric-chip" },
+            el("span", { className: "metric-chip-label", text: "Queries" }),
+            el("span", { className: "metric-chip-value", text: String(result.exploratory_queries ?? 0) })
+          ),
+          el("div", { className: "metric-chip" },
+            el("span", { className: "metric-chip-label", text: "Retries" }),
+            el("span", { className: "metric-chip-value", text: String(result.error_retries ?? 0) })
+          )
+        ),
+        result.catalog_context_summary
+          ? el("div", { className: "context-callout" },
+              el("span", { className: "context-callout-label", text: "Catalog & Context Summary:" }),
+              el("span", { text: result.catalog_context_summary })
+            )
+          : null,
+        Array.isArray(result.trust_reasons) && result.trust_reasons.length > 0
+          ? el("ul", { className: "trust-reasons-list" },
+              ...result.trust_reasons.map((reason) => el("li", { text: reason }))
+            )
+          : null,
+        Array.isArray(result.observed_signals) && result.observed_signals.length > 0
+          ? el("div", { className: "signal-chips" },
+              ...result.observed_signals.map((sig) =>
+                el("span", { className: "badge badge-mono", text: sig })
+              )
+            )
+          : null,
+        Array.isArray(result.tool_trace) && result.tool_trace.length > 0
+          ? el("div", { className: "rls-table-wrap" },
+              el("table", { className: "rls-table tool-trace-table" },
+                el("thead", null,
+                  el("tr", null,
+                    el("th", { text: "Turn" }),
+                    el("th", { text: "Tool" }),
+                    el("th", { text: "Args Summary" }),
+                    el("th", { text: "Status" }),
+                    el("th", { text: "Output Preview" })
+                  )
+                ),
+                el("tbody", null,
+                  ...result.tool_trace.map((step) =>
+                    el("tr", null,
+                      el("td", { className: "badge-mono", text: String(step.turn ?? "") }),
+                      el("td", { className: "badge-mono", text: String(step.tool_name || "") }),
+                      el("td", { className: "badge-mono", text: String(step.args_summary || "") }),
+                      el("td", { className: "badge-mono", text: String(step.status || "") }),
+                      el("td", { text: String(step.output_preview || "") })
+                    )
+                  )
+                )
+              )
+            )
+          : null,
+        result.sql_or_gql
+          ? el("div", { className: "code-pane" },
+              el("div", { className: "code-pane-head" },
+                el("span", { className: "badge badge-mono", text: `Generated ${result.query_language || "SQL"}` }),
+                el("button", {
+                  className: "btn",
+                  text: state.copiedPane === copyKey ? "Copied" : "Copy",
+                  attrs: { type: "button" },
+                  onClick: () => copyTextToClipboard(copyKey, result.sql_or_gql)
+                })
+              ),
+              buildHighlightedCodeNodes(result.sql_or_gql)
+            )
+          : null,
+        buildRowsPreviewTable(result.rows_preview)
+      );
+    }
+
+    function buildEmpiricalVsBaselineTable(rung, liveResponse) {
+      const arms = [
+        { key: "blind", label: "Blind", outcome: rung.blind },
+        { key: "governed", label: "Governed", outcome: rung.governed }
+      ];
+      const liveArms = liveResponse && liveResponse.arms ? liveResponse.arms : {};
+
+      return el("div", { className: "empirical-table-wrap" },
+        el("h3", { className: "progression-title", text: "Empirical N=5 vs. Authored Baseline Telemetry" }),
+        el("div", { className: "rls-table-wrap" },
+          el("table", { className: "rls-table" },
+            el("thead", null,
+              el("tr", null,
+                el("th", { text: "Arm" }),
+                el("th", { text: "Authored Baseline (Step 0)" }),
+                el("th", { text: "Empirical N=5 (Live Eval)" }),
+                el("th", { text: "Observed Signals" }),
+                el("th", { text: "Latest Live Agent Run" })
+              )
+            ),
+            el("tbody", null,
+              ...arms.map(({ key, label, outcome }) => {
+                const emp = outcome.empirical_eval;
+                const live = liveArms[key];
+                return el("tr", null,
+                  el("td", null,
+                    el("span", {
+                      className: key === "blind" ? "badge badge-tier-3" : "badge badge-ga",
+                      text: label
+                    })
+                  ),
+                  el("td", {
+                    className: "badge-mono",
+                    text: `Target ${outcome.eval_pass_count}/${outcome.eval_total_runs} · ${formatNumber(outcome.tokens_used)} tok · ${outcome.exploratory_queries} q · ${outcome.error_retries} retries`
+                  }),
+                  el("td", {
+                    className: "badge-mono",
+                    text: emp
+                      ? `Empirical N=${emp.runs}: ${emp.pass_count}/${emp.runs} · ${formatNumber(emp.median_tokens)} tok · ${emp.median_exploratory_queries} q · ${emp.median_error_retries} retries · ${Math.round(emp.median_latency_ms)} ms (${emp.model_id} @ ${emp.model_location})`
+                      : "Pending live eval_harness.py run"
+                  }),
+                  el("td", null,
+                    emp && Array.isArray(emp.observed_signals) && emp.observed_signals.length > 0
+                      ? el("div", { className: "signal-chips" },
+                          ...emp.observed_signals.map((sig) =>
+                            el("span", { className: "badge badge-mono", text: sig })
+                          )
+                        )
+                      : el("span", { className: "eval-label", text: "—" })
+                  ),
+                  el("td", {
+                    className: "badge-mono",
+                    text: live
+                      ? `${live.passed_grading ? "PASS" : "FAIL"} · ${formatNumber(live.tokens_used)} tok · ${Math.round(live.latency_ms)} ms · ${live.trust_tier}`
+                      : "Not run in session"
+                  })
+                );
+              })
+            )
+          )
+        )
+      );
+    }
+
+    function buildDemoKeyInlineBar() {
+      if (!state.authDialogOpen) {
+        return null;
+      }
+      const hasSaved = Boolean(getSavedDemoKey());
+      const keyInput = el("input", {
+        className: "demo-key-input",
+        attrs: {
+          id: "demo-key-input",
+          name: "demo_key",
+          type: state.authKeyVisible ? "text" : "password",
+          autocomplete: "off",
+          spellcheck: "false",
+          placeholder: "Paste demo share key...",
+          "aria-describedby": "demo-key-help",
+          required: "required"
+        }
+      });
+      keyInput.value = state.authInputDraft || "";
+      keyInput.addEventListener("input", (e) => {
+        state.authInputDraft = e.target.value;
+      });
+
+      const form = el("form", {
+        className: "demo-key-bar",
+        attrs: {
+          id: "demo-key-form",
+          role: "region",
+          "aria-labelledby": "demo-key-label"
+        }
+      },
+        el("div", { className: "demo-key-head" },
+          el("label", {
+            className: "demo-key-label",
+            attrs: { for: "demo-key-input", id: "demo-key-label" },
+            text: "Demo Share Key (X-Demo-Key)"
+          }),
+          el("span", {
+            className: "demo-key-help",
+            attrs: { id: "demo-key-help" },
+            text: "Stored only in sessionStorage for this browser tab and never written to the visible URL."
+          })
+        ),
+        state.authDialogError
+          ? el("p", {
+              className: "demo-key-error",
+              attrs: { role: "alert" },
+              text: state.authDialogError
+            })
+          : null,
+        el("div", { className: "demo-key-input-row" },
+          keyInput,
+          el("button", {
+            className: "btn",
+            text: state.authKeyVisible ? "Hide" : "Show",
+            attrs: {
+              type: "button",
+              "aria-pressed": state.authKeyVisible ? "true" : "false",
+              "aria-label": state.authKeyVisible ? "Hide demo share key" : "Show demo share key"
+            },
+            onClick: () => setState({ authKeyVisible: !state.authKeyVisible })
+          }),
+          el("button", {
+            className: "btn btn-primary",
+            text: state.pendingAgentAction ? "Save Key & Run Agent" : "Save Key",
+            attrs: { type: "submit" }
+          }),
+          hasSaved
+            ? el("button", {
+                className: "btn",
+                text: "Clear Saved Key",
+                attrs: { type: "button" },
+                onClick: () => {
+                  saveDemoKey("");
+                  setState({
+                    authDialogOpen: false,
+                    authDialogError: null,
+                    authKeyVisible: false,
+                    authInputDraft: "",
+                    pendingAgentAction: false
+                  });
+                }
+              })
+            : null,
+          el("button", {
+            className: "btn",
+            text: "Cancel",
+            attrs: { type: "button" },
+            onClick: () => setState({
+              authDialogOpen: false,
+              authDialogError: null,
+              authKeyVisible: false,
+              authInputDraft: "",
+              pendingAgentAction: false
+            })
+          })
+        )
+      );
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const val = String(keyInput.value || "").trim();
+        if (!val) {
+          setState({ authDialogError: "Please paste a non-empty Demo Share Key." });
+          return;
+        }
+        saveDemoKey(val);
+        const shouldRetry = state.pendingAgentAction;
+        setState({
+          authDialogOpen: false,
+          authDialogError: null,
+          authKeyVisible: false,
+          authInputDraft: "",
+          pendingAgentAction: false
+        });
+        if (shouldRetry) {
+          handleRunLiveAgent();
+        }
+      });
+
+      return form;
+    }
+
+    function buildLiveAgentPanel(rung, personaId) {
+      const isFileProtocol = window.location.protocol === "file:";
+      const disabledByServer = Boolean(state.health && state.health.live_agent_enabled === false);
+      const isDisabled = isFileProtocol || disabledByServer || state.agentLoading || state.isHorizon;
+      const savedKey = getSavedDemoKey();
+      const modelId = (state.agentResult && state.agentResult.data && state.agentResult.data.model_id)
+        || (state.health && state.health.agent_model_id)
+        || null;
+      const modelLoc = (state.agentResult && state.agentResult.data && state.agentResult.data.model_location)
+        || (state.health && state.health.agent_model_location)
+        || "global";
+
+      const armSelector = el("div", {
+        className: "segmented-group",
+        attrs: { role: "group", "aria-label": "Live agent arm selector" }
+      },
+        el("button", {
+          className: `seg-btn${state.agentArm === "both" ? " is-active" : ""}`,
+          text: "Compare Both",
+          attrs: { type: "button", "aria-pressed": state.agentArm === "both" ? "true" : "false" },
+          onClick: () => setState({ agentArm: "both" })
+        }),
+        el("button", {
+          className: `seg-btn${state.agentArm === "blind" ? " is-active" : ""}`,
+          text: "Blind Only",
+          attrs: { type: "button", "aria-pressed": state.agentArm === "blind" ? "true" : "false" },
+          onClick: () => setState({ agentArm: "blind" })
+        }),
+        el("button", {
+          className: `seg-btn${state.agentArm === "governed" ? " is-active" : ""}`,
+          text: "Governed Only",
+          attrs: { type: "button", "aria-pressed": state.agentArm === "governed" ? "true" : "false" },
+          onClick: () => setState({ agentArm: "governed" })
+        })
+      );
+
+      let disabledNote = null;
+      if (isFileProtocol) {
+        disabledNote = "Disabled in offline file:// preview. Serve via uvicorn server.app:app over http:// or Cloud Run to invoke live Gemini agents.";
+      } else if (disabledByServer) {
+        disabledNote = "Disabled by server kill-switch (ENABLE_LIVE_AGENT=false).";
+      }
+
+      const matchingResult = state.agentResult && state.agentResult.contextKey === activeContextKey()
+        ? state.agentResult.data
+        : null;
+
+      const armCards = [];
+      if (matchingResult && matchingResult.arms) {
+        if (matchingResult.arms.blind) {
+          armCards.push(buildAgentArmCard("blind", matchingResult.arms.blind, rung.id));
+        }
+        if (matchingResult.arms.governed) {
+          armCards.push(buildAgentArmCard("governed", matchingResult.arms.governed, rung.id));
+        }
+      }
+
+      return el("section", {
+        className: "live-agent-panel",
+        attrs: { "aria-label": "Run Live Agent Blind vs Governed" }
+      },
+        el("div", { className: "live-agent-header" },
+          el("div", { className: "outcome-label-group" },
+            el("h2", { className: "live-agent-title", text: "🤖 Run Live Agent (Blind vs. Governed)" }),
+            buildRegionalHonestyBadge(),
+            modelId
+              ? el("span", { className: "badge badge-mono", text: `Model: ${modelId} (${modelLoc})` })
+              : null,
+            personaId
+              ? el("span", { className: "badge badge-mono", text: `Persona: ${personaId}` })
+              : null
+          ),
+          el("div", { className: "live-agent-controls" },
+            armSelector,
+            !isFileProtocol
+              ? el("button", {
+                  className: "btn",
+                  text: savedKey ? "Demo Key: Saved" : "Set Demo Key",
+                  attrs: {
+                    type: "button",
+                    "aria-expanded": state.authDialogOpen ? "true" : "false",
+                    "aria-controls": "demo-key-form"
+                  },
+                  onClick: () => {
+                    if (state.authDialogOpen) {
+                      setState({ authDialogOpen: false, authDialogError: null, pendingAgentAction: false });
+                    } else {
+                      openAuthPrompt(null, false);
+                    }
+                  }
+                })
+              : null,
+            el("button", {
+              className: "btn btn-primary",
+              text: state.agentLoading ? "Running Live Agent..." : "🤖 Run Live Agent",
+              attrs: {
+                type: "button",
+                id: "run-live-agent-btn",
+                disabled: isDisabled ? true : null,
+                title: disabledNote || "Execute zero-trust Blind vs Governed live agent loop via POST /api/run-agent"
+              },
+              onClick: () => handleRunLiveAgent()
+            })
+          )
+        ),
+        disabledNote
+          ? el("p", { className: "outcome-detail", text: disabledNote })
+          : null,
+        buildDemoKeyInlineBar(),
+        state.agentLoading
+          ? el("div", { className: "live-result-banner is-info", attrs: { role: "status", "aria-live": "polite" } },
+              el("span", { text: `Running zero-trust ${state.agentArm} agent loop on ${rung.short_label}${personaId ? " (" + personaId + ")" : ""} via POST /api/run-agent...` })
+            )
+          : null,
+        state.agentError
+          ? el("div", { className: "live-result-banner is-error", attrs: { role: "alert" } },
+              el("span", { text: state.agentError }),
+              el("button", {
+                className: "btn",
+                text: "Dismiss",
+                attrs: { type: "button" },
+                onClick: () => setState({ agentError: null })
+              })
+            )
+          : null,
+        armCards.length > 0
+          ? el("div", { className: `agent-cards-grid${armCards.length === 1 ? " is-single" : ""}` }, armCards)
+          : null,
+        buildEmpiricalVsBaselineTable(rung, matchingResult)
       );
     }
 
@@ -1298,6 +2283,7 @@
           );
         }
       } else if (state.tab === "sql") {
+        const { blindEmp, govEmp } = getEmpiricalPair(rung);
         bodyChildren.push(
           el("div", { className: "code-diff-grid" },
             el("div", { className: "code-pane" },
@@ -1332,8 +2318,43 @@
             )
           )
         );
+        if ((blindEmp && blindEmp.sample_sql_or_gql) || (govEmp && govEmp.sample_sql_or_gql)) {
+          bodyChildren.push(
+            el("div", { className: "code-diff-grid" },
+              blindEmp && blindEmp.sample_sql_or_gql
+                ? el("div", { className: "code-pane" },
+                    el("div", { className: "code-pane-head" },
+                      el("span", { className: "badge badge-empirical badge-mono", text: `Empirical N=${blindEmp.runs} Blind Median SQL` }),
+                      el("button", {
+                        className: "btn",
+                        text: state.copiedPane === "emp_blind_sql" ? "Copied" : "Copy",
+                        attrs: { type: "button" },
+                        onClick: () => copyTextToClipboard("emp_blind_sql", blindEmp.sample_sql_or_gql)
+                      })
+                    ),
+                    buildHighlightedCodeNodes(blindEmp.sample_sql_or_gql)
+                  )
+                : el("div", null),
+              govEmp && govEmp.sample_sql_or_gql
+                ? el("div", { className: "code-pane" },
+                    el("div", { className: "code-pane-head" },
+                      el("span", { className: "badge badge-empirical badge-mono", text: `Empirical N=${govEmp.runs} Governed Median SQL` }),
+                      el("button", {
+                        className: "btn",
+                        text: state.copiedPane === "emp_gov_sql" ? "Copied" : "Copy",
+                        attrs: { type: "button" },
+                        onClick: () => copyTextToClipboard("emp_gov_sql", govEmp.sample_sql_or_gql)
+                      })
+                    ),
+                    buildHighlightedCodeNodes(govEmp.sample_sql_or_gql)
+                  )
+                : el("div", null)
+            )
+          );
+        }
       } else {
         bodyChildren.push(
+          el("div", { className: "release-badges-row" }, buildRegionalHonestyBadge()),
           el("div", null,
             el("h3", { className: "progression-title", text: "GCP Primitives" }),
             el("ul", { className: "primitives-list" },
@@ -1428,16 +2449,18 @@
         })
       );
 
-      const execBadgeText = bundle.generated_mode === "live_gcp_verified"
-        ? `Live GCP Verified (${bundle.region})`
+      const isLiveVerified = bundle.generated_mode === "live_gcp_verified" || bundle.generated_mode === "live_agent_verified";
+      const execBadgeText = isLiveVerified
+        ? `${formatGeneratedMode(bundle.generated_mode)} (${bundle.region})`
         : `[Recorded Verified Run] · ${formatGeneratedMode(bundle.generated_mode)}`;
 
       const statusBar = el("div", { className: "workbench-status-bar" },
         el("div", { className: "outcome-label-group" },
           el("span", {
-            className: bundle.generated_mode === "live_gcp_verified" ? "badge badge-ga" : "badge badge-ref",
+            className: isLiveVerified ? "badge badge-ga" : "badge badge-ref",
             text: execBadgeText
           }),
+          buildRegionalHonestyBadge(),
           el("span", { className: "badge badge-mono", text: `Period: ${bundle.closed_period_label}` }),
           personaId ? el("span", { className: "badge badge-mono", text: `Persona: ${personaId}` }) : null
         ),
@@ -1477,6 +2500,8 @@
       if (state.isHorizon) {
         mainSection = buildHorizonShowcase();
       } else {
+        const blindEmp = rung.blind.empirical_eval;
+        const govEmp = rung.governed.empirical_eval;
         mainSection = [
           el("section", { className: "workbench-summary-card", attrs: { "aria-label": "Selected rung summary" } },
             el("div", { className: "question-meta-row" },
@@ -1496,7 +2521,19 @@
               el("div", { className: "mini-outcome is-blind" },
                 el("div", { className: "outcome-card-head" },
                   el("span", { className: "outcome-role-title", text: "Blind Agent Trap" }),
-                  el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier })
+                  el("div", { className: "outcome-label-group" },
+                    el("span", {
+                      className: "badge badge-mono",
+                      text: `Target: ${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs}`
+                    }),
+                    blindEmp
+                      ? el("span", {
+                          className: "badge badge-empirical badge-mono",
+                          text: `Empirical N=${blindEmp.runs}: ${blindEmp.pass_count}/${blindEmp.runs}`
+                        })
+                      : null,
+                    el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier })
+                  )
                 ),
                 el("p", { className: "outcome-kpi", text: rung.blind.answer_headline }),
                 el("p", { className: "outcome-detail", text: rung.blind.answer_detail })
@@ -1504,7 +2541,19 @@
               el("div", { className: "mini-outcome is-governed" },
                 el("div", { className: "outcome-card-head" },
                   el("span", { className: "outcome-role-title", text: "Governed Context Outcome" }),
-                  el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
+                  el("div", { className: "outcome-label-group" },
+                    el("span", {
+                      className: "badge badge-mono",
+                      text: `Target: ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}`
+                    }),
+                    govEmp
+                      ? el("span", {
+                          className: "badge badge-empirical badge-mono",
+                          text: `Empirical N=${govEmp.runs}: ${govEmp.pass_count}/${govEmp.runs}`
+                        })
+                      : null,
+                    el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
+                  )
                 ),
                 el("p", { className: "outcome-kpi", text: rung.governed.answer_headline }),
                 el("p", { className: "outcome-detail", text: rung.governed.answer_detail }),
@@ -1512,6 +2561,7 @@
               )
             )
           ),
+          buildLiveAgentPanel(rung, personaId),
           buildXrayInspector(rung)
         ];
       }
@@ -1633,11 +2683,15 @@
       syncUrlAndDocument();
       const mainShell = state.mode === "workbench" ? buildWorkbenchView() : buildStageView();
       const pollModal = buildPollModal();
-      if (pollModal) {
-        root.replaceChildren(mainShell, pollModal);
-      } else {
-        root.replaceChildren(mainShell);
+      const xrayDrawer = buildStageXrayDrawer();
+      const nodes = [mainShell];
+      if (xrayDrawer) {
+        nodes.push(xrayDrawer);
       }
+      if (pollModal) {
+        nodes.push(pollModal);
+      }
+      root.replaceChildren(...nodes);
     }
 
     function isEditableTarget(target) {
@@ -1649,14 +2703,25 @@
     }
 
     window.addEventListener("keydown", (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || isEditableTarget(e.target)) {
-        return;
-      }
       if (e.code === "Escape") {
+        if (state.authDialogOpen) {
+          e.preventDefault();
+          setState({ authDialogOpen: false, authDialogError: null, pendingAgentAction: false });
+          return;
+        }
         if (state.pollOpen) {
           e.preventDefault();
           setState({ pollOpen: false });
+          return;
         }
+        if (state.stageXrayOpen) {
+          e.preventDefault();
+          setState({ stageXrayOpen: false });
+          return;
+        }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || isEditableTarget(e.target)) {
         return;
       }
       if (e.code === "KeyP") {
@@ -1665,6 +2730,13 @@
         return;
       }
       if (state.pollOpen) {
+        return;
+      }
+      if (e.code === "KeyX") {
+        if (state.mode === "stage" && !state.isHorizon) {
+          e.preventDefault();
+          toggleStageXray();
+        }
         return;
       }
       if (e.code === "KeyW") {
@@ -1677,7 +2749,7 @@
         toggleTheme();
         return;
       }
-      if (state.mode !== "stage") {
+      if (state.mode !== "stage" || state.stageXrayOpen) {
         return;
       }
       if (e.code === "Space" || e.code === "ArrowRight") {
@@ -1697,6 +2769,7 @@
     });
 
     render();
+    fetchHealth();
   }
 
   if (document.readyState === "loading") {
