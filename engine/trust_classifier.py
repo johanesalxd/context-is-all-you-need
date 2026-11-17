@@ -94,6 +94,9 @@ _BENIGN_IDENTIFIER_PATTERN = re.compile(
     r"\b(?:Q[1-4]|H[1-2]|FY\d{2,4}|v\d+(?:\.\d+)*|R[1-9][0-9]*)\b",
     re.IGNORECASE,
 )
+_HYPHENATED_TAG_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.-])#?([A-Za-z]+)-(\d+)(?![A-Za-z0-9_.-])"
+)
 _SCIENTIFIC_NOTATION_PATTERN = re.compile(r"\b\d+(?:\.\d+)?[eE][+-]?\d+\b")
 _UNDERSCORE_NUMBER_PATTERN = re.compile(r"\b\d+_\d+(?:_\d+)*\b")
 _ROW_COUNT_NOUN_PATTERN = re.compile(r"^(?:of\s+)?(rows?|records?|results?)\b", re.IGNORECASE)
@@ -304,12 +307,34 @@ def _to_float(val: Any) -> float | None:
     return None
 
 
+def _strip_hyphenated_tag(match: re.Match[str]) -> str:
+    prefix = match.group(1).lower()
+    if prefix in _ISO_CURRENCY_CODES:
+        return match.group(0)
+    return " "
+
+
+def _extract_sql_string_literal_years(sql_or_gql: str) -> set[float]:
+    years: set[float] = set()
+    if not sql_or_gql:
+        return years
+    for tok in tokenize_googlesql(sql_or_gql):
+        if tok.type != TokenType.STRING:
+            continue
+        for ym in re.finditer(r"(?<![A-Za-z0-9_])(\d{4})(?![A-Za-z0-9_])", tok.text):
+            y_val = float(ym.group(1))
+            if 1900 <= y_val <= 2100:
+                years.add(y_val)
+    return years
+
+
 def reconcile_prose_numbers(
     prose: str,
     *,
     question: str = "",
     result_rows: Sequence[Mapping[str, Any]] = (),
     expected_values: Sequence[float | int] = (),
+    sql_or_gql: str = "",
 ) -> tuple[str, ...]:
     """Audits numeric tokens in prose against query result rows and question echoes."""
     if not prose:
@@ -337,6 +362,7 @@ def reconcile_prose_numbers(
     for vd in valid_dates:
         clean = clean.replace(vd, " ")
 
+    clean = _HYPHENATED_TAG_PATTERN.sub(_strip_hyphenated_tag, clean)
     clean = _BENIGN_IDENTIFIER_PATTERN.sub(" ", clean)
     unverified: list[str] = []
 
@@ -364,6 +390,7 @@ def reconcile_prose_numbers(
         y_val = float(ym.group(1))
         if 1900 <= y_val <= 2100:
             question_years.add(y_val)
+    allowed_years = question_years | _extract_sql_string_literal_years(sql_or_gql)
 
     question_limit_numbers: set[float] = set()
     for lm in re.finditer(r"\b(?:top|first|last|limit)\s+(\d+)\b", question_clean, flags=re.IGNORECASE):
@@ -404,7 +431,7 @@ def reconcile_prose_numbers(
             continue
 
         if not has_currency_or_suffix:
-            if 1900 <= int(abs_val) <= 2100 and token_val in question_years and "." not in num_str and not is_negative:
+            if 1900 <= int(abs_val) <= 2100 and token_val in allowed_years and "." not in num_str and not is_negative:
                 continue
             if token_val in question_limit_numbers and not is_negative and "." not in num_str:
                 prefix_context = clean[max(0, match.start() - 20) : match.end()]
@@ -553,6 +580,7 @@ def classify_outcome(
                 headline_clean,
                 question=question,
                 result_rows=result_rows,
+                sql_or_gql=sql_or_gql or "",
             )
             for token in unverified_headline:
                 reasons.append(f"unverified_headline_numeric:{token}")
@@ -562,6 +590,7 @@ def classify_outcome(
                     answer_detail,
                     question=question,
                     result_rows=result_rows,
+                    sql_or_gql=sql_or_gql or "",
                 )
                 for token in unverified_detail:
                     reasons.append(f"unverified_detail_numeric:{token}")

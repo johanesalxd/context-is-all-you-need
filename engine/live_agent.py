@@ -223,6 +223,12 @@ def extract_observed_signals(
                 signals.add("GLOSSARY_DEFINITION")
             if name == "execute_select_sql":
                 signals.add("DRY_RUN_VALIDATED")
+        if status == "blocked" and (
+            "governance" in preview.lower()
+            or "uncertified_stale" in preview.lower()
+            or "deprecated" in preview.lower()
+        ):
+            signals.add("GOVERNANCE_POLICY_BLOCKED")
         if "shadow_auto_tbl" in preview.lower() or "shadow_auto_tbl" in str(step.get("args_summary") or "").lower():
             signals.add("SHADOW_TABLE_PROBED")
 
@@ -858,10 +864,12 @@ def run_live_agent_arm(
         f"`{project_id}.{target_dataset}` (location `{bq_location}`).\n"
         f"Rules:\n"
         f"1. Batch your initial schema or context discovery tool calls in Turns 1-2; never retry a missed lookup with generic synonyms.\n"
-        f"2. Compute exact aggregated summary metrics (and any requested breakdown rows) in a single valid read-only GoogleSQL SELECT statement "
-        f"(including GRAPH_TABLE when appropriate). Fully qualify tables inside `{project_id}.{target_dataset}.<table>` "
-        f"(never use multi-statement SQL or INFORMATION_SCHEMA).\n"
-        f"3. Once execute_select_sql succeeds with the needed results, stop calling tools and synthesize your final answer immediately—do not run redundant follow-up queries.\n"
+        f"2. Compute exact overall aggregated totals/ratios (SUM/COUNT/AVG/ROUND, or SUM(...) OVER () alongside any requested per-group breakdown rows) "
+        f"in a single valid read-only GoogleSQL SELECT statement (including GRAPH_TABLE or GRAPH_EXPAND when appropriate). "
+        f"Fully qualify FROM tables as `{project_id}.{target_dataset}.<table>` and GRAPH_TABLE graphs as GRAPH_TABLE(`{project_id}.{target_dataset}.<graph>` ...), "
+        f'whereas GRAPH_EXPAND requires a double-quoted STRING literal: GRAPH_EXPAND("{project_id}.{target_dataset}.<graph>", ...). '
+        f"Never use multi-statement SQL or INFORMATION_SCHEMA.\n"
+        f"3. Once execute_select_sql returns non-empty rows, stop calling tools completely and emit your final answer on the very next turn—never run redundant follow-up queries or cross-check another table.\n"
         f"4. Base every numeric claim strictly on actual tool/SQL outputs, and finish with a concise answer ending with a ```json``` block containing keys: "
         f'`{{"answer_summary": string, "numeric_value": number_or_null, "unit": string_or_null}}`.'
     )
