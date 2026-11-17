@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -182,3 +184,66 @@ def test_app_js_keyboard_url_params_file_safety_and_dom_security() -> None:
         "▶ Run Live Query",
     ):
         assert marker in app_js
+
+
+def test_identity_variant_scoped_metric_never_formats_currency_as_percent() -> None:
+    app_js = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
+    assert "formatVariantMetricValue" in app_js
+    assert "Math.abs(val) <= 100" in app_js
+
+    bundle = _extract_bundle_json(WEB_DIR / "js" / "fallback_bundle.js")
+    r4 = bundle["rungs"][3]
+    assert r4["governed"]["unit"] == "PCT"
+    assert r4["identity_variants"]["analyst_global"]["numeric_value"] == 450000.0
+    assert "%" in r4["identity_variants"]["analyst_global"]["answer_headline"]
+
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return
+
+    match = re.search(
+        r"(function formatNumber\(.*?\n  \}\n\n  function formatMetricValue\(.*?\n  \}\n\n  function formatVariantMetricValue\(.*?\n  \})",
+        app_js,
+        re.DOTALL,
+    )
+    assert match is not None, "Could not extract metric formatter functions from web/js/app.js"
+
+    script = f"""
+{match.group(1)}
+const r4 = {json.dumps(r4)};
+const globalOut = formatVariantMetricValue(r4.identity_variants.analyst_global, r4, "USD");
+const apacOut = formatVariantMetricValue(r4.identity_variants.analyst_apac, r4, "USD");
+const synthetic420k = formatVariantMetricValue(
+  {{ answer_headline: "SGD 420,000.00 (4 SEA Markets · 28.4%)", numeric_value: 420000.0 }},
+  {{ governed: {{ unit: "PCT" }} }},
+  "SGD"
+);
+const plain420k = formatVariantMetricValue(
+  {{ answer_headline: "420,000 units (28.4%)", numeric_value: 420000.0 }},
+  {{ governed: {{ unit: "PCT" }} }},
+  "SGD"
+);
+const pctVariant = formatVariantMetricValue(
+  {{ answer_headline: "28.4% Margin (Regional)", numeric_value: 28.4 }},
+  {{ governed: {{ unit: "PCT" }} }},
+  "SGD"
+);
+console.log(JSON.stringify({{ globalOut, apacOut, synthetic420k, plain420k, pctVariant }}));
+"""
+    res = subprocess.run(
+        [node_bin, "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    outputs = json.loads(res.stdout.strip())
+    assert outputs["globalOut"] == "USD 450,000.00"
+    assert "%" not in outputs["globalOut"]
+    assert outputs["apacOut"] == "USD 185,000.00"
+    assert "%" not in outputs["apacOut"]
+    assert outputs["synthetic420k"] == "SGD 420,000.00"
+    assert "%" not in outputs["synthetic420k"]
+    assert outputs["plain420k"] == "420,000"
+    assert "%" not in outputs["plain420k"]
+    assert outputs["pctVariant"] == "28.4%"
+

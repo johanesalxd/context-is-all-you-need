@@ -94,18 +94,40 @@
   }
 
   function formatVariantMetricValue(variant, rung, currency) {
-    const headline = String(variant.answer_headline || "");
-    if (headline.includes("%")) {
-      return formatMetricValue(variant.numeric_value, "%", currency);
-    }
-    if (currency && headline.toUpperCase().includes(String(currency).toUpperCase())) {
-      return formatMetricValue(variant.numeric_value, currency, currency);
-    }
+    const headline = String(variant.answer_headline || "").trim();
+    const val = variant.numeric_value;
     const rungUnit = String((rung && rung.governed && rung.governed.unit) || "");
-    if (rungUnit && !["PCT", "%"].includes(rungUnit.toUpperCase())) {
-      return formatMetricValue(variant.numeric_value, rungUnit, currency);
+    const upperHeadline = headline.toUpperCase();
+    const upperCurrency = currency ? String(currency).toUpperCase() : "";
+
+    const leadingCurrencyMatch = headline.match(/^([A-Z]{3})(?=\s+[\d,.-])/);
+    if (leadingCurrencyMatch) {
+      return formatMetricValue(val, leadingCurrencyMatch[1], leadingCurrencyMatch[1]);
     }
-    return formatMetricValue(variant.numeric_value, currency || "", currency);
+    if (upperCurrency && upperHeadline.startsWith(upperCurrency)) {
+      return formatMetricValue(val, upperCurrency, upperCurrency);
+    }
+
+    const pctIdx = headline.indexOf("%");
+    const currencyIdx = upperCurrency ? upperHeadline.indexOf(upperCurrency) : -1;
+    if (currencyIdx >= 0 && (pctIdx === -1 || currencyIdx < pctIdx)) {
+      return formatMetricValue(val, upperCurrency, upperCurrency);
+    }
+
+    if (
+      ["PCT", "%"].includes(rungUnit.toUpperCase()) &&
+      typeof val === "number" &&
+      Math.abs(val) <= 100 &&
+      pctIdx >= 0 &&
+      (currencyIdx === -1 || pctIdx < currencyIdx)
+    ) {
+      return formatMetricValue(val, "%", currency);
+    }
+
+    if (rungUnit && !["PCT", "%"].includes(rungUnit.toUpperCase())) {
+      return formatMetricValue(val, rungUnit, currency);
+    }
+    return formatNumber(val);
   }
 
   function formatGeneratedMode(mode) {
