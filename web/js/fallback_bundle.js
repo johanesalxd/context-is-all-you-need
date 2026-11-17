@@ -367,7 +367,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "identity_variants": {
           "analyst_global": {
             "persona_id": "analyst_global",
-            "answer_headline": "USD 450,000.00 (All 4 Regions)",
+            "answer_headline": "USD 450,000.00 (All 4 Regions · 25.0%)",
             "answer_detail": "Global Operations Analyst clears full regional scope across NA, EMEA, LATAM, and APAC certified partitions.",
             "numeric_value": 450000.0,
             "rows_visible": 12,
