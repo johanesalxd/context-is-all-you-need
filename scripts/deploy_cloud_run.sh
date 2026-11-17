@@ -56,6 +56,7 @@ BQ_MAX_BYTES_BILLED="${BQ_MAX_BYTES_BILLED:-104857600}"
 RUN_RUNG_RPM_LIMIT="${RUN_RUNG_RPM_LIMIT:-30}"
 DEMO_SHARE_TOKEN="${DEMO_SHARE_TOKEN:-}"
 DRY_RUN=0
+ENABLE_SHARE_TOKEN=0
 ROTATE_TOKEN=0
 
 while [[ $# -gt 0 ]]; do
@@ -72,12 +73,17 @@ while [[ $# -gt 0 ]]; do
       CLOUD_RUN_REGION="$2"
       shift 2
       ;;
+    --enable-share-token)
+      ENABLE_SHARE_TOKEN=1
+      shift
+      ;;
     --rotate-token)
+      ENABLE_SHARE_TOKEN=1
       ROTATE_TOKEN=1
       shift
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--service-name NAME] [--region REGION] [--rotate-token]"
+      echo "Usage: $0 [--dry-run] [--service-name NAME] [--region REGION] [--enable-share-token] [--rotate-token]"
       exit 0
       ;;
     *)
@@ -111,15 +117,19 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
-# 1. Ensure DEMO_SHARE_TOKEN exists (persisted in untracked .env)
-if [[ -z "${DEMO_SHARE_TOKEN}" || "${ROTATE_TOKEN}" -eq 1 ]]; then
-  DEMO_SHARE_TOKEN="$(/usr/bin/python3 -IB -c 'import secrets; print(secrets.token_urlsafe(18))')"
-  if [[ -f "${REPO_ROOT}/.env" ]]; then
-    grep -v '^DEMO_SHARE_TOKEN=' "${REPO_ROOT}/.env" > "${REPO_ROOT}/.env.tmp" || true
-    mv "${REPO_ROOT}/.env.tmp" "${REPO_ROOT}/.env"
+# 1. Optional DEMO_SHARE_TOKEN (only when --enable-share-token is requested)
+if [[ "${ENABLE_SHARE_TOKEN}" -eq 1 ]]; then
+  if [[ -z "${DEMO_SHARE_TOKEN}" || "${ROTATE_TOKEN}" -eq 1 ]]; then
+    DEMO_SHARE_TOKEN="$(/usr/bin/python3 -IB -c 'import secrets; print(secrets.token_urlsafe(18))')"
+    if [[ -f "${REPO_ROOT}/.env" ]]; then
+      grep -v '^DEMO_SHARE_TOKEN=' "${REPO_ROOT}/.env" > "${REPO_ROOT}/.env.tmp" || true
+      mv "${REPO_ROOT}/.env.tmp" "${REPO_ROOT}/.env"
+    fi
+    printf 'DEMO_SHARE_TOKEN="%s"\n' "${DEMO_SHARE_TOKEN}" >> "${REPO_ROOT}/.env"
+    chmod 600 "${REPO_ROOT}/.env"
   fi
-  printf 'DEMO_SHARE_TOKEN="%s"\n' "${DEMO_SHARE_TOKEN}" >> "${REPO_ROOT}/.env"
-  chmod 600 "${REPO_ROOT}/.env"
+else
+  DEMO_SHARE_TOKEN=""
 fi
 
 # 2. Provision dedicated least-privilege runtime SA (never use default Compute SA)
@@ -211,4 +221,8 @@ CLOUDSDK_CORE_INTERACTIVE_UX_STYLE=OFF gcloud run deploy "${SERVICE_NAME}" \
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" --format='value(status.url)' | grep -v '^Created ' | tail -n 1)"
 echo "Deployed Cloud Run Service: ${SERVICE_URL}"
-echo "Shareable Live Demo URL:    ${SERVICE_URL}/?key=${DEMO_SHARE_TOKEN}"
+if [[ -n "${DEMO_SHARE_TOKEN}" ]]; then
+  echo "Shareable Live Demo URL:    ${SERVICE_URL}/?key=[REDACTED_SAVED_IN_DOTENV]"
+else
+  echo "Shareable Live Demo URL:    ${SERVICE_URL}"
+fi
