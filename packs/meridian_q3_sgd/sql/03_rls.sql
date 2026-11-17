@@ -4,11 +4,11 @@
 --   sg_coldchain  -> restricted strictly to country_code = 'SG' -> SGD 346,480.00
 
 CREATE OR REPLACE ROW ACCESS POLICY rls_cfo_regional_all_markets
-ON `${PROJECT_ID}.${DATASET_ID}.cold_chain_margin_gold`
+ON `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r2`
 GRANT TO ("${RLS_CFO_PRINCIPAL}")
 FILTER USING (TRUE);
 
 CREATE OR REPLACE ROW ACCESS POLICY rls_sg_coldchain_country_sg
-ON `${PROJECT_ID}.${DATASET_ID}.cold_chain_margin_gold`
+ON `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r2`
 GRANT TO ("${RLS_SG_PRINCIPAL}")
 FILTER USING (country_code = 'SG');

@@ -1,0 +1,308 @@
+# Meridian Commerce Q3 SGD — Governed Context Layer Specification
+# Consumed by engine/context_retriever.py and scripts/provision_context_layer.py.
+# Zero real GCP project IDs: use ${PROJECT_ID} and ${DATASET_ID} placeholders.
+
+blind_dataset_tables:
+  - "customers"
+  - "orders"
+  - "order_lines"
+  - "parcel_legs"
+  - "cold_chain_batches"
+  - "sku_lot_allocations"
+  - "mart_coldchain_q3_r1"
+  - "mart_coldchain_q3_r2"
+  - "vendor_sla_ledger"
+
+shadow_table_prefix: "shadow_auto_tbl_"
+shadow_table_count: 190
+
+legacy_tables_to_drop:
+  - "cold_chain_margin_gold"
+  - "staging_cold_chain_oct11"
+
+glossary:
+  glossary_id: "meridian-commerce-glossary"
+  display_name: "Meridian Commerce Business Glossary"
+  description: "Authoritative business definitions and canonical SQL predicates for Meridian Commerce SEA Q3 analytics."
+  terms:
+    - term_id: "premier-customer"
+      display_name: "Premier Customer"
+      description: >-
+        Official Premier Customer segment: customers.tier_code = 'PRM_HV'
+        (trailing_12m_spend_sgd >= 5000.00 AND return_rate < 0.08).
+        Never filter segment_label LIKE '%Premier%', which sweeps in uncertified
+        Premier_Promo_Trial mobile accounts.
+      linked_columns:
+        - table: "customers"
+          column: "tier_code"
+          link_type: "definition"
+
+aspect_types:
+  - aspect_type_id: "data-product-certification"
+    display_name: "Data Product Certification"
+    description: "Distinguishes certified Knowledge Catalog Data Products from preliminary/stale staging snapshots sharing identical physical schemas."
+    fields:
+      - name: "certification_status"
+        display_name: "Certification Status"
+        type: "enum"
+        enum_values:
+          - "CERTIFIED"
+          - "UNCERTIFIED_STALE"
+          - "DEPRECATED"
+        required: true
+        index: 1
+      - name: "close_cycle"
+        display_name: "Close Cycle"
+        type: "string"
+        required: true
+        index: 2
+      - name: "owner_domain"
+        display_name: "Owner Domain"
+        type: "string"
+        required: false
+        index: 3
+      - name: "notes"
+        display_name: "Governance Notes"
+        type: "string"
+        required: false
+        index: 4
+    assignments:
+      - table: "mart_coldchain_q3_r2"
+        data:
+          certification_status: "CERTIFIED"
+          close_cycle: "2026-Q3-FINAL"
+          owner_domain: "SEA Finance & Cold-Chain"
+          notes: "Authoritative Q3 Cold-Chain Gross Margin Data Product including settled supplier rebates (close_batch_code='B26Q3_R2')."
+      - table: "mart_coldchain_q3_r1"
+        data:
+          certification_status: "UNCERTIFIED_STALE"
+          close_cycle: "2026-Q3-OCT11-PRELIM"
+          owner_domain: "Staging"
+          notes: "Preliminary Oct 11 snapshot missing late-Q3 supplier rebate settlements. Do NOT use for executive margin reporting."
+
+data_quality_scans:
+  - scan_id: "meridian-coldchain-dq"
+    display_name: "Meridian Cold-Chain Q3 Data Quality"
+    description: "Validates settled supplier rebate close batch code and non-null country keys on mart_coldchain_q3_r2."
+    target_table: "mart_coldchain_q3_r2"
+    catalog_publishing_enabled: true
+    rules:
+      - name: "rebate-settled-check"
+        column: "close_batch_code"
+        dimension: "VALIDITY"
+        set_values:
+          - "B26Q3_R2"
+      - name: "no-null-country-code"
+        column: "country_code"
+        dimension: "COMPLETENESS"
+        non_null: true
+
+unstructured_contracts:
+  bucket_suffix: "meridian-contracts"
+  connection_id: "meridian_vertex_conn"
+  object_table: "contract_docs_obj"
+  files:
+    - "contracts/ArcticHaul_Amendment_2.md"
+    - "contracts/ArcticHaul_MSA_2025.md"
+    - "contracts/SiamFrost_Logistics_MSA_2025.md"
+    - "contracts/StraitsTemp_Cargo_MSA_2025.md"
+  extraction_staging_table: "sla_overlay_extracted"
+  fallback_table: "sla_overlay"
+  target_vendor_filter: "ArcticHaul"
+  target_file_pattern: "ArcticHaul_Amendment_2.md"
+  ai_generate_prompt: >-
+    Extract the governing SLA credit overlay parameters from the Meridian Commerce
+    logistics contract document into strict JSON with keys:
+    overlay_id (string), vendor_name (string), sku_class (string),
+    effective_quarter (string), source_document (string),
+    temp_threshold_c (float, strict > threshold in Celsius),
+    duration_threshold_min (integer, minimum >= duration in minutes),
+    credit_rate (float, decimal fraction e.g. 0.12 for 12%),
+    quarterly_cap_sgd (float, quarterly credit cap in SGD).
+    Return the superseding amendment terms whenever an executed amendment modifies an MSA.
+  expected_invariants:
+    temp_threshold_c: 2.0
+    duration_threshold_min: 45
+    credit_rate: 0.12
+    quarterly_cap_sgd: 35000.0
+
+verified_metric_contracts:
+  r3_metrics:
+    metric_name: "Same-Day Contribution Margin %"
+    display_name: "Singapore Closed Q3 Same-Day Contribution Margin %"
+    description: >-
+      Grain-locked contribution margin percentage across COMPLETED Singapore orders
+      with fulfillment_tier = 'SAME_DAY'. Prevents 1:N Cartesian fan-out across
+      order_lines and parcel_legs by aggregating each grain independently via
+      BigQuery Property Graph MEASURE() / GRAPH_EXPAND + AGG().
+    grain: "1 row per order_id (orders) reconciled against order-grouped order_lines and parcel_legs"
+    fan_trap_warning: >-
+      NEVER join orders, order_lines, and parcel_legs in a single un-aggregated SELECT.
+      Multiplying 1:N lines by 1:M parcel legs inflates orders.fulfillment_fee_sgd and
+      parcel_legs.leg_cost_sgd, severely understating contribution margin %.
+    formula: >-
+      ROUND(100.0 * SUM(net_revenue_sgd - cogs_sgd - fulfillment_fee_sgd - COALESCE(leg_cost_sgd, 0.0))
+      / NULLIF(SUM(net_revenue_sgd), 0), 1)
+    required_filters:
+      - "country_code = 'SG'"
+      - "order_status = 'COMPLETED'"
+      - "fulfillment_tier = 'SAME_DAY'"
+      - "order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'"
+    allowed_tables:
+      - "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph"
+      - "${PROJECT_ID}.${DATASET_ID}.orders"
+      - "${PROJECT_ID}.${DATASET_ID}.order_lines"
+      - "${PROJECT_ID}.${DATASET_ID}.parcel_legs"
+    sql_pattern: |
+      WITH order_line_metrics AS (
+        SELECT
+          CustomerOrder_order_id AS order_id,
+          AGG(CustomerOrder_total_net_revenue) AS net_revenue_sgd,
+          AGG(CustomerOrder_total_fulfillment_fee) AS fulfillment_fee_sgd,
+          AGG(OrderLine_total_cogs) AS cogs_sgd
+        FROM GRAPH_EXPAND(
+          "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph",
+          start_node => "OrderLine"
+        )
+        WHERE CustomerOrder_country_code = 'SG'
+          AND CustomerOrder_order_status = 'COMPLETED'
+          AND CustomerOrder_fulfillment_tier = 'SAME_DAY'
+          AND CustomerOrder_order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+        GROUP BY CustomerOrder_order_id
+      ),
+      parcel_leg_metrics AS (
+        SELECT
+          CustomerOrder_order_id AS order_id,
+          AGG(ParcelLeg_total_leg_cost) AS leg_cost_sgd
+        FROM GRAPH_EXPAND(
+          "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph",
+          start_node => "ParcelLeg"
+        )
+        WHERE CustomerOrder_country_code = 'SG'
+          AND CustomerOrder_order_status = 'COMPLETED'
+          AND CustomerOrder_fulfillment_tier = 'SAME_DAY'
+          AND CustomerOrder_order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+        GROUP BY CustomerOrder_order_id
+      )
+      SELECT
+        ROUND(
+          100.0 * SUM(
+            olm.net_revenue_sgd - olm.cogs_sgd - olm.fulfillment_fee_sgd - COALESCE(plm.leg_cost_sgd, 0.0)
+          ) / NULLIF(SUM(olm.net_revenue_sgd), 0),
+          1
+        ) AS contribution_margin_pct
+      FROM order_line_metrics AS olm
+      LEFT JOIN parcel_leg_metrics AS plm
+        USING (order_id)
+
+  r5_graph:
+    graph_name: "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph"
+    display_name: "Meridian Supply Chain 4-Hop Property Graph"
+    description: >-
+      Zero-ETL BigQuery Property Graph tracing Cold-Chain batch excursions through
+      warehouse SKU lot allocations, order lines, customer orders (label CustomerOrder),
+      and governed Premier Customer profiles.
+    edge_chain: "(ColdChainBatch)<-[:SUPPLIED_IN_BATCH]-(SkuLotAllocation)<-[:ALLOCATED_FROM_LOT]-(OrderLine)-[:BELONGS_TO_ORDER]->(CustomerOrder)-[:PLACED_BY]->(Customer)"
+    node_labels:
+      - "ColdChainBatch (cold_chain_batches: batch_id, supplier_tier)"
+      - "SkuLotAllocation (sku_lot_allocations: lot_id, batch_id)"
+      - "OrderLine (order_lines: line_id, order_id, lot_id, net_line_revenue_sgd, cogs_line_sgd)"
+      - "CustomerOrder (orders: order_id, customer_id, country_code, order_status, order_date, amt_net_settled_sgd)"
+      - "Customer (customers: customer_id, tier_code, segment_label)"
+    edge_labels:
+      - "SUPPLIED_IN_BATCH (SkuLotAllocation -> ColdChainBatch)"
+      - "ALLOCATED_FROM_LOT (OrderLine -> SkuLotAllocation)"
+      - "BELONGS_TO_ORDER (OrderLine -> CustomerOrder)"
+      - "PLACED_BY (CustomerOrder -> Customer)"
+    fan_trap_warning: >-
+      Multiple OrderLines from the same CustomerOrder can map to the same ColdChainBatch.
+      Always deduplicate (SELECT DISTINCT order_id, amt_net_settled_sgd) over the GRAPH_TABLE
+      result before SUM(amt_net_settled_sgd) or COUNT(*), and never filter by lot_id LIKE '%409%'
+      or segment_label LIKE '%Premier%'.
+    required_filters:
+      - "b.batch_id = '#LN-409'"
+      - "b.supplier_tier = 'TIER_2'"
+      - "o.country_code = 'SG'"
+      - "o.order_status = 'COMPLETED'"
+      - "o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'"
+      - "c.tier_code = 'PRM_HV'"
+    gql_pattern: |
+      SELECT
+        ROUND(SUM(amt_net_settled_sgd), 2) AS exposed_revenue_sgd,
+        COUNT(*) AS exposed_order_count
+      FROM (
+        SELECT DISTINCT
+          order_id,
+          amt_net_settled_sgd
+        FROM GRAPH_TABLE(
+          `${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph`
+          MATCH
+            (b:ColdChainBatch {batch_id: '#LN-409', supplier_tier: 'TIER_2'})
+            <-[:SUPPLIED_IN_BATCH]-(lot:SkuLotAllocation)
+            <-[:ALLOCATED_FROM_LOT]-(ol:OrderLine)
+            -[:BELONGS_TO_ORDER]->(o:CustomerOrder)
+            -[:PLACED_BY]->(c:Customer)
+          FILTER o.country_code = 'SG'
+            AND o.order_status = 'COMPLETED'
+            AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+            AND c.tier_code = 'PRM_HV'
+          RETURN
+            o.order_id AS order_id,
+            o.amt_net_settled_sgd AS amt_net_settled_sgd
+        )
+      )
+
+  r6_contracts:
+    metric_name: "Recoverable Vendor SLA Credit (SGD)"
+    display_name: "Q3 Cold-Chain Vendor SLA Credit Recovery with Amendment Overlay"
+    description: >-
+      Computes recoverable Q3 vendor SLA credits by joining vendor_sla_ledger with the
+      structured sla_overlay (or sla_overlay_extracted) extracted from executed Drive
+      amendments via BigQuery Object Tables + AI.GENERATE.
+    governing_tables:
+      - "${PROJECT_ID}.${DATASET_ID}.vendor_sla_ledger"
+      - "${PROJECT_ID}.${DATASET_ID}.sla_overlay"
+      - "${PROJECT_ID}.${DATASET_ID}.sla_overlay_extracted"
+    join_keys:
+      - "l.vendor_name = o.vendor_name"
+      - "l.sku_class = o.sku_class"
+    business_rule: >-
+      When an overlay row exists for (vendor_name, sku_class), its thresholds supersede
+      vendor_sla_ledger base_temp_threshold_c, base_duration_min, and base_credit_rate:
+      BIOLOGIC_CHILLED excursions with temp_peak_celsius > 2.0C for >= 45 min qualify
+      for a 12% credit, capped per vendor at quarterly_cap_sgd (SGD 35,000.00).
+    sql_pattern: |
+      WITH evaluated_claims AS (
+        SELECT
+          l.event_id,
+          l.vendor_name,
+          COALESCE(o.quarterly_cap_sgd, 999999999.0) AS quarterly_cap_sgd,
+          CASE
+            WHEN o.overlay_id IS NOT NULL
+              AND l.temp_peak_celsius > o.temp_threshold_c
+              AND l.excursion_duration_min >= o.duration_threshold_min
+            THEN l.shipment_invoice_sgd * o.credit_rate
+            WHEN o.overlay_id IS NULL
+              AND l.temp_peak_celsius > l.base_temp_threshold_c
+              AND l.excursion_duration_min >= l.base_duration_min
+            THEN l.shipment_invoice_sgd * l.base_credit_rate
+            ELSE 0.0
+          END AS raw_credit_sgd
+        FROM `${PROJECT_ID}.${DATASET_ID}.vendor_sla_ledger` AS l
+        LEFT JOIN `${PROJECT_ID}.${DATASET_ID}.sla_overlay` AS o
+          ON l.vendor_name = o.vendor_name
+         AND l.sku_class = o.sku_class
+        WHERE l.quarter = '2026-Q3'
+      ),
+      vendor_capped AS (
+        SELECT
+          vendor_name,
+          SUM(CASE WHEN raw_credit_sgd > 0 THEN 1 ELSE 0 END) AS qualifying_shipments,
+          LEAST(SUM(raw_credit_sgd), MAX(quarterly_cap_sgd)) AS recoverable_credit_sgd
+        FROM evaluated_claims
+        GROUP BY vendor_name
+      )
+      SELECT
+        ROUND(SUM(recoverable_credit_sgd), 2) AS recoverable_credit_sgd,
+        SUM(qualifying_shipments) AS qualifying_shipments
+      FROM vendor_capped

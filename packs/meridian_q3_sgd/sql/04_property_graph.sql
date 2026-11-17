@@ -28,9 +28,9 @@ CREATE OR REPLACE PROPERTY GRAPH `${PROJECT_ID}.${DATASET_ID}.meridian_supply_gr
         fulfillment_tier,
         order_date,
         order_status,
-        net_realized_revenue_sgd,
+        amt_net_settled_sgd,
         fulfillment_fee_sgd,
-        MEASURE(SUM(net_realized_revenue_sgd)) AS total_net_revenue OPTIONS(
+        MEASURE(SUM(amt_net_settled_sgd)) AS total_net_revenue OPTIONS(
           description = "Grain-locked net realized revenue in SGD (ex-GST, net of returns)",
           synonyms = ["net_revenue", "realized_revenue"]
         ),
@@ -151,9 +151,9 @@ CREATE OR REPLACE PROPERTY GRAPH `${PROJECT_ID}.${DATASET_ID}.meridian_supply_gr
 -- FROM order_line_metrics olm LEFT JOIN parcel_leg_metrics plm USING (order_id);
 --
 -- Verification Query Example 2 (Rung 5 4-Hop ISO GQL Exposure Traversal):
--- SELECT ROUND(SUM(net_realized_revenue_sgd), 2) AS exposed_revenue_sgd, COUNT(*) AS exposed_order_count
+-- SELECT ROUND(SUM(amt_net_settled_sgd), 2) AS exposed_revenue_sgd, COUNT(*) AS exposed_order_count
 -- FROM (
---   SELECT DISTINCT order_id, net_realized_revenue_sgd
+--   SELECT DISTINCT order_id, amt_net_settled_sgd
 --   FROM GRAPH_TABLE(
 --     `${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph`
 --     MATCH (b:ColdChainBatch {batch_id: '#LN-409', supplier_tier: 'TIER_2'})
@@ -162,6 +162,6 @@ CREATE OR REPLACE PROPERTY GRAPH `${PROJECT_ID}.${DATASET_ID}.meridian_supply_gr
 --           -[:BELONGS_TO_ORDER]->(o:CustomerOrder)
 --           -[:PLACED_BY]->(c:Customer)
 --     FILTER o.country_code = 'SG' AND o.order_status = 'COMPLETED' AND c.tier_code = 'PRM_HV'
---     RETURN o.order_id AS order_id, o.net_realized_revenue_sgd AS net_realized_revenue_sgd
+--     RETURN o.order_id AS order_id, o.amt_net_settled_sgd AS amt_net_settled_sgd
 --   )
 -- );

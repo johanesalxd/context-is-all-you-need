@@ -264,15 +264,15 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
                 "fulfillment_tier": fulfillment_tier,
                 "order_date": odate,
                 "order_status": order_status,
-                "gross_item_sgd": _from_cents(gross_item_cents),
-                "gross_total_sgd": _from_cents(gross_total_cents),
-                "gst_sgd": _from_cents(gst_cents),
+                "amt_gross_billed_sgd": _from_cents(gross_total_cents),
+                "amt_item_subtotal_sgd": _from_cents(gross_item_cents),
+                "amt_gst_sgd": _from_cents(gst_cents),
                 "fulfillment_fee_sgd": _from_cents(fulfillment_fee_cents),
-                "net_realized_revenue_sgd": _from_cents(net_cents),
+                "amt_net_settled_sgd": _from_cents(net_cents),
             }
         )
 
-        # Split line totals so SUM(order_lines.net_line_revenue_sgd) == orders.net_realized_revenue_sgd
+        # Split line totals so SUM(order_lines.net_line_revenue_sgd) == orders.amt_net_settled_sgd
         if order_status == "COMPLETED":
             line_net_parts = _partition_cents(
                 rng, net_cents, line_count, 0, net_cents
@@ -527,7 +527,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
 
     # -------------------------------------------------------------------------
     # Cohort 4: SG STD_RET STANDARD/NEXT_DAY Completed (1,500 orders, SUM = 537,030.00)
-    # Total SG COMPLETED net_realized_revenue_sgd == 1,312,450.00
+    # Total SG COMPLETED amt_net_settled_sgd == 1,312,450.00
     # Also includes 3 STD_RET SG orders linked to LOT-SG-8841 to prove PRM_HV filter matters in R5
     # -------------------------------------------------------------------------
     cohort4_parts = _partition_cents(
@@ -535,7 +535,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
     )
     for i, net_c in enumerate(cohort4_parts):
         cid = pools["sg_std_general"][i % len(pools["sg_std_general"])]
-        # Include modest partial returns on first 100 orders so gross_item > net_realized
+        # Include modest partial returns on first 100 orders so amt_item_subtotal_sgd > amt_net_settled_sgd
         partial_ret_c = _to_cents(15.00) if i < 100 else 0
         gross_c = net_c + partial_ret_c
         gst_c = int(round(gross_c * 0.09))
@@ -559,10 +559,10 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
 
     # -------------------------------------------------------------------------
     # Cohort 5: SG CANCELLED / RETURNED orders
-    # Brings ALL SG orders SUM(gross_total_sgd) to EXACT 1,684,200.00
+    # Brings ALL SG orders SUM(amt_gross_billed_sgd) to EXACT 1,684,200.00
     # -------------------------------------------------------------------------
     sg_completed_gross_total_cents = sum(
-        _to_cents(o["gross_total_sgd"]) for o in orders if o["country_code"] == "SG"
+        _to_cents(o["amt_gross_billed_sgd"]) for o in orders if o["country_code"] == "SG"
     )
     target_sg_gross_total_cents = _to_cents(1684200.00)
     remaining_gross_total_cents = target_sg_gross_total_cents - sg_completed_gross_total_cents
@@ -627,19 +627,17 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             )
 
     # -------------------------------------------------------------------------
-    # R4 Tables: cold_chain_margin_gold (certified) vs staging_cold_chain_oct11 (stale)
+    # R4 Tables: mart_coldchain_q3_r2 (certified) vs mart_coldchain_q3_r1 (preliminary snapshot)
+    # Identical 6-column physical schema so Blind cannot guess from table or column names.
     # -------------------------------------------------------------------------
-    cold_chain_margin_gold = [
+    mart_coldchain_q3_r2 = [
         {
             "country_code": "SG",
             "quarter": "2026-Q3",
             "net_revenue_sgd": 1220000.00,
             "gross_margin_sgd": 346480.00,
             "gross_margin_pct": 28.4,
-            "rebate_settled": True,
-            "certified_at": "2026-10-14T08:30:00Z",
-            "prior_year_margin_pct": 28.55,
-            "yoy_delta_bps": -15,
+            "close_batch_code": "B26Q3_R2",
         },
         {
             "country_code": "MY",
@@ -647,10 +645,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             "net_revenue_sgd": 750000.00,
             "gross_margin_sgd": 218250.00,
             "gross_margin_pct": 29.1,
-            "rebate_settled": True,
-            "certified_at": "2026-10-14T08:30:00Z",
-            "prior_year_margin_pct": 29.25,
-            "yoy_delta_bps": -15,
+            "close_batch_code": "B26Q3_R2",
         },
         {
             "country_code": "TH",
@@ -658,10 +653,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             "net_revenue_sgd": 550000.00,
             "gross_margin_sgd": 151800.00,
             "gross_margin_pct": 27.6,
-            "rebate_settled": True,
-            "certified_at": "2026-10-14T08:30:00Z",
-            "prior_year_margin_pct": 27.75,
-            "yoy_delta_bps": -15,
+            "close_batch_code": "B26Q3_R2",
         },
         {
             "country_code": "ID",
@@ -669,24 +661,18 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             "net_revenue_sgd": 446900.00,
             "gross_margin_sgd": 126070.00,
             "gross_margin_pct": 28.2,
-            "rebate_settled": True,
-            "certified_at": "2026-10-14T08:30:00Z",
-            "prior_year_margin_pct": 28.35,
-            "yoy_delta_bps": -15,
+            "close_batch_code": "B26Q3_R2",
         },
     ]
 
-    staging_cold_chain_oct11 = [
+    mart_coldchain_q3_r1 = [
         {
             "country_code": "SG",
             "quarter": "2026-Q3",
             "net_revenue_sgd": 1220000.00,
             "gross_margin_sgd": 296460.00,
             "gross_margin_pct": 24.3,
-            "rebate_settled": False,
-            "certified_at": None,
-            "prior_year_margin_pct": 28.4,
-            "yoy_delta_bps": -410,
+            "close_batch_code": "B26Q3_R1",
         },
         {
             "country_code": "MY",
@@ -694,10 +680,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             "net_revenue_sgd": 750000.00,
             "gross_margin_sgd": 182250.00,
             "gross_margin_pct": 24.3,
-            "rebate_settled": False,
-            "certified_at": None,
-            "prior_year_margin_pct": 28.4,
-            "yoy_delta_bps": -410,
+            "close_batch_code": "B26Q3_R1",
         },
         {
             "country_code": "TH",
@@ -705,10 +688,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             "net_revenue_sgd": 550000.00,
             "gross_margin_sgd": 133650.00,
             "gross_margin_pct": 24.3,
-            "rebate_settled": False,
-            "certified_at": None,
-            "prior_year_margin_pct": 28.4,
-            "yoy_delta_bps": -410,
+            "close_batch_code": "B26Q3_R1",
         },
         {
             "country_code": "ID",
@@ -716,10 +696,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
             "net_revenue_sgd": 446900.00,
             "gross_margin_sgd": 108596.70,
             "gross_margin_pct": 24.3,
-            "rebate_settled": False,
-            "certified_at": None,
-            "prior_year_margin_pct": 28.4,
-            "yoy_delta_bps": -410,
+            "close_batch_code": "B26Q3_R1",
         },
     ]
 
@@ -827,8 +804,8 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict[str, Any]]
         "parcel_legs": parcel_legs,
         "cold_chain_batches": batches,
         "sku_lot_allocations": allocations,
-        "cold_chain_margin_gold": cold_chain_margin_gold,
-        "staging_cold_chain_oct11": staging_cold_chain_oct11,
+        "mart_coldchain_q3_r2": mart_coldchain_q3_r2,
+        "mart_coldchain_q3_r1": mart_coldchain_q3_r1,
         "vendor_sla_ledger": vendor_sla_ledger,
         "sla_overlay": sla_overlay,
     }
@@ -853,10 +830,15 @@ def evaluate_invariants(
         legs_by_order[pl["order_id"]].append(pl)
 
     # R1: SG gross total vs SG completed net realized revenue + header-to-line tie-out
+    # R1: SG gross billed vs SG completed net settled revenue + header-to-line tie-out
     sg_orders = [o for o in ds["orders"] if o["country_code"] == "SG"]
     sg_completed = [o for o in sg_orders if o["order_status"] == "COMPLETED"]
-    r1_blind_gross = round(sum(o["gross_total_sgd"] for o in sg_orders), 2)
-    r1_governed_net = round(sum(o["net_realized_revenue_sgd"] for o in sg_completed), 2)
+    r1_blind_gross = round(sum(o["amt_gross_billed_sgd"] for o in sg_orders), 2)
+    r1_sg_all_item_subtotal = round(sum(o["amt_item_subtotal_sgd"] for o in sg_orders), 2)
+    r1_governed_net = round(sum(o["amt_net_settled_sgd"] for o in sg_completed), 2)
+    r1_non_completed_net_settled = round(
+        sum(o["amt_net_settled_sgd"] for o in sg_orders if o["order_status"] != "COMPLETED"), 2
+    )
 
     drifts = []
     agg_line_net = 0.0
@@ -864,9 +846,9 @@ def evaluate_invariants(
     for o in ds["orders"]:
         if o["order_status"] == "COMPLETED":
             line_sum = round(sum(ol["net_line_revenue_sgd"] for ol in lines_by_order[o["order_id"]]), 2)
-            drifts.append(abs(line_sum - o["net_realized_revenue_sgd"]))
+            drifts.append(abs(line_sum - o["amt_net_settled_sgd"]))
             agg_line_net += line_sum
-            agg_order_net += o["net_realized_revenue_sgd"]
+            agg_order_net += o["amt_net_settled_sgd"]
     r1_max_drift = round(max(drifts) if drifts else 0.0, 2)
     r1_agg_drift = round(abs(agg_line_net - agg_order_net), 2)
 
@@ -876,13 +858,13 @@ def evaluate_invariants(
     for o in sg_completed:
         cust = customers_by_id[o["customer_id"]]
         if "Premier" in cust["segment_label"]:
-            blind_channel_rev[o["sales_channel"]].append(o["net_realized_revenue_sgd"])
+            blind_channel_rev[o["sales_channel"]].append(o["amt_net_settled_sgd"])
         if (
             cust["tier_code"] == "PRM_HV"
             and cust["trailing_12m_spend_sgd"] >= 5000.0
             and cust["return_rate"] < 0.08
         ):
-            gov_channel_rev[o["sales_channel"]].append(o["net_realized_revenue_sgd"])
+            gov_channel_rev[o["sales_channel"]].append(o["amt_net_settled_sgd"])
 
     r2_blind_winner, r2_blind_vals = max(
         blind_channel_rev.items(), key=lambda kv: sum(kv[1]) / len(kv[1])
@@ -894,7 +876,7 @@ def evaluate_invariants(
 
     # R3: Grain-locked SAME_DAY margin vs naive 3-way JOIN fan-trap
     sameday_sg = [o for o in sg_completed if o["fulfillment_tier"] == "SAME_DAY"]
-    true_rev = sum(o["net_realized_revenue_sgd"] for o in sameday_sg)
+    true_rev = sum(o["amt_net_settled_sgd"] for o in sameday_sg)
     true_fee = sum(o["fulfillment_fee_sgd"] for o in sameday_sg)
     true_cogs = sum(
         ol["cogs_line_sgd"] for o in sameday_sg for ol in lines_by_order[o["order_id"]]
@@ -920,9 +902,9 @@ def evaluate_invariants(
         100.0 * (naive_rev - naive_cogs - naive_fee - naive_leg) / naive_rev, 1
     )
 
-    # R4: Certified gold vs staging + Beat 4b RLS projections
-    gold_q3 = [r for r in ds["cold_chain_margin_gold"] if r["quarter"] == "2026-Q3"]
-    stg_q3 = [r for r in ds["staging_cold_chain_oct11"] if r["quarter"] == "2026-Q3"]
+    # R4: Certified r2 vs preliminary r1 + Beat 4b RLS projections
+    gold_q3 = [r for r in ds["mart_coldchain_q3_r2"] if r["quarter"] == "2026-Q3"]
+    stg_q3 = [r for r in ds["mart_coldchain_q3_r1"] if r["quarter"] == "2026-Q3"]
     r4_gold_margin_pct = round(
         100.0 * sum(r["gross_margin_sgd"] for r in gold_q3) / sum(r["net_revenue_sgd"] for r in gold_q3),
         1,
@@ -952,8 +934,8 @@ def evaluate_invariants(
         if "409" in ol["lot_id"] and "Premier" in cust["segment_label"]:
             blind_exposed_oids.add(o["order_id"])
 
-    r5_gov_rev = round(sum(orders_by_id[oid]["net_realized_revenue_sgd"] for oid in gov_exposed_oids), 2)
-    r5_blind_rev = round(sum(orders_by_id[oid]["net_realized_revenue_sgd"] for oid in blind_exposed_oids), 2)
+    r5_gov_rev = round(sum(orders_by_id[oid]["amt_net_settled_sgd"] for oid in gov_exposed_oids), 2)
+    r5_blind_rev = round(sum(orders_by_id[oid]["amt_net_settled_sgd"] for oid in blind_exposed_oids), 2)
 
     # R6: Base vendor_sla_ledger vs sla_overlay join
     overlays = {(o["vendor_name"], o["sku_class"]): o for o in ds["sla_overlay"]}
@@ -999,7 +981,10 @@ def evaluate_invariants(
 
     return {
         "r1_blind_sg_gross_total_sgd": r1_blind_gross,
+        "r1_sg_all_orders_item_subtotal_sgd": r1_sg_all_item_subtotal,
         "r1_governed_sg_net_realized_revenue_sgd": r1_governed_net,
+        "r1_sg_completed_order_count": len(sg_completed),
+        "r1_non_completed_net_settled_sgd": r1_non_completed_net_settled,
         "r1_header_to_line_max_drift_sgd": r1_max_drift,
         "r1_header_to_line_aggregate_drift_sgd": r1_agg_drift,
         "r2_blind_winning_channel": r2_blind_winner,
@@ -1016,9 +1001,9 @@ def evaluate_invariants(
         "r3_governed_sameday_margin_sgd": r3_true_margin_sgd,
         "r3_governed_sameday_revenue_sgd": round(true_rev, 2),
         "r4_blind_staging_margin_pct": r4_stg_margin_pct,
-        "r4_blind_yoy_delta_bps": int(stg_q3[0]["yoy_delta_bps"]),
+        "r4_blind_yoy_delta_bps": int(round((r4_stg_margin_pct - 28.4) * 100)),
         "r4_governed_gold_margin_pct": r4_gold_margin_pct,
-        "r4_governed_yoy_delta_bps": int(gold_q3[0]["yoy_delta_bps"]),
+        "r4_governed_yoy_delta_bps": int(round((r4_gold_margin_pct - 28.55) * 100)),
         "r4_cfo_regional_gross_margin_sgd": round(sum(r["gross_margin_sgd"] for r in gold_q3), 2),
         "r4_cfo_regional_rows_visible": len(gold_q3),
         "r4_sg_coldchain_gross_margin_sgd": round(sum(r["gross_margin_sgd"] for r in sg_gold), 2),
@@ -1039,7 +1024,10 @@ def evaluate_invariants(
 
 EXPECTED_INVARIANTS: dict[str, float | int | str | bool] = {
     "r1_blind_sg_gross_total_sgd": 1684200.0,
+    "r1_sg_all_orders_item_subtotal_sgd": 1545137.73,
     "r1_governed_sg_net_realized_revenue_sgd": 1312450.0,
+    "r1_sg_completed_order_count": 3400,
+    "r1_non_completed_net_settled_sgd": 0.0,
     "r1_header_to_line_max_drift_sgd": 0.0,
     "r1_header_to_line_aggregate_drift_sgd": 0.0,
     "r2_blind_winning_channel": "Mobile App",
@@ -1093,8 +1081,7 @@ def emit_shadow_ddl(
             "  net_revenue_sgd FLOAT64,\n"
             "  gross_margin_sgd FLOAT64,\n"
             "  gross_margin_pct FLOAT64,\n"
-            "  rebate_settled BOOL,\n"
-            "  snapshot_tag STRING\n"
+            "  close_batch_code STRING\n"
             ")\n"
             'OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");'
         )

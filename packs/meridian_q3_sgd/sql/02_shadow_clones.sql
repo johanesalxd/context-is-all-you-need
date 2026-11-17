@@ -1,18 +1,6 @@
--- Uncertified staging clone + 190 automated shadow tables (Rung 4 Trust & Data Products trap).
+-- 190 automated shadow tables (Rung 4 Trust & Data Products discovery noise).
+-- Shares identical 6-column physical schema with mart_coldchain_q3_r1 and mart_coldchain_q3_r2.
 -- Idempotent table creation ensures re-running after .jsonl ingestion never truncates loaded rows.
-
-CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.staging_cold_chain_oct11` (
-  country_code STRING NOT NULL,
-  quarter STRING NOT NULL,
-  net_revenue_sgd FLOAT64 NOT NULL,
-  gross_margin_sgd FLOAT64 NOT NULL,
-  gross_margin_pct FLOAT64 NOT NULL,
-  rebate_settled BOOL NOT NULL,
-  certified_at TIMESTAMP,
-  prior_year_margin_pct FLOAT64 NOT NULL,
-  yoy_delta_bps INT64 NOT NULL
-)
-OPTIONS(description="Uncertified Oct 11 staging snapshot missing late-Q3 supplier rebates (trap table).");
 
 CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_001` (
   country_code STRING,
@@ -20,8 +8,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_001` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -31,8 +18,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_002` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -42,8 +28,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_003` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -53,8 +38,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_004` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -64,8 +48,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_005` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -75,8 +58,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_006` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -86,8 +68,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_007` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -97,8 +78,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_008` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -108,8 +88,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_009` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -119,8 +98,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_010` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -130,8 +108,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_011` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -141,8 +118,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_012` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -152,8 +128,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_013` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -163,8 +138,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_014` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -174,8 +148,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_015` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -185,8 +158,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_016` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -196,8 +168,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_017` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -207,8 +178,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_018` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -218,8 +188,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_019` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -229,8 +198,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_020` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -240,8 +208,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_021` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -251,8 +218,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_022` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -262,8 +228,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_023` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -273,8 +238,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_024` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -284,8 +248,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_025` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -295,8 +258,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_026` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -306,8 +268,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_027` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -317,8 +278,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_028` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -328,8 +288,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_029` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -339,8 +298,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_030` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -350,8 +308,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_031` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -361,8 +318,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_032` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -372,8 +328,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_033` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -383,8 +338,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_034` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -394,8 +348,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_035` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -405,8 +358,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_036` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -416,8 +368,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_037` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -427,8 +378,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_038` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -438,8 +388,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_039` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -449,8 +398,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_040` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -460,8 +408,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_041` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -471,8 +418,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_042` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -482,8 +428,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_043` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -493,8 +438,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_044` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -504,8 +448,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_045` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -515,8 +458,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_046` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -526,8 +468,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_047` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -537,8 +478,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_048` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -548,8 +488,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_049` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -559,8 +498,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_050` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -570,8 +508,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_051` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -581,8 +518,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_052` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -592,8 +528,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_053` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -603,8 +538,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_054` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -614,8 +548,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_055` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -625,8 +558,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_056` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -636,8 +568,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_057` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -647,8 +578,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_058` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -658,8 +588,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_059` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -669,8 +598,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_060` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -680,8 +608,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_061` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -691,8 +618,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_062` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -702,8 +628,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_063` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -713,8 +638,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_064` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -724,8 +648,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_065` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -735,8 +658,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_066` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -746,8 +668,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_067` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -757,8 +678,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_068` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -768,8 +688,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_069` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -779,8 +698,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_070` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -790,8 +708,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_071` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -801,8 +718,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_072` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -812,8 +728,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_073` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -823,8 +738,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_074` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -834,8 +748,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_075` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -845,8 +758,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_076` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -856,8 +768,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_077` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -867,8 +778,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_078` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -878,8 +788,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_079` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -889,8 +798,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_080` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -900,8 +808,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_081` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -911,8 +818,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_082` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -922,8 +828,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_083` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -933,8 +838,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_084` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -944,8 +848,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_085` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -955,8 +858,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_086` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -966,8 +868,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_087` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -977,8 +878,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_088` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -988,8 +888,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_089` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -999,8 +898,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_090` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1010,8 +908,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_091` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1021,8 +918,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_092` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1032,8 +928,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_093` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1043,8 +938,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_094` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1054,8 +948,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_095` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1065,8 +958,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_096` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1076,8 +968,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_097` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1087,8 +978,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_098` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1098,8 +988,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_099` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1109,8 +998,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_100` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1120,8 +1008,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_101` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1131,8 +1018,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_102` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1142,8 +1028,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_103` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1153,8 +1038,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_104` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1164,8 +1048,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_105` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1175,8 +1058,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_106` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1186,8 +1068,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_107` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1197,8 +1078,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_108` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1208,8 +1088,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_109` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1219,8 +1098,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_110` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1230,8 +1108,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_111` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1241,8 +1118,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_112` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1252,8 +1128,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_113` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1263,8 +1138,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_114` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1274,8 +1148,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_115` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1285,8 +1158,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_116` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1296,8 +1168,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_117` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1307,8 +1178,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_118` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1318,8 +1188,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_119` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1329,8 +1198,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_120` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1340,8 +1208,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_121` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1351,8 +1218,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_122` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1362,8 +1228,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_123` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1373,8 +1238,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_124` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1384,8 +1248,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_125` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1395,8 +1258,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_126` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1406,8 +1268,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_127` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1417,8 +1278,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_128` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1428,8 +1288,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_129` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1439,8 +1298,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_130` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1450,8 +1308,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_131` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1461,8 +1318,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_132` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1472,8 +1328,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_133` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1483,8 +1338,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_134` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1494,8 +1348,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_135` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1505,8 +1358,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_136` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1516,8 +1368,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_137` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1527,8 +1378,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_138` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1538,8 +1388,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_139` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1549,8 +1398,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_140` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1560,8 +1408,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_141` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1571,8 +1418,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_142` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1582,8 +1428,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_143` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1593,8 +1438,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_144` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1604,8 +1448,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_145` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1615,8 +1458,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_146` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1626,8 +1468,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_147` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1637,8 +1478,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_148` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1648,8 +1488,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_149` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1659,8 +1498,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_150` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1670,8 +1508,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_151` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1681,8 +1518,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_152` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1692,8 +1528,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_153` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1703,8 +1538,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_154` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1714,8 +1548,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_155` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1725,8 +1558,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_156` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1736,8 +1568,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_157` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1747,8 +1578,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_158` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1758,8 +1588,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_159` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1769,8 +1598,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_160` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1780,8 +1608,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_161` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1791,8 +1618,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_162` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1802,8 +1628,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_163` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1813,8 +1638,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_164` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1824,8 +1648,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_165` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1835,8 +1658,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_166` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1846,8 +1668,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_167` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1857,8 +1678,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_168` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1868,8 +1688,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_169` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1879,8 +1698,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_170` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1890,8 +1708,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_171` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1901,8 +1718,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_172` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1912,8 +1728,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_173` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1923,8 +1738,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_174` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1934,8 +1748,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_175` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1945,8 +1758,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_176` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1956,8 +1768,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_177` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1967,8 +1778,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_178` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1978,8 +1788,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_179` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -1989,8 +1798,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_180` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2000,8 +1808,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_181` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2011,8 +1818,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_182` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2022,8 +1828,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_183` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2033,8 +1838,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_184` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2044,8 +1848,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_185` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2055,8 +1858,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_186` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2066,8 +1868,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_187` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2077,8 +1878,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_188` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2088,8 +1888,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_189` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
 
@@ -2099,7 +1898,6 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.shadow_auto_tbl_190` (
   net_revenue_sgd FLOAT64,
   gross_margin_sgd FLOAT64,
   gross_margin_pct FLOAT64,
-  rebate_settled BOOL,
-  snapshot_tag STRING
+  close_batch_code STRING
 )
 OPTIONS(description="Uncertified automated clone generated during Q3 ad-hoc backfills");
