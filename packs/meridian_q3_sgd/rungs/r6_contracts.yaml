@@ -1,0 +1,126 @@
+id: "r6_contracts"
+rung_num: 6
+short_label: "R6 · Contracts"
+title: "Unstructured Contract Overlays & SLA Recovery"
+pyramid_layer: "Layer 3 · Gemini Enterprise Drive Connector + Object Tables + AI.GENERATE / DocAI (GA)"
+release_badges:
+  - capability: "Gemini Enterprise Drive Connector"
+    stage: "GA"
+    region_scope: "Global / asia-southeast1"
+  - capability: "BigQuery Object Tables"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "AI.GENERATE / DocAI"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+
+question: "How much vendor SLA credit is recoverable on Q3 Cold-Chain excursions?"
+
+poll:
+  prompt: "Myth-Buster #6: Base `vendor_sla_ledger` captures legacy MSA rules (`> 4.0°C for 90m -> 5%`). Executed `ArcticHaul_Amendment_2.md` sits in Drive (`> 2.0°C for 45m -> 12%`). Should we dump 40-page PDFs into every SQL prompt?"
+  options:
+    - key: "A"
+      text: "Yes—paste all raw contract PDFs into the context window at query time."
+    - key: "B"
+      text: "No—compile executed amendments once via Object Tables + AI.GENERATE / DocAI into a 480-token `sla_overlay` table, recovering SGD 18,960.00 (14 shipments) vs SGD 1,420.00 (3 breaches)."
+    - key: "C"
+      text: "SQL agents can ignore executed Drive amendments because ERP tables always lead legal."
+    - key: "D"
+      text: "The quarterly cap is exceeded, reducing recovery to zero."
+  correct_key: "B"
+  reveal_takeaway: "Stuffing unstructured PDFs into every prompt burns tokens and fails deterministic arithmetic. Compiling executed Drive amendments via Object Tables + AI.GENERATE / DocAI into a compact 480-token `sla_overlay` table unlocks 13.3x SLA recovery (SGD 18,960.00 across 14 chilled shipments, safely within the SGD 35,000.00 cap)."
+
+blind:
+  answer_headline: "SGD 1,420.00 (3 breaches)"
+  answer_detail: "Missed SGD 17,540.00 in recoverable credits because base vendor_sla_ledger applies legacy > 4.0 C for >= 90 min (5% credit), overlooking executed ArcticHaul Amendment #2."
+  numeric_value: 1420.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Structured ERP table only (base `vendor_sla_ledger`, unaware of Drive Amendment #2)"
+  context_payload: |
+    Unstructured Drive contracts not connected or compiled.
+    Agent evaluated only base_temp_threshold_c (> 4.0 C), base_duration_min (>= 90), and base_credit_rate (0.05).
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(shipment_invoice_sgd * base_credit_rate), 2) AS recoverable_credit_sgd,
+      COUNT(*) AS qualifying_breaches
+    FROM `${PROJECT_ID}.${DATASET_ID}.vendor_sla_ledger`
+    WHERE quarter = '2026-Q3'
+      AND temp_peak_celsius > base_temp_threshold_c
+      AND excursion_duration_min >= base_duration_min
+  tokens_used: 2150
+  exploratory_queries: 3
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Ignores executed ArcticHaul Amendment #2 governing BIOLOGIC_CHILLED excursions."
+
+governed:
+  answer_headline: "SGD 18,960.00 (14 qualifying chilled shipments)"
+  answer_detail: "Joining structured 480-token sla_overlay extracted from ArcticHaul_Amendment_2.md (> 2.0 C for >= 45 min -> 12% credit, cap SGD 35,000.00) recovers SGD 18,960.00 across 14 shipments."
+  numeric_value: 18960.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Gemini Enterprise Drive Connector + BigQuery Object Tables + AI.GENERATE / DocAI (`sla_overlay`)"
+  context_payload: |
+    {
+      "overlay_id": "OVL-ARCTIC-AMD2",
+      "source_doc": "contracts/ArcticHaul_Amendment_2.md",
+      "extraction_tokens": 480,
+      "rule": "vendor_name='ArcticHaul' AND sku_class='BIOLOGIC_CHILLED' AND temp_peak_celsius > 2.0 AND excursion_duration_min >= 45 -> 12% credit",
+      "quarterly_cap_sgd": 35000.00
+    }
+  sql_or_gql: |
+    WITH evaluated_claims AS (
+      SELECT
+        l.event_id,
+        l.vendor_name,
+        COALESCE(o.quarterly_cap_sgd, 999999999.0) AS quarterly_cap_sgd,
+        CASE
+          WHEN o.overlay_id IS NOT NULL
+            AND l.temp_peak_celsius > o.temp_threshold_c
+            AND l.excursion_duration_min >= o.duration_threshold_min
+          THEN l.shipment_invoice_sgd * o.credit_rate
+          WHEN o.overlay_id IS NULL
+            AND l.temp_peak_celsius > l.base_temp_threshold_c
+            AND l.excursion_duration_min >= l.base_duration_min
+          THEN l.shipment_invoice_sgd * l.base_credit_rate
+          ELSE 0.0
+        END AS raw_credit_sgd
+      FROM `${PROJECT_ID}.${DATASET_ID}.vendor_sla_ledger` AS l
+      LEFT JOIN `${PROJECT_ID}.${DATASET_ID}.sla_overlay` AS o
+        ON l.vendor_name = o.vendor_name
+       AND l.sku_class = o.sku_class
+      WHERE l.quarter = '2026-Q3'
+    ),
+    vendor_capped AS (
+      SELECT
+        vendor_name,
+        SUM(CASE WHEN raw_credit_sgd > 0 THEN 1 ELSE 0 END) AS qualifying_shipments,
+        CASE
+          WHEN SUM(raw_credit_sgd) > MAX(quarterly_cap_sgd) THEN MAX(quarterly_cap_sgd)
+          ELSE SUM(raw_credit_sgd)
+        END AS recoverable_credit_sgd
+      FROM evaluated_claims
+      GROUP BY vendor_name
+    )
+    SELECT
+      ROUND(SUM(recoverable_credit_sgd), 2) AS recoverable_credit_sgd,
+      SUM(qualifying_shipments) AS qualifying_shipments
+    FROM vendor_capped
+  tokens_used: 540
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Deterministic SQL join against compiled 480-token sla_overlay extracted from ArcticHaul_Amendment_2.md (5/5 pass)."
+
+xray_summary:
+  context_added: "Structured 480-token sla_overlay table compiled from contracts/ArcticHaul_Amendment_2.md (> 2.0 C for >= 45m -> 12%, cap SGD 35K)."
+  gcp_primitives:
+    - "Gemini Enterprise Drive Connector (GA)"
+    - "BigQuery Object Tables (GA)"
+    - "BigQuery AI.GENERATE / DocAI (GA)"
+  negative_control_assertion: "Base vendor_sla_ledger scan alone misses 11 moderate biologic excursions and understates credit recovery by 92.5%."

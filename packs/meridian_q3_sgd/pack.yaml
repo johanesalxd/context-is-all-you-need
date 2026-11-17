@@ -1,0 +1,79 @@
+schema_version: "2.0"
+pack_id: "meridian_q3_sgd"
+title: "Meridian Commerce · Closed Q3 Context Benchmark"
+subtitle: "6-Rung Enterprise Context Progression in BigQuery & Knowledge Catalog (SGD)"
+hero_tagline: "Frontier models are table stakes—governed enterprise context is the differentiator."
+closed_period_label: "Closed Q3 (2026-07-01 to 2026-09-30)"
+currency: "SGD"
+region: "asia-southeast1"
+rng_seed: 20261126
+generated_mode: "offline_fixture"
+
+personas:
+  - id: "cfo_regional"
+    label: "Regional CFO (SEA)"
+    principal_display: "cfo-regional@example-project-id.iam.gserviceaccount.com"
+    scope_summary: "Unrestricted regional visibility across SG, MY, TH, and ID certified Cold-Chain Data Products."
+  - id: "sg_coldchain"
+    label: "SG Cold-Chain Ops Lead"
+    principal_display: "sg-coldchain@example-project-id.iam.gserviceaccount.com"
+    scope_summary: "Row-Level Security restricted strictly to country_code = 'SG' across certified Cold-Chain margins."
+
+invariants:
+  r1_blind_sg_gross_total_sgd: 1684200.0
+  r1_governed_sg_net_realized_revenue_sgd: 1312450.0
+  r1_header_to_line_max_drift_sgd: 0.0
+  r1_header_to_line_aggregate_drift_sgd: 0.0
+  r2_blind_winning_channel: "Mobile App"
+  r2_blind_winning_aov_sgd: 284.1
+  r2_governed_winning_channel: "B2B Corporate Portal"
+  r2_governed_winning_aov_sgd: 612.5
+  r2_governed_b2b_order_count: 240
+  r2_governed_b2b_revenue_sgd: 147000.0
+  r2_governed_total_prm_hv_orders: 640
+  r2_governed_total_prm_hv_revenue_sgd: 317203.2
+  r2_governed_overall_prm_hv_aov_sgd: 495.63
+  r3_blind_sameday_margin_pct: 14.2
+  r3_governed_sameday_margin_pct: 31.8
+  r3_governed_sameday_margin_sgd: 131016.0
+  r3_governed_sameday_revenue_sgd: 412000.0
+  r4_blind_staging_margin_pct: 24.3
+  r4_blind_yoy_delta_bps: -410
+  r4_governed_gold_margin_pct: 28.4
+  r4_governed_yoy_delta_bps: -15
+  r4_cfo_regional_gross_margin_sgd: 842600.0
+  r4_cfo_regional_rows_visible: 4
+  r4_sg_coldchain_gross_margin_sgd: 346480.0
+  r4_sg_coldchain_rows_visible: 1
+  r4_shadow_table_count: 190
+  r5_blind_exposed_revenue_sgd: 4120.0
+  r5_blind_exposed_order_count: 8
+  r5_governed_exposed_order_count: 38
+  r5_governed_exposed_revenue_sgd: 19380.0
+  r5_governed_exposed_aov_sgd: 510.0
+  r6_blind_base_breach_count: 3
+  r6_blind_base_credit_sgd: 1420.0
+  r6_governed_qualifying_shipments: 14
+  r6_governed_recoverable_credit_sgd: 18960.0
+  r6_governed_quarterly_cap_sgd: 35000.0
+
+horizon_cards:
+  - id: "knowledge_studio"
+    title: "Knowledge Studio (Context Sets & Enrichment Agent)"
+    release_badge: "Preview"
+    region_availability: "US / EU multi-regions (Preview; not yet in asia-southeast1)"
+    summary: "Curates domain Context Sets and deploys the Enrichment Agent inside Knowledge Catalog to bootstrap glossary bindings, verified queries, and semantic descriptions. Kept strictly decoupled from R1–R6 production scope in asia-southeast1 until regional GA availability."
+    primitives:
+      - "Knowledge Catalog"
+      - "Knowledge Studio Context Sets"
+      - "Enrichment Agent"
+  - id: "open_lakehouse_federation"
+    title: "Cross-Cloud Lakehouse Catalog Federation"
+    release_badge: "GA"
+    region_availability: "GA (Multi-region & asia-southeast1 via BigQuery / Knowledge Catalog)"
+    summary: "Federates external Iceberg and Delta lakehouse catalogs directly into Knowledge Catalog and BigQuery governance with distinct cloud-native identity delegation models: Databricks Unity Catalog via per-user OIDC (GA), Snowflake Horizon Catalog via Workload Identity Federation (GA—never per-user OIDC), and AWS Glue Data Catalog via IAM role delegation (GA)."
+    primitives:
+      - "Knowledge Catalog"
+      - "Databricks Unity Catalog (per-user OIDC)"
+      - "Snowflake Horizon Catalog (Workload Identity Federation)"
+      - "AWS Glue Data Catalog (IAM role delegation)"

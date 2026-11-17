@@ -1,0 +1,150 @@
+id: "r3_metrics"
+rung_num: 3
+short_label: "R3 · Metrics"
+title: "Grain-Locked Measures & Fan-Trap Elimination"
+pyramid_layer: "Layer 4 · BigQuery Graph MEASURE() + Verified Query + Semantic Contract"
+release_badges:
+  - capability: "BigQuery Graph MEASURE()"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Verified Query"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Semantic Contract"
+    stage: "Reference Architecture"
+    region_scope: "Cross-region pattern (LookML excluded from R1–R6)"
+
+question: "What was Singapore's Q3 Same-Day Contribution Margin %?"
+
+poll:
+  prompt: "Myth-Buster #3: Every Same-Day order spans 2 to 4 `parcel_legs` and multiple `order_lines`. What happens when an LLM joins `orders`, `order_lines`, and `parcel_legs` directly?"
+  options:
+    - key: "A"
+      text: "SQL engines automatically deduplicate 1:N joins before running SUM()."
+    - key: "B"
+      text: "Cartesian fan-out multiplies order fulfillment fees and parcel leg costs across lines, distorting 31.8% margin down to 14.2%."
+    - key: "C"
+      text: "BigQuery rejects a 3-way JOIN unless LookML is attached."
+    - key: "D"
+      text: "It only changes row order, never percentages."
+  correct_key: "B"
+  reveal_takeaway: "The 1:N chasm/fan-trap silently corrupts financial ratios by -17.6 percentage points without throwing any SQL error. BigQuery Graph MEASURE() with GRAPH_EXPAND + AGG() locks every metric to its native PK grain, recovering exact 31.8% (SGD 131,016.00 on SGD 412,000.00)."
+
+blind:
+  answer_headline: "14.2%"
+  answer_detail: "Severely distorted by a 1:N Cartesian chasm trap: joining orders -> order_lines (3 lines) -> parcel_legs (2–4 legs) multiplied fulfillment_fee_sgd up to 12x and leg_cost_sgd 3x."
+  numeric_value: 14.2
+  unit: "%"
+  query_language: "SQL"
+  context_mechanism: "Naive 3-way SQL JOIN across mixed order, line, and parcel-leg grains"
+  context_payload: |
+    No semantic grain contract or BigQuery Graph MEASURE() provided.
+    Agent joined orders (1) -> order_lines (N) -> parcel_legs (M) in a single flat SELECT.
+  sql_or_gql: |
+    SELECT
+      ROUND(
+        100.0 * (
+          SUM(ol.net_line_revenue_sgd)
+          - SUM(ol.cogs_line_sgd)
+          - SUM(o.fulfillment_fee_sgd)
+          - SUM(pl.leg_cost_sgd)
+        ) / NULLIF(SUM(ol.net_line_revenue_sgd), 0),
+        1
+      ) AS contribution_margin_pct
+    FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
+    JOIN `${PROJECT_ID}.${DATASET_ID}.order_lines` AS ol
+      ON o.order_id = ol.order_id
+    JOIN `${PROJECT_ID}.${DATASET_ID}.parcel_legs` AS pl
+      ON o.order_id = pl.order_id
+    WHERE o.country_code = 'SG'
+      AND o.order_status = 'COMPLETED'
+      AND o.fulfillment_tier = 'SAME_DAY'
+      AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+  tokens_used: 2910
+  exploratory_queries: 4
+  error_retries: 1
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Un-aggregated 3-way JOIN over 1:N parcel_legs and order_lines triggers silent fan-out overcounting."
+
+governed:
+  answer_headline: "31.8% (SGD 131,016.00)"
+  answer_detail: "Exact Same-Day Contribution Margin of SGD 131,016.00 on SGD 412,000.00 net revenue (31.8%), computed via grain-locked BigQuery Graph MEASURE() definitions and AGG()."
+  numeric_value: 31.8
+  unit: "%"
+  query_language: "SQL+GQL"
+  context_mechanism: "BigQuery Property Graph MEASURE() + GRAPH_EXPAND AGG() + Verified Query"
+  context_payload: |
+    {
+      "property_graph": "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph",
+      "measures": {
+        "CustomerOrder": ["MEASURE(SUM(net_realized_revenue_sgd)) AS total_net_revenue", "MEASURE(SUM(fulfillment_fee_sgd)) AS total_fulfillment_fee"],
+        "OrderLine": ["MEASURE(SUM(cogs_line_sgd)) AS total_cogs"],
+        "ParcelLeg": ["MEASURE(SUM(leg_cost_sgd)) AS total_leg_cost"]
+      },
+      "semantic_contract": "Contribution Margin % = (total_net_revenue - total_cogs - total_fulfillment_fee - total_leg_cost) / total_net_revenue",
+      "lookml_in_r1_r6": false
+    }
+  sql_or_gql: |
+    WITH order_line_metrics AS (
+      SELECT
+        CustomerOrder_order_id AS order_id,
+        AGG(CustomerOrder_total_net_revenue) AS net_revenue_sgd,
+        AGG(CustomerOrder_total_fulfillment_fee) AS fulfillment_fee_sgd,
+        AGG(OrderLine_total_cogs) AS cogs_sgd
+      FROM GRAPH_EXPAND(
+        "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph",
+        start_node => "OrderLine"
+      )
+      WHERE CustomerOrder_country_code = 'SG'
+        AND CustomerOrder_order_status = 'COMPLETED'
+        AND CustomerOrder_fulfillment_tier = 'SAME_DAY'
+        AND CustomerOrder_order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+      GROUP BY CustomerOrder_order_id
+    ),
+    parcel_leg_metrics AS (
+      SELECT
+        CustomerOrder_order_id AS order_id,
+        AGG(ParcelLeg_total_leg_cost) AS leg_cost_sgd
+      FROM GRAPH_EXPAND(
+        "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph",
+        start_node => "ParcelLeg"
+      )
+      WHERE CustomerOrder_country_code = 'SG'
+        AND CustomerOrder_order_status = 'COMPLETED'
+        AND CustomerOrder_fulfillment_tier = 'SAME_DAY'
+        AND CustomerOrder_order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+      GROUP BY CustomerOrder_order_id
+    )
+    SELECT
+      ROUND(
+        100.0 * SUM(
+          olm.net_revenue_sgd - olm.cogs_sgd - olm.fulfillment_fee_sgd - COALESCE(plm.leg_cost_sgd, 0.0)
+        ) / NULLIF(SUM(olm.net_revenue_sgd), 0),
+        1
+      ) AS contribution_margin_pct,
+      ROUND(
+        SUM(olm.net_revenue_sgd - olm.cogs_sgd - olm.fulfillment_fee_sgd - COALESCE(plm.leg_cost_sgd, 0.0)),
+        2
+      ) AS contribution_margin_sgd,
+      ROUND(SUM(olm.net_revenue_sgd), 2) AS net_revenue_sgd
+    FROM order_line_metrics AS olm
+    LEFT JOIN parcel_leg_metrics AS plm
+      USING (order_id)
+  tokens_used: 620
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Compiled via BigQuery Graph MEASURE() + GRAPH_EXPAND AGG() locking order, line, and parcel-leg grains (5/5 pass)."
+
+xray_summary:
+  context_added: "BigQuery Property Graph MEASURE() definitions on CustomerOrder, OrderLine, and ParcelLeg queried via GRAPH_EXPAND(..., start_node) + AGG()."
+  gcp_primitives:
+    - "BigQuery Property Graph MEASURE() (GA)"
+    - "BigQuery GRAPH_EXPAND & AGG() (GA)"
+    - "Verified Query Template (GA)"
+    - "Semantic Contract Pattern (Reference Architecture)"
+  negative_control_assertion: "Direct 3-way relational join fails grain-lock verification and outputs distorted 14.2% margin (TIER_3_REVIEW_REQUIRED)."

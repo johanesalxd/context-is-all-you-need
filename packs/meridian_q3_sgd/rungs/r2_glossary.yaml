@@ -1,0 +1,107 @@
+id: "r2_glossary"
+rung_num: 2
+short_label: "R2 · Glossary"
+title: "Knowledge Catalog Business Glossary"
+pyramid_layer: "Layer 4 · Knowledge Catalog Business Glossary (GA)"
+release_badges:
+  - capability: "Knowledge Catalog Business Glossary"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+
+question: "Which sales channel led Closed Q3 Singapore Premier segment AOV?"
+
+poll:
+  prompt: "Myth-Buster #2: When a customer table has a column called `segment_label` containing `'Premier_Promo_Trial'`, what happens without a governed Business Glossary?"
+  options:
+    - key: "A"
+      text: "The model reads our finance committee policy from memory and skips promo rows."
+    - key: "B"
+      text: "It filters segment_label LIKE '%Premier%', crowning Mobile App (SGD 284.10) instead of true PRM_HV leader B2B Corporate Portal (SGD 612.50)."
+    - key: "C"
+      text: "BigQuery throws a compilation error on LIKE '%Premier%'."
+    - key: "D"
+      text: "Both queries return the exact same winning channel."
+  correct_key: "B"
+  reveal_takeaway: "Marketing labels are not financial definitions. Binding 'Premier Customer' in Knowledge Catalog Business Glossary to tier_code = 'PRM_HV' (spend >= SGD 5,000 and return_rate < 0.08) recovers B2B Corporate Portal at SGD 612.50 AOV across 240 orders (overall SG PRM_HV AOV SGD 495.63 across 640 orders)."
+
+blind:
+  answer_headline: "Mobile App (SGD 284.10)"
+  answer_detail: "Wrong channel and -53.6% understated AOV: filtering segment_label LIKE '%Premier%' swept in 260 low-value 'Premier_Promo_Trial' mobile/web coupon orders while excluding Enterprise_Corporate B2B Premier accounts."
+  numeric_value: 284.1
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Unresolved string heuristic (`segment_label LIKE '%Premier%'`)"
+  context_payload: |
+    No Business Glossary term bound for "Premier Customer".
+    Agent inferred predicate from sample values in customers.segment_label:
+      'Premier_Promo_Trial', 'Premier_Loyalty', 'Enterprise_Corporate', 'Enterprise_Direct'
+  sql_or_gql: |
+    SELECT
+      ROUND(AVG(o.net_realized_revenue_sgd), 2) AS aov_sgd,
+      o.sales_channel,
+      COUNT(*) AS order_count
+    FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
+    JOIN `${PROJECT_ID}.${DATASET_ID}.customers` AS c
+      ON o.customer_id = c.customer_id
+    WHERE o.country_code = 'SG'
+      AND o.order_status = 'COMPLETED'
+      AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+      AND c.segment_label LIKE '%Premier%'
+    GROUP BY o.sales_channel
+    ORDER BY aov_sgd DESC
+    LIMIT 1
+  tokens_used: 2640
+  exploratory_queries: 4
+  error_retries: 1
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Conflates legacy marketing campaign tag 'Premier_Promo_Trial' with official Premier Customer cohort."
+
+governed:
+  answer_headline: "B2B Corporate Portal (SGD 612.50)"
+  answer_detail: "B2B Corporate Portal led with SGD 612.50 AOV across 240 orders (SGD 147,000.00), within the 640 total SG PRM_HV completed orders averaging SGD 495.63 (SGD 317,203.20 total)."
+  numeric_value: 612.5
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Knowledge Catalog Business Glossary Term Binding (`Premier Customer` -> `tier_code = 'PRM_HV'`)"
+  context_payload: |
+    {
+      "glossary": "meridian_enterprise_glossary",
+      "term": "Premier Customer",
+      "canonical_predicate": "c.tier_code = 'PRM_HV' AND c.trailing_12m_spend_sgd >= 5000.00 AND c.return_rate < 0.08",
+      "excluded_distractors": ["segment_label LIKE '%Premier%'", "PRM_TRIAL"],
+      "steward": "Regional Finance & Revenue Governance"
+    }
+  sql_or_gql: |
+    SELECT
+      ROUND(AVG(o.net_realized_revenue_sgd), 2) AS aov_sgd,
+      o.sales_channel,
+      COUNT(*) AS order_count,
+      ROUND(SUM(o.net_realized_revenue_sgd), 2) AS total_net_revenue_sgd
+    FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
+    JOIN `${PROJECT_ID}.${DATASET_ID}.customers` AS c
+      ON o.customer_id = c.customer_id
+    WHERE o.country_code = 'SG'
+      AND o.order_status = 'COMPLETED'
+      AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+      AND c.tier_code = 'PRM_HV'
+      AND c.trailing_12m_spend_sgd >= 5000.00
+      AND c.return_rate < 0.08
+    GROUP BY o.sales_channel
+    ORDER BY aov_sgd DESC
+    LIMIT 1
+  tokens_used: 760
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_2_GROUNDED"
+  rationale: "Resolves canonical Business Glossary term Premier Customer deterministically to tier_code = 'PRM_HV' (5/5 pass)."
+
+xray_summary:
+  context_added: "Knowledge Catalog Business Glossary binding 'Premier Customer' to tier_code = 'PRM_HV' and explicit threshold guardrails."
+  gcp_primitives:
+    - "Knowledge Catalog Business Glossary (GA)"
+    - "Knowledge Catalog Glossary Term-to-Column Linking (GA)"
+  negative_control_assertion: "Queries matching segment_label LIKE '%Premier%' fail glossary reconciliation against PRM_HV cohort invariants."
