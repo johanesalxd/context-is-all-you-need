@@ -894,6 +894,7 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
     refs = entry_link_posts[0]["entryReferences"]  # type: ignore[index]
     by_type = {r["type"]: r for r in refs}
     assert by_type["SOURCE"]["path"] == "Schema.tier_code"
+    assert f"projects/{synth_num}/locations/asia-southeast1/entryGroups/@bigquery/entries/" in by_type["SOURCE"]["name"]
     assert "/tables/customers" in by_type["SOURCE"]["name"]
     assert f"projects/{synth_num}/locations/asia-southeast1/entryGroups/@dataplex/entries/projects/{synth_num}/" in by_type["TARGET"]["name"]
     assert "/terms/premier" in by_type["TARGET"]["name"]
@@ -1504,3 +1505,131 @@ def test_offline_mock_harness_all_6_rungs_and_execution_outcome_fields(tmp_path:
         r["governed"]["trust_tier"] in {"TIER_1_VERIFIED_OR_COMPILED", "TIER_2_GROUNDED"}
         for r in bundle["rungs"]
     )
+
+
+def test_provision_dataplex_403_poll_and_400_already_exists_idempotency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 1. _poll_entry_exists retries cleanly across 403 -> 404 -> 200
+    poll_statuses = iter([403, 404, 200])
+    seen_polls: list[str] = []
+
+    def _poll_transport(method: str, url: str, _payload: dict | None) -> tuple[int, dict[str, Any]]:
+        seen_polls.append(f"{method} {url}")
+        return next(poll_statuses), {"error": {"message": "Permission denied"}}
+
+    pcl._poll_entry_exists(
+        pcl._RestClient(transport=_poll_transport),
+        project_id="synth-proj",
+        bq_location="asia-southeast1",
+        entry_name="projects/synth-proj/locations/asia-southeast1/entryGroups/@dataplex/entries/t1",
+        timeout_s=5.0,
+        poll_interval_s=0.0,
+    )
+    assert len(seen_polls) == 3
+
+    # 2. _create_or_update_entry_link treats 400 "already exists" as idempotent (does NOT swap orientation)
+    link_calls: list[dict[str, Any] | None] = []
+
+    def _link_exists_transport(_m: str, _u: str, payload: dict[str, Any] | None) -> tuple[int, dict[str, Any]]:
+        link_calls.append(payload)
+        return 400, {"error": {"code": 400, "message": "EntryLink already exists", "status": "INVALID_ARGUMENT"}}
+
+    pcl._create_or_update_entry_link(
+        pcl._RestClient(transport=_link_exists_transport),
+        project_id="synth-proj",
+        bq_location="asia-southeast1",
+        entry_link_id="l1",
+        bq_entry_name="bq_e",
+        linked_column="tier_code",
+        term_entry_name="term_e",
+    )
+    assert len(link_calls) == 1
+
+    # 3. Term POST 400 "already exists" triggers PATCH, while unrelated 400 fails loudly
+    proj = "live-idem-" + "556677"
+    synth_num = "12345" + "6789"
+    monkeypatch.setenv("PROJECT_ID", proj)
+    monkeypatch.setenv("DATASET_ID", "synth_commerce")
+    monkeypatch.setenv("BLIND_DATASET_ID", "synth_blind")
+    packs_dir = tmp_path / "packs"
+    p_dir = packs_dir / "idem_p2"
+    (p_dir / "sql").mkdir(parents=True)
+    (p_dir / "context_layer.yaml").write_text(
+        json.dumps(
+            {
+                "blind_dataset_tables": ["orders"],
+                "glossary": {
+                    "glossary_id": "synth-gloss",
+                    "display_name": "Synth Glossary",
+                    "terms": [{"term_id": "premier", "display_name": "Premier", "description": "Code P"}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    plan = pcl.resolve_provision_plan(pack_id="idem_p2", repo_root=tmp_path, packs_dir=packs_dir)
+    from google.cloud import bigquery
+
+    fake_bq = _FakeAgentBQClient(
+        tables_by_dataset={"synth_commerce": {"orders": {"schema": [bigquery.SchemaField("id", "STRING")]}}},
+        rows_by_sql=lambda _sql, _d: [{"cnt": 1}],
+    )
+    orig_query = fake_bq.query
+
+    def _q_side_effect(sql: str, *, job_config: Any = None, location: str = "asia-southeast1") -> Any:
+        if "CREATE OR REPLACE TABLE" in sql and ".synth_blind." in sql:
+            tbl_leaf = sql.split(".synth_blind.", 1)[1].split()[0].strip("`")
+            fake_bq.tables_by_dataset.setdefault("synth_blind", {})[tbl_leaf] = {
+                "table_type": "TABLE",
+                "description": None,
+                "num_rows": 1,
+                "schema": [bigquery.SchemaField("id", "STRING")],
+            }
+        return orig_query(sql, job_config=job_config, location=location)
+
+    fake_bq.query = _q_side_effect  # type: ignore[method-assign]
+    monkeypatch.setattr(pcl, "_ensure_sa_exists", lambda *_a, **_kw: None)
+    monkeypatch.setattr(pcl, "_bind_project_role", lambda *_a, **_kw: None)
+    monkeypatch.setattr(pcl, "_bind_sa_token_creator", lambda *_a, **_kw: None)
+    monkeypatch.setattr(pcl, "_sa_exists", lambda _sa: False)
+    monkeypatch.setattr(pcl, "_run_cmd", lambda *_a, **_kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
+
+    seen_reqs: list[tuple[str, str]] = []
+
+    def _idem_transport(method: str, url: str, _payload: dict | None) -> tuple[int, dict[str, Any]]:
+        seen_reqs.append((method, url))
+        if method == "POST" and "/terms?termId=" in url:
+            return 400, {"error": {"code": 400, "message": "Term with name: foo already exists.", "status": "INVALID_ARGUMENT"}}
+        return 200, {"done": True}
+
+    res = pcl.run_provision(
+        plan,
+        repo_root=tmp_path,
+        packs_dir=packs_dir,
+        bq_client=fake_bq,
+        storage_client=SimpleNamespace(),
+        rest_client=pcl._RestClient(transport=_idem_transport),
+        caller_email="dev@example.com",
+        project_number=synth_num,
+    )
+    assert res["status"] == "provisioned"
+    assert any(m == "PATCH" and "/terms/premier?" in u for m, u in seen_reqs)
+
+    def _bad_400_transport(method: str, url: str, _payload: dict | None) -> tuple[int, dict[str, Any]]:
+        if method == "POST" and "/terms?termId=" in url:
+            return 400, {"error": {"code": 400, "message": "Invalid term display name", "status": "INVALID_ARGUMENT"}}
+        return 200, {"done": True}
+
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        pcl.run_provision(
+            plan,
+            repo_root=tmp_path,
+            packs_dir=packs_dir,
+            bq_client=fake_bq,
+            storage_client=SimpleNamespace(),
+            rest_client=pcl._RestClient(transport=_bad_400_transport),
+            caller_email="dev@example.com",
+            project_number=synth_num,
+        )

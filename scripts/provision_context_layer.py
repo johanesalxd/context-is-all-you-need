@@ -552,19 +552,37 @@ def _build_metadata_template(aspect_spec: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _poll_entry_exists(rest: _RestClient, *, project_id: str, bq_location: str, entry_name: str, timeout_s: float = 45.0) -> None:
+def _poll_entry_exists(
+    rest: _RestClient,
+    *,
+    project_id: str,
+    bq_location: str,
+    entry_name: str,
+    timeout_s: float = 45.0,
+    poll_interval_s: float = 3.0,
+) -> None:
     url = (
         f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}:lookupEntry"
         f"?entry={quote(entry_name, safe='/:@')}&view=BASIC"
     )
     deadline = time.monotonic() + timeout_s
     while True:
-        status, _ = rest.request("GET", url, allow_statuses=(200, 404))
+        status, _ = rest.request("GET", url, allow_statuses=(200, 403, 404))
         if status == 200:
             return
         if time.monotonic() >= deadline:
             raise TimeoutError(f"Timed out waiting for projected Knowledge Catalog entry: {entry_name}")
-        time.sleep(3.0)
+        if poll_interval_s > 0:
+            time.sleep(poll_interval_s)
+
+
+def _is_already_exists_error(status: int, resp: Any) -> bool:
+    if status == 409:
+        return True
+    if status == 400:
+        msg = resp if isinstance(resp, str) else json.dumps(resp or {}, ensure_ascii=True)
+        return "already exists" in msg.lower()
+    return False
 
 
 def _iter_term_column_links(term: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -633,6 +651,8 @@ def _create_or_update_entry_link(
         ],
     }
     status, resp = rest.request("POST", url, payload=primary_body, allow_statuses=(200, 201, 400, 409))
+    if _is_already_exists_error(status, resp):
+        return
     if status == 400:
         swapped_body = {
             "entryLinkType": link_type,
@@ -641,12 +661,12 @@ def _create_or_update_entry_link(
                 {"name": term_entry_name, "type": "SOURCE"},
             ],
         }
-        status2, resp2 = rest.request("POST", url, payload=swapped_body, allow_statuses=(200, 201, 409))
-        if status2 == 409:
+        status2, resp2 = rest.request("POST", url, payload=swapped_body, allow_statuses=(200, 201, 400, 409))
+        if _is_already_exists_error(status2, resp2):
             return
+        if status2 == 400:
+            raise RuntimeError(f"HTTP 400 for POST {url}: {json.dumps(resp2)[:500]}")
         rest.wait_lro(resp2)
-        return
-    if status == 409:
         return
     rest.wait_lro(resp)
 
@@ -843,9 +863,13 @@ def run_provision(
                 "displayName": str(glossary.get("display_name") or g_id),
                 "description": str(glossary.get("description") or ""),
             },
-            allow_statuses=(200, 201, 409),
+            allow_statuses=(200, 201, 400, 409),
         )
-        if st != 409:
+        if _is_already_exists_error(st, g_resp):
+            pass
+        elif st == 400:
+            raise RuntimeError(f"HTTP 400 for POST {g_url}: {json.dumps(g_resp)[:500]}")
+        else:
             rest.wait_lro(g_resp)
 
         for term in glossary.get("terms") or []:
@@ -860,9 +884,9 @@ def run_provision(
                     "description": str(term.get("description") or ""),
                     "parent": g_resource,
                 },
-                allow_statuses=(200, 201, 409),
+                allow_statuses=(200, 201, 400, 409),
             )
-            if st_t == 409:
+            if _is_already_exists_error(st_t, t_resp):
                 _, patch_resp = rest.request(
                     "PATCH",
                     f"{_DATAPLEX_BASE}/{g_resource}/terms/{t_id}?updateMask=displayName,description",
@@ -874,6 +898,8 @@ def run_provision(
                     allow_statuses=(200,),
                 )
                 rest.wait_lro(patch_resp)
+            elif st_t == 400:
+                raise RuntimeError(f"HTTP 400 for POST {t_url}: {json.dumps(t_resp)[:500]}")
             else:
                 rest.wait_lro(t_resp)
 
@@ -886,7 +912,7 @@ def run_provision(
                 )
                 _poll_entry_exists(rest, project_id=project_id, bq_location=bq_location, entry_name=term_entry)
                 bq_entry = (
-                    f"projects/{project_id}/locations/{bq_location}/entryGroups/@bigquery/entries/"
+                    f"projects/{proj_num}/locations/{bq_location}/entryGroups/@bigquery/entries/"
                     f"bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{linked_tbl}"
                 )
                 _poll_entry_exists(rest, project_id=project_id, bq_location=bq_location, entry_name=bq_entry)
@@ -911,8 +937,8 @@ def run_provision(
             "metadataTemplate": template,
         }
         at_create_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/aspectTypes?aspectTypeId={quote(at_id)}"
-        st_at, at_resp = rest.request("POST", at_create_url, payload=at_payload, allow_statuses=(200, 201, 409))
-        if st_at == 409:
+        st_at, at_resp = rest.request("POST", at_create_url, payload=at_payload, allow_statuses=(200, 201, 400, 409))
+        if _is_already_exists_error(st_at, at_resp):
             _, p_resp = rest.request(
                 "PATCH",
                 f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/aspectTypes/{at_id}?updateMask=displayName,description,metadataTemplate",
@@ -920,6 +946,8 @@ def run_provision(
                 allow_statuses=(200,),
             )
             rest.wait_lro(p_resp)
+        elif st_at == 400:
+            raise RuntimeError(f"HTTP 400 for POST {at_create_url}: {json.dumps(at_resp)[:500]}")
         else:
             rest.wait_lro(at_resp)
 
@@ -960,8 +988,8 @@ def run_provision(
             },
         }
         ds_create_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans?dataScanId={quote(scan_id)}"
-        st_ds, ds_resp = rest.request("POST", ds_create_url, payload=scan_body, allow_statuses=(200, 201, 409))
-        if st_ds == 409:
+        st_ds, ds_resp = rest.request("POST", ds_create_url, payload=scan_body, allow_statuses=(200, 201, 400, 409))
+        if _is_already_exists_error(st_ds, ds_resp):
             _, upd_resp = rest.request(
                 "PATCH",
                 f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{scan_id}?updateMask=displayName,description,dataQualitySpec,executionSpec",
@@ -969,6 +997,8 @@ def run_provision(
                 allow_statuses=(200,),
             )
             rest.wait_lro(upd_resp)
+        elif st_ds == 400:
+            raise RuntimeError(f"HTTP 400 for POST {ds_create_url}: {json.dumps(ds_resp)[:500]}")
         else:
             rest.wait_lro(ds_resp)
 
