@@ -55,6 +55,7 @@ _STRUCTURAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("google_email", re.compile(r"@(?:[a-z0-9-]+\.)*[g]oogle\.com\b", re.IGNORECASE)),
     ("altostrat_email", re.compile(r"@(?:[a-z0-9-]+\.)*[a]ltostrat\.com\b", re.IGNORECASE)),
     ("gcp_6digit_project_id", re.compile(r"\b[a-z][a-z0-9-]{3,23}-[0-9]{6}\b")),
+    ("gcp_project_number_path", re.compile(r"projects/[0-9]{6,}\b")),
 )
 
 _SA_EMAIL_PATTERN = re.compile(
@@ -203,6 +204,13 @@ def scan_repo_for_leaks(
                 target_files.append(candidate)
     else:
         target_files = _list_repo_files(resolved_root)
+        results_dir = resolved_root / "results"
+        if results_dir.is_dir():
+            seen = {p.resolve() for p in target_files}
+            for f in sorted(results_dir.rglob("*")):
+                if f.is_file() and f.resolve() not in seen:
+                    seen.add(f.resolve())
+                    target_files.append(f)
 
     findings: list[LeakFinding] = []
     for file_path in target_files:

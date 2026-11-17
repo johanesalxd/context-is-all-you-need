@@ -24,9 +24,11 @@ __all__ = [
     "build_impersonated_credentials",
     "is_valid_customer_sa",
     "mint_hmac_role_assertion",
+    "parse_agent_sa_map",
     "parse_role_sa_map",
     "redact_bundle_data",
     "redact_sensitive_identifiers",
+    "resolve_agent_sa_map",
     "verify_role_assertion",
 ]
 
@@ -41,6 +43,7 @@ _SA_EMAIL_REDACTION_REGEX = re.compile(
 _USER_EMAIL_REDACTION_REGEX = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
+_PROJECT_NUMBER_PATH_REGEX = re.compile(r"(projects/)[0-9]{6,}\b")
 
 _REDACTED_SA = "redacted-sa@example-project-id.iam.gserviceaccount.com"
 _REDACTED_USER = "redacted-user@example.com"
@@ -83,26 +86,30 @@ def is_valid_customer_sa(email: str) -> bool:
     return bool(_CUSTOMER_SA_REGEX.match(cleaned)) and not _is_google_managed_sa(cleaned)
 
 
-def parse_role_sa_map(raw_json: str | None) -> dict[str, str]:
-    """Parses and validates a JSON mapping of role slugs to customer-managed service accounts."""
+def _parse_sa_map(
+    raw_json: str | None,
+    *,
+    env_name: str,
+) -> dict[str, str]:
+    """Parses and validates a JSON mapping of slugs to customer-managed service accounts."""
     if raw_json is None or not raw_json.strip():
-        raise ImpersonationError("SQL_ROLE_SA_MAP_JSON cannot be empty or None")
+        raise ImpersonationError(f"{env_name} cannot be empty or None")
 
     def _pairs_hook(pairs: list[tuple[Any, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, val in pairs:
             if key in result:
-                raise ImpersonationError(f"Duplicate role key in role_sa_map: {key!r}")
+                raise ImpersonationError(f"Duplicate role key in {env_name}: {key!r}")
             result[key] = val
         return result
 
     try:
         data = json.loads(raw_json, object_pairs_hook=_pairs_hook)
     except json.JSONDecodeError as err:
-        raise ImpersonationError(f"Malformed JSON in SQL_ROLE_SA_MAP_JSON: {err}") from err
+        raise ImpersonationError(f"Malformed JSON in {env_name}: {err}") from err
 
     if not isinstance(data, dict) or not data:
-        raise ImpersonationError("SQL_ROLE_SA_MAP_JSON must be a non-empty JSON object")
+        raise ImpersonationError(f"{env_name} must be a non-empty JSON object")
 
     validated: dict[str, str] = {}
     for role, sa_email in data.items():
@@ -123,6 +130,63 @@ def parse_role_sa_map(raw_json: str | None) -> dict[str, str]:
         validated[role] = sa_clean
 
     return validated
+
+
+def parse_role_sa_map(raw_json: str | None) -> dict[str, str]:
+    """Parses and validates a JSON mapping of role slugs to customer-managed service accounts."""
+    return _parse_sa_map(raw_json, env_name="SQL_ROLE_SA_MAP_JSON")
+
+
+def parse_agent_sa_map(raw_json: str | None) -> dict[str, str]:
+    """Parses AGENT_SA_MAP_JSON ensuring strict blind/governed SA isolation."""
+    validated = _parse_sa_map(raw_json, env_name="AGENT_SA_MAP_JSON")
+    required = {"blind", "governed"}
+    missing = required - set(validated.keys())
+    if missing:
+        raise ImpersonationError(
+            f"AGENT_SA_MAP_JSON missing required arm key(s): {sorted(missing)}"
+        )
+    if validated["blind"] == validated["governed"]:
+        raise ImpersonationError("AGENT_SA_MAP_JSON blind and governed SAs must be distinct")
+    for arm, sa_email in validated.items():
+        if "web-runner" in sa_email.lower():
+            raise ImpersonationError(
+                f"AGENT_SA_MAP_JSON arm {arm!r} cannot use web-runner SA: {sa_email!r}"
+            )
+    return validated
+
+
+def resolve_agent_sa_map(
+    *,
+    project_id: str,
+    pack_id: str = "",
+    env_json: str | None = None,
+    context_layer: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Resolves distinct blind and governed customer SAs from env, context_layer, or pack prefix."""
+    raw_env = env_json if env_json is not None else os.getenv("AGENT_SA_MAP_JSON")
+    if raw_env is not None and raw_env.strip():
+        return parse_agent_sa_map(raw_env)
+
+    prefix_raw = ""
+    if context_layer and isinstance(context_layer.get("agent_sa_prefix"), str):
+        prefix_raw = context_layer["agent_sa_prefix"].strip().lower()
+    if not prefix_raw and pack_id:
+        prefix_raw = pack_id.split("_")[0].strip().lower()
+    prefix_clean = re.sub(r"[^a-z0-9-]", "-", prefix_raw or "agent").strip("-") or "agent"
+    prefix_clean = prefix_clean[:15].rstrip("-") or "agent"
+
+    blind_sa = f"{prefix_clean}-blind-agent@{project_id}.iam.gserviceaccount.com"
+    governed_sa = f"{prefix_clean}-governed-agent@{project_id}.iam.gserviceaccount.com"
+
+    if context_layer and isinstance(context_layer.get("agent_sas"), Mapping):
+        sas_cfg = context_layer["agent_sas"]
+        if isinstance(sas_cfg.get("blind"), str) and sas_cfg["blind"].strip():
+            blind_sa = sas_cfg["blind"].strip()
+        if isinstance(sas_cfg.get("governed"), str) and sas_cfg["governed"].strip():
+            governed_sa = sas_cfg["governed"].strip()
+
+    return parse_agent_sa_map(json.dumps({"blind": blind_sa, "governed": governed_sa}))
 
 
 def mint_hmac_role_assertion(
@@ -332,6 +396,7 @@ def redact_sensitive_identifiers(
 
     result = _SA_EMAIL_REDACTION_REGEX.sub(_scrub_sa_match, text)
     result = _USER_EMAIL_REDACTION_REGEX.sub(_scrub_user_match, result)
+    result = _PROJECT_NUMBER_PATH_REGEX.sub(rf"\g<1>{_PLACEHOLDER_PROJECT}", result)
 
     tokens_to_scrub: set[str] = set()
     if live_project_id:
@@ -342,6 +407,10 @@ def redact_sensitive_identifiers(
         env_pid = os.environ.get("PROJECT_ID", "").strip()
         if env_pid and env_pid != _PLACEHOLDER_PROJECT and len(env_pid) >= 6:
             tokens_to_scrub.add(env_pid)
+
+    env_pnum = os.environ.get("PROJECT_NUMBER", "").strip()
+    if env_pnum and env_pnum.isdigit() and len(env_pnum) >= 6:
+        tokens_to_scrub.add(env_pnum)
 
     if extra_tokens:
         for tok in extra_tokens:

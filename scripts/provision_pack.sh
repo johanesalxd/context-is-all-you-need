@@ -374,6 +374,7 @@ from pathlib import Path
 import re
 from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
+import yaml
 
 from engine.capture_rungs import list_active_row_access_policies
 from engine.pack_loader import _strip_sql_comments, extract_create_table_statement
@@ -448,6 +449,16 @@ def run_ddl_sql(sql_text: str) -> None:
     client.query(sql_text, job_config=job_cfg, location=bq_location).result()
 
 
+def _load_ctx_yaml() -> dict:
+    ctx_path = pack_dir / "context_layer.yaml"
+    if ctx_path.is_file():
+        return yaml.safe_load(ctx_path.read_text(encoding="utf-8")) or {}
+    return {}
+
+
+ctx_yaml = _load_ctx_yaml()
+
+
 def run_sql_file(sql_path: Path, *, staging_only: bool = False) -> None:
     if not sql_path.is_file():
         return
@@ -455,7 +466,13 @@ def run_sql_file(sql_path: Path, *, staging_only: bool = False) -> None:
     if not sql_text:
         return
     if staging_only:
-        extracted = extract_create_table_statement(sql_text, "staging_cold_chain_oct11")
+        shadow_src = str(ctx_yaml.get("shadow_source_table") or "").strip()
+        candidates = [c for c in (shadow_src, "mart_coldchain_q3_r1", "staging_cold_chain_oct11") if c]
+        extracted = None
+        for cand in candidates:
+            extracted = extract_create_table_statement(sql_text, cand)
+            if extracted:
+                break
         if not extracted:
             return
         sql_text = extracted
@@ -513,6 +530,15 @@ def reset_existing_objects_for_idempotency() -> None:
             if leaf not in declared_tables:
                 declared_tables.append(leaf)
 
+    # Drop legacy deprecated Phase-1 tables if left over in the dataset.
+    legacy_drops = [str(x).strip() for x in (ctx_yaml.get("legacy_tables_to_drop") or []) if str(x).strip()]
+    for extra_legacy in ("cold_chain_margin_gold", "staging_cold_chain_oct11"):
+        if extra_legacy not in declared_tables and extra_legacy not in legacy_drops:
+            legacy_drops.append(extra_legacy)
+    for legacy_tbl in legacy_drops:
+        if existing_types.get(legacy_tbl) == "TABLE" and legacy_tbl not in declared_tables:
+            run_ddl_sql(f"DROP TABLE IF EXISTS `{project_id}.{dataset_id}.{legacy_tbl}`;")
+
     # Drop in reverse declaration order so FK child tables are dropped before parents.
     for tbl_name in reversed(declared_tables):
         if existing_types.get(tbl_name) == "TABLE":
@@ -569,28 +595,61 @@ with ThreadPoolExecutor(max_workers=8) as pool:
     loaded_summary = [fut.result() for fut in as_completed(futures)]
 print("Loaded JSONL tables:", ", ".join(sorted(loaded_summary)))
 
-# 3. Provision 190 empty shadow tables concurrently via BigQuery API (<10s).
+# 3. Provision 190 empty shadow tables concurrently via BigQuery API (<10s), purging stale schemas.
 shadow_schema = [
     bigquery.SchemaField("record_id", "STRING"),
     bigquery.SchemaField("country_code", "STRING"),
     bigquery.SchemaField("snapshot_tag", "STRING"),
 ]
-try:
-    staging_tbl = client.get_table(f"{project_id}.{dataset_id}.staging_cold_chain_oct11")
-    if staging_tbl.schema:
-        shadow_schema = list(staging_tbl.schema)
-except Exception:
-    pass
+shadow_candidates: list[str] = []
+shadow_src_cfg = str(ctx_yaml.get("shadow_source_table") or "").strip()
+if shadow_src_cfg:
+    shadow_candidates.append(shadow_src_cfg)
+for tbl_candidate in (ctx_yaml.get("blind_dataset_tables") or []):
+    s_tbl = str(tbl_candidate).strip()
+    if "r1" in s_tbl.lower() or "staging" in s_tbl.lower():
+        if s_tbl not in shadow_candidates:
+            shadow_candidates.append(s_tbl)
+for fallback_src in ("mart_coldchain_q3_r1", "staging_cold_chain_oct11"):
+    if fallback_src not in shadow_candidates:
+        shadow_candidates.append(fallback_src)
+
+for cand_tbl in shadow_candidates:
+    try:
+        staging_tbl = client.get_table(f"{project_id}.{dataset_id}.{cand_tbl}")
+        if staging_tbl.schema:
+            shadow_schema = list(staging_tbl.schema)
+            print(f"Shadow clone schema source: {cand_tbl} ({len(shadow_schema)} cols)")
+            break
+    except Exception:
+        continue
+
+expected_shadow_sig = [(f.name, f.field_type) for f in shadow_schema]
+existing_shadows = {
+    t.table_id
+    for t in client.list_tables(f"{project_id}.{dataset_id}")
+    if t.table_id.startswith("shadow_auto_tbl_")
+}
 
 
-def create_shadow(idx: int) -> None:
+def create_or_refresh_shadow(idx: int) -> None:
     tbl_name = f"shadow_auto_tbl_{idx:03d}"
-    tbl = bigquery.Table(f"{project_id}.{dataset_id}.{tbl_name}", schema=shadow_schema)
+    tbl_id = f"{project_id}.{dataset_id}.{tbl_name}"
+    if tbl_name in existing_shadows:
+        try:
+            cur = client.get_table(tbl_id)
+            cur_sig = [(f.name, f.field_type) for f in (cur.schema or [])]
+            if cur_sig == expected_shadow_sig:
+                return
+        except NotFound:
+            pass
+        client.delete_table(tbl_id, not_found_ok=True)
+    tbl = bigquery.Table(tbl_id, schema=shadow_schema)
     client.create_table(tbl, exists_ok=True)
 
 
 with ThreadPoolExecutor(max_workers=20) as pool:
-    futs = [pool.submit(create_shadow, i) for i in range(1, 191)]
+    futs = [pool.submit(create_or_refresh_shadow, i) for i in range(1, 191)]
     for fut in as_completed(futs):
         fut.result()
 print("Provisioned 190 shadow tables (shadow_auto_tbl_001..shadow_auto_tbl_190)")
