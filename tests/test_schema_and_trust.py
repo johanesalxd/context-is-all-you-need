@@ -633,6 +633,7 @@ def test_fastapi_server_allowlist_and_live_execution(
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload["numeric_value"] == 100.0
+    assert payload["row_count"] == 1
     assert payload["trust_tier"] == "TIER_1_VERIFIED_OR_COMPILED"
     assert live_proj not in json.dumps(payload)
 
