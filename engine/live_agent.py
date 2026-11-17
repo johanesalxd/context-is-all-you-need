@@ -149,6 +149,9 @@ def _extract_scalar_from_rows(rows: Sequence[Mapping[str, Any]]) -> float | None
         return None
     first = rows[0]
     preferred_keys = (
+        "aov",
+        "exposed_revenue",
+        "contribution_margin",
         "net_revenue",
         "revenue",
         "gross_margin_pct",
@@ -207,7 +210,7 @@ def extract_observed_signals(
         preview = str(step.get("output_preview") or "")
         if name and status == "ok":
             signals.add(name)
-            if name == "get_verified_metric_contract":
+            if name == "get_verified_metric_contract" and '"matched_contracts": {}' not in preview:
                 signals.add("VERIFIED_METRIC_CONTRACT")
             if name == "search_certified_tables" and "CERTIFIED" in preview:
                 signals.add("CERTIFIED")
@@ -529,7 +532,7 @@ def _build_blind_declarations() -> list[Any]:
                     ),
                     "limit": types.Schema(
                         type=types.Type.INTEGER,
-                        description="Maximum tables to return (1-250, default 50).",
+                        description="Maximum tables to return (1-250, default 250).",
                     ),
                 },
             ),
@@ -964,7 +967,7 @@ def run_live_agent_arm(
                         exploratory_queries += 1
                         result_payload = tool_ctx.list_tables(
                             pattern=str(raw_args.get("pattern") or ""),
-                            limit=int(raw_args.get("limit") or 50),
+                            limit=int(raw_args.get("limit") or 250),
                         )
                     elif fn_name == "get_table_ddl":
                         exploratory_queries += 1

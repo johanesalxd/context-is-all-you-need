@@ -1235,11 +1235,13 @@ def test_grading_persona_targets_secondary_numerics_and_graph_signal() -> None:
 
 
 def test_list_tables_search_priority_truncation_and_timeout_cancel() -> None:
+    from google.cloud import bigquery
     from engine.context_retriever import _await_bq_job_result
 
-    # Blind list_tables sets truncated=True cleanly when table count exceeds limit
-    blind_tables = {f"shadow_auto_tbl_{i:03d}": {"schema": []} for i in range(5)}
-    blind_tables["orders"] = {"schema": []}
+    # Blind list_tables sets truncated=True when limit<total, and default limit=250 returns 199 tables untruncated
+    blind_tables = {f"noise_tbl_{i:03d}": {"schema": []} for i in range(1, 191)}
+    for core_tbl in ("orders", "customers", "products", "alpha_fact", "beta_fact", "gamma_dim", "delta_dim", "eps_fact", "zeta_ledg"):
+        blind_tables[core_tbl] = {"schema": []}
     bq = _FakeAgentBQClient(tables_by_dataset={"ds_blind": blind_tables})
     b_ctx = BlindToolContext(
         bq_client=bq,
@@ -1249,14 +1251,27 @@ def test_list_tables_search_priority_truncation_and_timeout_cancel() -> None:
         bq_location="asia-southeast1",
         sa_email="blind@example-project-id.iam.gserviceaccount.com",
     )
-    listed = b_ctx.list_tables(limit=3)
-    assert listed["truncated"] is True
-    assert listed["total_tables"] == 6
-    assert len(listed["tables"]) == 3
+    listed_small = b_ctx.list_tables(limit=3)
+    assert listed_small["truncated"] is True
+    assert listed_small["total_tables"] == 199
+    assert len(listed_small["tables"]) == 3
 
-    # Governed search_certified_tables prioritizes KC hits & non-shadow tables before shadow_auto_tbl_*
-    gov_tables = {f"shadow_auto_tbl_{i:03d}": {"table_type": "TABLE", "schema": []} for i in range(1, 25)}
-    gov_tables["mart_r2_certified"] = {"table_type": "TABLE", "schema": [], "description": "Certified mart"}
+    listed_default = b_ctx.list_tables()
+    assert listed_default["truncated"] is False
+    assert listed_default["total_tables"] == 199
+    assert listed_default["matched_tables"] == 199
+    assert len(listed_default["tables"]) == 199
+
+    # Governed search_certified_tables filters by catalog facts (description/aspect/glossary link),
+    # ignores structural system aspects, prioritizes CERTIFIED, returns compact column_names, and tracks truncation >25.
+    gov_tables = {
+        f"noise_tbl_{i:03d}": {"table_type": "TABLE", "schema": []} for i in range(1, 25)
+    }
+    gov_tables["mart_r2_certified"] = {
+        "table_type": "TABLE",
+        "schema": [bigquery.SchemaField("margin_pct", "FLOAT64", description="Authoritative margin %")],
+        "description": "Certified mart",
+    }
     gov_bq = _FakeAgentBQClient(tables_by_dataset={"ds_gov": gov_tables})
     fake_catalog = DataplexCatalogRestClient(
         project_id="p1",
@@ -1273,7 +1288,11 @@ def test_list_tables_search_priority_truncation_and_timeout_cancel() -> None:
                 ]
             }
             if ":searchEntries" in url
-            else {"aspects": {}}
+            else (
+                {"aspects": {"dataplex-types.global.schema": {"data": {"fields": []}}}}
+                if "noise_tbl_" in url and ":lookupEntry" in url
+                else {"aspects": {}}
+            )
         ),
     )
     g_ctx = GovernedToolContext(
@@ -1288,8 +1307,36 @@ def test_list_tables_search_priority_truncation_and_timeout_cancel() -> None:
         catalog_client=fake_catalog,
     )
     res = g_ctx.search_certified_tables("*")
-    assert res["truncated"] is True
+    assert res["total_matched"] == 1
+    assert res["uncertified_omitted"] == 24
+    assert res["truncated"] is False
+    assert "CERTIFIED" in res["governance_policy"]
     assert res["tables"][0]["table_name"] == "ds_gov.mart_r2_certified"
+    assert res["tables"][0]["column_names"] == ["margin_pct"]
+    assert "columns" not in res["tables"][0]
+
+    # When >25 tables are curated (via descriptions), truncated=True triggers at limit 25
+    many_curated = {
+        f"curated_tbl_{i:02d}": {"table_type": "TABLE", "schema": [], "description": f"Curated fact {i}"}
+        for i in range(1, 28)
+    }
+    many_bq = _FakeAgentBQClient(tables_by_dataset={"ds_gov": many_curated})
+    g_many = GovernedToolContext(
+        project_id="p1",
+        dataset_id="ds_gov",
+        blind_dataset_id="ds_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=many_bq,
+        sql_bq_client=many_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=fake_catalog,
+    )
+    res_many = g_many.search_certified_tables("*")
+    assert res_many["total_matched"] == 27
+    assert res_many["uncertified_omitted"] == 0
+    assert res_many["truncated"] is True
+    assert len(res_many["tables"]) == 25
 
     # _await_bq_job_result cancels job if result(timeout=...) raises TimeoutError
     class _SlowJob:
@@ -1662,3 +1709,174 @@ def test_provision_dataplex_403_poll_and_400_already_exists_idempotency(
             caller_email="dev@example.com",
             project_number=synth_num,
         )
+
+
+def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> None:
+    from google.cloud import bigquery
+    from engine.live_agent import _build_blind_declarations, _extract_scalar_from_rows
+
+    # 1. Blind declaration advertises default 250
+    blind_decls = _build_blind_declarations()
+    list_tool = blind_decls[0]
+    assert "default 250" in (list_tool.parameters.properties["limit"].description or "")
+
+    # 2. Catalog-fact filtering keeps glossary-only & aspect-only tables regardless of name,
+    #    paginates search_entries across nextPageToken, and omits unannotated entries cleanly.
+    gov_tables = {
+        "alpha_curated_cert": {"table_type": "TABLE", "schema": [bigquery.SchemaField("val", "FLOAT64")]},
+        "beta_glossary_only": {"table_type": "TABLE", "schema": [bigquery.SchemaField("tier_code", "STRING")]},
+        "gamma_stale_mart": {
+            "table_type": "TABLE",
+            "schema": [bigquery.SchemaField("margin_pct", "FLOAT64")],
+            "description": "Stale snapshot",
+        },
+        "zeta_unannotated": {"table_type": "TABLE", "schema": [bigquery.SchemaField("x", "STRING")]},
+    }
+    gov_bq = _FakeAgentBQClient(tables_by_dataset={"synth_gov": gov_tables})
+    long_context_text = "CONTEXT_LINE\n" * 400
+
+    def _transport(_m: str, url: str, payload: dict | None, _h: dict) -> dict[str, Any]:
+        if ":searchEntries" in url:
+            token = (payload or {}).get("pageToken")
+            if not token:
+                return {
+                    "results": [
+                        {
+                            "linkedResource": "//bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/alpha_curated_cert",
+                            "dataplexEntry": {
+                                "name": "projects/p1/locations/asia-southeast1/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/alpha_curated_cert"
+                            },
+                        }
+                    ],
+                    "nextPageToken": "page-2",
+                }
+            return {
+                "results": [
+                    {
+                        "linkedResource": "//bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/zeta_unannotated",
+                        "dataplexEntry": {
+                            "name": "projects/p1/locations/asia-southeast1/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/zeta_unannotated"
+                        },
+                    }
+                ]
+            }
+        if ":lookupContext" in url:
+            return {"context": long_context_text}
+        if ":lookupEntryLinks" in url:
+            if "beta_glossary_only" in url:
+                return {
+                    "entryLinks": [
+                        {
+                            "entryLinkType": "definition",
+                            "entryReferences": [
+                                {"name": "entry", "path": "Schema.tier_code", "type": "TARGET"},
+                                {
+                                    "name": "projects/p1/locations/asia-southeast1/entryGroups/@dataplex/entries/projects/999/locations/asia-southeast1/glossaries/g1/terms/premier",
+                                    "type": "SOURCE",
+                                },
+                            ],
+                        }
+                    ]
+                }
+            return {"entryLinks": []}
+        if "/terms/premier" in url:
+            return {"displayName": "Premier Customer", "description": "Tier rule"}
+        if ":lookupEntry" in url:
+            if "alpha_curated_cert" in url:
+                return {
+                    "aspects": {
+                        "999.asia-southeast1.data-product-certification": {
+                            "data": {"certification_status": "CERTIFIED"}
+                        }
+                    }
+                }
+            if "gamma_stale_mart" in url:
+                return {
+                    "aspects": {
+                        "999.asia-southeast1.data-product-certification": {
+                            "data": {"certification_status": "UNCERTIFIED_STALE"}
+                        }
+                    }
+                }
+            # Unannotated entry has only structural schema system aspect and empty overview
+            return {
+                "aspects": {
+                    "dataplex-types.global.schema": {"data": {"fields": [{"name": "x"}]}},
+                    "dataplex-types.global.overview": {"data": {"content": ""}},
+                }
+            }
+        return {}
+
+    cat_client = DataplexCatalogRestClient(
+        project_id="p1",
+        bq_location="asia-southeast1",
+        http_transport=_transport,
+    )
+    g_ctx = GovernedToolContext(
+        project_id="p1",
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=cat_client,
+        context_layer={
+            "verified_metric_contracts": {
+                "r3_metrics": {
+                    "metric_name": "regional_margin_pct",
+                    "display_name": "Regional Certified Margin",
+                    "formula": "MEASURE(margin_pct) -- unrelated revenue note",
+                },
+                "r5_graph": {
+                    "metric_name": "same_day_contribution_margin",
+                    "display_name": "Same-Day Contribution Margin",
+                    "formula": "GRAPH_TABLE(ops MATCH ...)",
+                },
+            }
+        },
+    )
+    discovered = g_ctx.search_certified_tables("*")
+    found_names = [t["table_name"] for t in discovered["tables"]]
+    assert found_names == [
+        "synth_gov.alpha_curated_cert",
+        "synth_gov.beta_glossary_only",
+        "synth_gov.gamma_stale_mart",
+    ]
+    assert discovered["total_matched"] == 3
+    assert discovered["uncertified_omitted"] == 1
+    assert "CERTIFIED" in discovered["governance_policy"]
+
+    # 3. lookup_catalog_context caps snippet at 1800 chars & preserves structured glossary + governance_policy
+    ctx_res = g_ctx.lookup_catalog_context(["alpha_curated_cert", "beta_glossary_only"])
+    assert len(ctx_res["lookup_context"]) == 1800
+    assert "CERTIFIED" in ctx_res["governance_policy"]
+    assert ctx_res["tables"][1]["glossary_definitions"][0]["display_name"] == "Premier Customer"
+
+    # 4. get_verified_metric_contract returns {} on unmatched / generic stop-word topics & does not trigger signal
+    for miss_topic in ("AOV", "Net Realized Revenue", "", "metric total value", "unrelated revenue"):
+        miss = g_ctx.get_verified_metric_contract(miss_topic)
+        assert miss["matched_contracts"] == {}
+        assert "lookup_catalog_context" in miss["note"]
+        signals = extract_observed_signals(
+            sql_or_gql="SELECT 1",
+            tool_trace=[
+                {
+                    "tool_name": "get_verified_metric_contract",
+                    "status": "ok",
+                    "output_preview": json.dumps(miss)[:240],
+                }
+            ],
+        )
+        assert "VERIFIED_METRIC_CONTRACT" not in signals
+
+    hit_r3 = g_ctx.get_verified_metric_contract("r3")
+    assert list(hit_r3["matched_contracts"].keys()) == ["r3_metrics"]
+    hit_r5 = g_ctx.get_verified_metric_contract("same-day contribution")
+    assert list(hit_r5["matched_contracts"].keys()) == ["r5_graph"]
+
+    # 5. _extract_scalar_from_rows prioritizes aov, exposed_revenue, contribution_margin over generic revenue/margin
+    assert _extract_scalar_from_rows([{"total_net_revenue_sgd": 147000.0, "aov_sgd": 612.5}]) == pytest.approx(612.5)
+    assert _extract_scalar_from_rows([{"total_revenue": 90000.0, "exposed_revenue_amt": 42000.0}]) == pytest.approx(42000.0)
+    assert _extract_scalar_from_rows([{"gross_margin": 50000.0, "contribution_margin_pct": 18.4}]) == pytest.approx(18.4)
