@@ -348,10 +348,10 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "rationale": "Selected stale uncertified draft table from uncurated schema catalog."
         },
         "governed": {
-          "answer_headline": "USD 450,000.00 Global Margin (25.0%)",
-          "answer_detail": "Routes exclusively to certified temp_margin_gold Data Product and enforces caller Row-Level Security policy.",
-          "numeric_value": 450000.0,
-          "unit": "USD",
+          "answer_headline": "25.0% Margin (-30 bps YoY)",
+          "answer_detail": "Routes exclusively to certified temp_margin_gold Data Product (no false drop) and enforces caller Row-Level Security policy.",
+          "numeric_value": 25.0,
+          "unit": "PCT",
           "sql_or_gql": "SELECT\n  SUM(gross_margin_usd) AS visible_gross_margin_usd,\n  COUNT(*) AS rows_visible\nFROM `example-project-id.sample_analytics.temp_margin_gold`\nWHERE quarter = 'Q4';",
           "query_language": "SQL",
           "context_mechanism": "Knowledge Catalog Data Product certification + BigQuery Row Access Policy",

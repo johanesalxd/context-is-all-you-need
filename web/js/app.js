@@ -421,7 +421,7 @@
         setState({
           isHorizon: false,
           rungIndex: bundle.rungs.length - 1,
-          beat: "compare",
+          beat: "governed",
           liveResult: null
         });
         return;
@@ -437,7 +437,7 @@
       if (state.rungIndex > 0) {
         setState({
           rungIndex: state.rungIndex - 1,
-          beat: "compare",
+          beat: "governed",
           pollSelectedKey: null,
           pollRevealed: false,
           liveResult: null
@@ -516,12 +516,15 @@
         const elapsedMs = Math.round(performance.now() - startedAt);
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          const detail = data.detail || data.error || `HTTP ${response.status}`;
+          const rawDetail = data.detail !== undefined && data.detail !== null
+            ? data.detail
+            : (data.error !== undefined && data.error !== null ? data.error : `HTTP ${response.status}`);
+          const detail = typeof rawDetail === "string" ? rawDetail : JSON.stringify(rawDetail);
           setState({
             liveLoading: false,
             liveResult: {
               kind: "error",
-              message: `Live query request failed (${elapsedMs} ms): ${String(detail)}`
+              message: `Live query request failed (${elapsedMs} ms): ${detail}`
             }
           });
           return;
@@ -680,6 +683,10 @@
         );
       }
 
+      const variantMetric = variant
+        ? formatVariantMetricValue(variant, rung, bundle.currency)
+        : null;
+
       return el("section", {
         className: "identity-panel",
         attrs: { "aria-label": "Beat 4b Identity and Row-Level Security" }
@@ -688,6 +695,15 @@
           el("span", { className: "identity-title", text: "Beat 4b · Switch Identity" }),
           segGroup
         ),
+        variant
+          ? el("div", { className: "identity-outcome-box" },
+              el("div", { className: "identity-outcome-head" },
+                el("strong", { className: "identity-outcome-kpi", text: variant.answer_headline }),
+                el("span", { className: "badge badge-ga badge-mono", text: `Scoped Metric: ${variantMetric}` })
+              ),
+              el("p", { className: "identity-outcome-detail", text: variant.answer_detail })
+            )
+          : null,
         variant
           ? el("div", { className: "identity-meta-grid" },
               el("div", { className: "identity-meta-item" },
@@ -713,7 +729,11 @@
 
     function buildHorizonShowcase() {
       const grid = el("div", { className: "horizon-grid" });
+      const cardTitles = [];
       for (const card of bundle.horizon_cards) {
+        if (card && card.title) {
+          cardTitles.push(card.title);
+        }
         const primList = el("ul", { className: "primitives-list" },
           ...(Array.isArray(card.primitives) ? card.primitives : []).map((p) =>
             el("li", { className: "primitive-chip", text: p })
@@ -737,16 +757,20 @@
         );
       }
 
+      const subtitleText = cardTitles.length > 0
+        ? `Rungs 1–6 execute strictly within ${bundle.region}. Horizon cards rendered dynamically from ${bundle.pack_id}: ${cardTitles.join(" · ")}.`
+        : `Rungs 1–6 execute strictly within ${bundle.region}. Architectural capabilities below are decoupled from the live rung scope.`;
+
       return el("section", {
         className: "horizon-showcase",
         attrs: { "aria-label": "Act IV Horizon Architectural Showcase" }
       },
         el("div", { className: "horizon-banner" },
           el("span", { className: "horizon-banner-eyebrow", text: "Act IV · Architectural Horizon (Decoupled from R1–R6 Live Scope)" }),
-          el("h1", { className: "horizon-banner-title", text: "Where Knowledge Governance Goes Next: Context Studio & Cross-Cloud Federation" }),
+          el("h1", { className: "horizon-banner-title", text: "Act IV · Architectural Horizon" }),
           el("p", {
             className: "horizon-banner-subtitle",
-            text: `Rungs 1–6 execute strictly within ${bundle.region}. These Horizon capabilities map regional Preview tracks and multi-cloud GA federation patterns.`
+            text: subtitleText
           })
         ),
         grid
@@ -898,17 +922,6 @@
             )
           ];
         } else {
-          const personaId = activePersonaId();
-          const activeVariant = personaId && rung.identity_variants
-            ? rung.identity_variants[personaId]
-            : null;
-
-          const govHeadline = activeVariant ? activeVariant.answer_headline : rung.governed.answer_headline;
-          const govDetail = activeVariant ? activeVariant.answer_detail : rung.governed.answer_detail;
-          const govNumericFormatted = activeVariant
-            ? formatVariantMetricValue(activeVariant, rung, bundle.currency)
-            : formatMetricValue(rung.governed.numeric_value, rung.governed.unit, bundle.currency);
-
           const blindCardClass = `outcome-card is-blind${state.beat === "governed" ? " is-subdued" : ""}`;
           const blindCard = el("article", {
             className: blindCardClass,
@@ -960,16 +973,8 @@
                     ),
                     el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
                   ),
-                  el("p", { className: "outcome-kpi", text: govHeadline }),
-                  el("p", { className: "outcome-detail", text: govDetail }),
-                  activeVariant
-                    ? el("div", { className: "scoped-metric-row" },
-                        el("span", {
-                          className: "badge badge-ga badge-mono",
-                          text: `Scoped Metric: ${govNumericFormatted}`
-                        })
-                      )
-                    : null,
+                  el("p", { className: "outcome-kpi", text: rung.governed.answer_headline }),
+                  el("p", { className: "outcome-detail", text: rung.governed.answer_detail }),
                   buildIdentitySwitchPanel(rung)
                 ),
                 el("div", null,
@@ -1317,9 +1322,6 @@
       const rung = activeRung();
       const { modeGroup, themeGroup } = buildModeAndThemeSwitches();
       const personaId = activePersonaId();
-      const activeVariant = !state.isHorizon && personaId && rung.identity_variants
-        ? rung.identity_variants[personaId]
-        : null;
 
       const header = el("header", { className: "workbench-header" },
         el("div", { className: "brand-block" },
@@ -1408,9 +1410,6 @@
       if (state.isHorizon) {
         mainSection = buildHorizonShowcase();
       } else {
-        const govHeadline = activeVariant ? activeVariant.answer_headline : rung.governed.answer_headline;
-        const govDetail = activeVariant ? activeVariant.answer_detail : rung.governed.answer_detail;
-
         mainSection = [
           el("section", { className: "workbench-summary-card", attrs: { "aria-label": "Selected rung summary" } },
             el("div", { className: "question-meta-row" },
@@ -1440,8 +1439,8 @@
                   el("span", { className: "outcome-role-title", text: "Governed Context Outcome" }),
                   el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
                 ),
-                el("p", { className: "outcome-kpi", text: govHeadline }),
-                el("p", { className: "outcome-detail", text: govDetail }),
+                el("p", { className: "outcome-kpi", text: rung.governed.answer_headline }),
+                el("p", { className: "outcome-detail", text: rung.governed.answer_detail }),
                 buildIdentitySwitchPanel(rung)
               )
             )
@@ -1520,7 +1519,7 @@
           el("div", { className: "modal-head" },
             el("div", null,
               el("span", { className: "badge badge-mono", text: `CDO Myth-Busting Poll · ${rung.short_label}` }),
-              el("h2", { className: "modal-title", id: "poll-modal-title", text: poll.prompt })
+              el("h2", { className: "modal-title", attrs: { id: "poll-modal-title" }, text: poll.prompt })
             ),
             el("button", {
               className: "btn",
@@ -1601,6 +1600,19 @@
       if (state.pollOpen) {
         return;
       }
+      if (e.code === "KeyW") {
+        e.preventDefault();
+        toggleMode();
+        return;
+      }
+      if (e.code === "KeyT") {
+        e.preventDefault();
+        toggleTheme();
+        return;
+      }
+      if (state.mode !== "stage") {
+        return;
+      }
       if (e.code === "Space" || e.code === "ArrowRight") {
         e.preventDefault();
         stepForward();
@@ -1614,16 +1626,6 @@
       if (e.code === "KeyB") {
         e.preventDefault();
         cycleBeatB();
-        return;
-      }
-      if (e.code === "KeyW") {
-        e.preventDefault();
-        toggleMode();
-        return;
-      }
-      if (e.code === "KeyT") {
-        e.preventDefault();
-        toggleTheme();
       }
     });
 

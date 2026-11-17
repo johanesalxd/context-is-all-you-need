@@ -726,6 +726,38 @@ button, input, select {
   color: var(--gov-fg);
 }
 
+.identity-outcome-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-subtle);
+  background: var(--gov-bg);
+}
+
+.identity-outcome-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.identity-outcome-kpi {
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: var(--gov-fg-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.identity-outcome-detail {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
 .identity-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

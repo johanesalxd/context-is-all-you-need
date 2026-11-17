@@ -127,6 +127,7 @@ def test_web_and_readme_enforce_official_naming_and_zero_trust_pct() -> None:
         assert re.search(r"\bdataplex\b", content, re.IGNORECASE) is None, (
             f"Deprecated product name found in {path}; use Knowledge Catalog."
         )
+        assert "Context Studio" not in content
         assert "rented commodities" not in content.lower()
         assert "Trust %" not in content
 
@@ -169,7 +170,9 @@ def test_app_js_keyboard_url_params_file_safety_and_dom_security() -> None:
     for marker in (
         "Beat 4b · Switch Identity",
         "Act IV Horizon",
+        "Act IV · Architectural Horizon",
         "CDO Myth-Busting Poll",
+        'attrs: { id: "poll-modal-title" }',
         "Reveal Answer",
         "Context Injected",
         "Compiled SQL / ISO GQL",
