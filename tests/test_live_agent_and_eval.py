@@ -1975,3 +1975,199 @@ def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> 
     assert large_res["total_matched"] == 1
     assert large_res["uncertified_omitted"] == 50
     assert get_table_calls == ["curated_orders"]
+
+
+def test_symmetric_turn_config_thinking_budget_and_tool_declarations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    from engine.context_retriever import BlindToolContext
+    from engine.live_agent import run_live_agent_arm
+
+    for k in (
+        "PROJECT_ID",
+        "DATASET_ID",
+        "BLIND_DATASET_ID",
+        "BQ_LOCATION",
+        "AGENT_MODEL_ID",
+        "AGENT_MODEL_LOCATION",
+    ):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("PROJECT_ID", "example-project-id")
+    monkeypatch.setenv("DATASET_ID", "synth_gov")
+    monkeypatch.setenv("BLIND_DATASET_ID", "synth_blind")
+    monkeypatch.setenv("BQ_LOCATION", "asia-southeast1")
+    monkeypatch.setenv("AGENT_MODEL_ID", "gemini-3.8-flash")
+    monkeypatch.setenv("AGENT_MODEL_LOCATION", "global")
+
+    packs_dir = tmp_path / "packs"
+    pack_dir = packs_dir / "synth_pack"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "context_layer.yaml").write_text(
+        yaml.safe_dump({"glossary": {"terms": []}, "verified_metric_contracts": {}}),
+        encoding="utf-8",
+    )
+
+    blind_bq = _FakeAgentBQClient(tables_by_dataset={"synth_blind": {"orders": {"table_type": "TABLE", "schema": []}}})
+    gov_bq = _FakeAgentBQClient(tables_by_dataset={"synth_gov": {"orders": {"table_type": "TABLE", "schema": []}}})
+    cat_client = DataplexCatalogRestClient(
+        project_id="example-project-id",
+        bq_location="asia-southeast1",
+        http_transport=lambda _m, _u, _p, _h: {"results": [], "aspects": {}},
+    )
+    blind_ctx = BlindToolContext(
+        project_id="example-project-id",
+        blind_dataset_id="synth_blind",
+        governed_dataset_id="synth_gov",
+        bq_location="asia-southeast1",
+        bq_client=blind_bq,
+        sa_email="blind@example-project-id.iam.gserviceaccount.com",
+    )
+    gov_ctx = GovernedToolContext(
+        project_id="example-project-id",
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=cat_client,
+    )
+
+    captured_configs: list[tuple[str, Any]] = []
+
+    class _FakeResp:
+        def __init__(self, text: str) -> None:
+            self.function_calls = []
+            self.text = text
+            self.candidates = []
+            self.usage_metadata = None
+
+    class _RecordingModels:
+        def __init__(self, arm_label: str) -> None:
+            self._arm_label = arm_label
+
+        def generate_content(self, *, model: str, contents: Any, config: Any) -> _FakeResp:
+            captured_configs.append((self._arm_label, config))
+            return _FakeResp(
+                'Summary complete.\n```json\n{"answer_summary": "ok", "numeric_value": 100, "unit": "USD"}\n```'
+            )
+
+    class _RecordingClient:
+        def __init__(self, arm_label: str) -> None:
+            self.models = _RecordingModels(arm_label)
+
+    rung = {
+        "rung_id": "r1_test",
+        "question": "What is the synthetic total?",
+        "region": "asia-southeast1",
+        "grading": {"target_value": 100.0, "tolerance": 0.01},
+    }
+
+    run_live_agent_arm(
+        pack_id="synth_pack",
+        rung=rung,
+        arm="blind",
+        repo_root=tmp_path,
+        packs_dir=packs_dir,
+        genai_client=_RecordingClient("blind"),
+        blind_tool_ctx=blind_ctx,
+    )
+    run_live_agent_arm(
+        pack_id="synth_pack",
+        rung=rung,
+        arm="governed",
+        repo_root=tmp_path,
+        packs_dir=packs_dir,
+        genai_client=_RecordingClient("governed"),
+        governed_tool_ctx=gov_ctx,
+    )
+
+    assert [arm for arm, _ in captured_configs] == ["blind", "governed"]
+    blind_cfg = captured_configs[0][1]
+    gov_cfg = captured_configs[1][1]
+    assert blind_cfg.temperature == 0.0
+    assert gov_cfg.temperature == 0.0
+    assert blind_cfg.thinking_config is not None
+    assert gov_cfg.thinking_config is not None
+    assert blind_cfg.thinking_config.thinking_budget == 256
+    assert gov_cfg.thinking_config.thinking_budget == 256
+
+    blind_sys = str(blind_cfg.system_instruction).replace("synth_blind", "<DATASET>")
+    gov_sys = str(gov_cfg.system_instruction).replace("synth_gov", "<DATASET>")
+    assert blind_sys == gov_sys
+    assert "do not run redundant follow-up queries" in gov_sys
+
+    gov_decls = {d.name: d for d in gov_cfg.tools[0].function_declarations}
+    assert "Business Glossary term definitions" in gov_decls["lookup_catalog_context"].description
+    contract_decl = gov_decls["get_verified_metric_contract"]
+    assert "at most once" in contract_decl.description
+    topic_desc = contract_decl.parameters.properties["topic"].description.lower()
+    assert "margin" not in topic_desc
+    assert "'metric'" not in topic_desc
+
+
+def test_get_verified_metric_contract_prevents_multi_contract_cross_match() -> None:
+    gov_bq = _FakeAgentBQClient(tables_by_dataset={"synth_gov": {"orders": {"table_type": "TABLE", "schema": []}}})
+    cat_client = DataplexCatalogRestClient(
+        project_id="p1",
+        bq_location="asia-southeast1",
+        http_transport=lambda _m, _u, _p, _h: {"results": [], "aspects": {}},
+    )
+    g_ctx = GovernedToolContext(
+        project_id="p1",
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=cat_client,
+        context_layer={
+            "glossary": {"terms": [{"term_id": "priority-tier", "display_name": "Priority Account"}]},
+            "verified_metric_contracts": {
+                "r3_metrics": {
+                    "metric_name": "Regional Contribution Ratio",
+                    "display_name": "Regional Orders Contribution Ratio",
+                    "description": "Computes contribution ratio without fan-out.",
+                    "governing_tables": ["orders", "order_items"],
+                },
+                "r5_graph": {
+                    "graph_name": "${PROJECT_ID}.${DATASET_ID}.synth_supply_graph",
+                    "display_name": "Synth Supply Chain Graph",
+                    "description": "Traces alpha-chain batch events across 4 hops.",
+                    "node_labels": ["SupplierBatch", "WidgetLot"],
+                    "edge_labels": ["SUPPLIED_IN_BATCH"],
+                },
+                "r6_contracts": {
+                    "metric_name": "Recoverable Carrier Credit",
+                    "display_name": "Quarterly Alpha-Chain Carrier Penalty Credit Overlay",
+                    "description": "Computes carrier penalty credit under amendment rules.",
+                    "governing_tables": ["contracts_obj", "penalties_overlay"],
+                },
+            },
+        },
+    )
+
+    # Ambiguous shared words ('alpha', 'chain') + stopwords ('gross', 'margin') must not cross-match r5_graph or r6_contracts
+    assert g_ctx.get_verified_metric_contract("alpha-chain gross margin")["matched_contracts"] == {}
+    assert g_ctx.get_verified_metric_contract("alpha-chain")["matched_contracts"] == {}
+    assert g_ctx.get_verified_metric_contract("chain")["matched_contracts"] == {}
+
+    # Contract-unique tokens resolve cleanly to the single right contract
+    assert list(g_ctx.get_verified_metric_contract("alpha-chain penalty credit")["matched_contracts"].keys()) == [
+        "r6_contracts"
+    ]
+    assert list(g_ctx.get_verified_metric_contract("carrier overlay")["matched_contracts"].keys()) == [
+        "r6_contracts"
+    ]
+    assert list(g_ctx.get_verified_metric_contract("supply chain")["matched_contracts"].keys()) == [
+        "r5_graph"
+    ]
+    assert list(g_ctx.get_verified_metric_contract("contribution ratio")["matched_contracts"].keys()) == [
+        "r3_metrics"
+    ]
+
