@@ -671,10 +671,44 @@ def test_capture_rungs_all_cli_modes_and_redaction(
     )
     assert bundle_sa_map["generated_mode"] == "live_gcp_verified"
 
-    # 6. Zero-flag --live-gcp (SQL_ROLE_SA_MAP_JSON unset): SESSION_USER matches user: grantee +
-    # policy serviceAccount grantee is impersonated via build_impersonated_credentials
+    # 6. Zero-flag --live-gcp (SQL_ROLE_SA_MAP_JSON unset): BigQuery REST GET rowAccessPolicies
+    # omits grantees, so list_active_row_access_policies fetches bindings via POST :getIamPolicy,
+    # SESSION_USER matches user: grantee, and SG SA is impersonated via build_impersonated_credentials.
     monkeypatch.delenv("SQL_ROLE_SA_MAP_JSON", raising=False)
-    zero_flag_client = _FakeBigQueryClient(session_user="global@example.com")
+
+    class _FakeRestPolicyBQClient(_FakeBigQueryClient):
+        def _call_api(self, *_args: Any, method: str = "GET", path: str = "", **_kwargs: Any) -> dict[str, Any]:
+            if path.endswith("/rowAccessPolicies") and method == "GET":
+                return {
+                    "rowAccessPolicies": [
+                        {
+                            "rowAccessPolicyReference": {"tableId": "gold_margin", "policyId": "rls_global_all"},
+                            "filterPredicate": "TRUE",
+                        },
+                        {
+                            "rowAccessPolicyReference": {"tableId": "gold_margin", "policyId": "rls_sg_only"},
+                            "filterPredicate": "country_code = 'SG'",
+                        },
+                    ]
+                }
+            if path.endswith("/rls_global_all:getIamPolicy") and method == "POST":
+                return {
+                    "bindings": [
+                        {"role": "roles/bigquery.filteredDataViewer", "members": ["user:global@example.com"]}
+                    ]
+                }
+            if path.endswith("/rls_sg_only:getIamPolicy") and method == "POST":
+                return {
+                    "bindings": [
+                        {
+                            "role": "roles/bigquery.filteredDataViewer",
+                            "members": [f"serviceAccount:{sa_sg}"],
+                        }
+                    ]
+                }
+            return {}
+
+    zero_flag_client = _FakeRestPolicyBQClient(session_user="global@example.com")
     bundle_zero_flag = capture_rungs(
         pack_id="synthetic_pack",
         mode="live_gcp",

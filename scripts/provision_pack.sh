@@ -215,6 +215,7 @@ PY
     policy_json="$(gcloud projects get-iam-policy "${PROJECT_ID}" --format=json 2>/dev/null || true)"
     if [[ -n "${policy_json}" ]]; then
       export _IAM_POLICY_JSON="${policy_json}"
+      export PROJECT_ID
       local picked_sa
       picked_sa="$(
         uv run --project "${REPO_ROOT}" python - <<'PY'
@@ -226,6 +227,7 @@ idx = raw.find("{")
 if idx < 0:
     sys.exit(0)
 policy = json.loads(raw[idx:])
+project_id = os.environ.get("PROJECT_ID", "").strip()
 cfo = os.environ.get("RLS_CFO_PRINCIPAL", "").strip().lower()
 
 job_roles = {"roles/bigquery.jobUser", "roles/bigquery.user", "roles/bigquery.admin"}
@@ -246,14 +248,55 @@ for binding in policy.get("bindings", []):
             if is_valid_customer_sa(email) and f"serviceaccount:{email.lower()}" != cfo:
                 sa_roles.setdefault(email, set()).add(role)
 
-candidates = [
-    (bool(roles & overbroad_roles), email)
+job_capable = [
+    (bool(roles & overbroad_roles), not bool(roles & data_roles), email, bool(roles & data_roles))
     for email, roles in sa_roles.items()
-    if (roles & job_roles) and (roles & data_roles)
+    if (roles & job_roles)
 ]
-candidates.sort()
-if candidates:
-    print(candidates[0][1])
+if not job_capable:
+    sys.exit(0)
+
+
+def can_impersonate(sa_email: str) -> bool:
+    if not project_id:
+        return False
+    try:
+        import google.auth
+        from google.auth.transport.requests import AuthorizedSession
+
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        session = AuthorizedSession(creds)
+        url = (
+            f"https://iam.googleapis.com/v1/projects/{project_id}"
+            f"/serviceAccounts/{sa_email}:testIamPermissions"
+        )
+        resp = session.post(
+            url,
+            json={"permissions": ["iam.serviceAccounts.getAccessToken"]},
+            timeout=2.0,
+        )
+        if resp.status_code == 200:
+            perms = resp.json().get("permissions") or []
+            return "iam.serviceAccounts.getAccessToken" in perms
+    except Exception:
+        pass
+    return False
+
+
+data_only = [email for _, _, email, has_data in job_capable if has_data]
+if len(job_capable) == 1 and len(data_only) == 1:
+    print(data_only[0])
+else:
+    scored = []
+    for overbroad, missing_proj_data, email, has_data in job_capable:
+        impersonatable = can_impersonate(email)
+        # Accept SAs with project-level data role, OR job-capable SAs explicitly grantable via TokenCreator
+        # (which may hold dataset-scoped BigQuery dataViewer/dataEditor bindings).
+        if has_data or impersonatable:
+            scored.append((not impersonatable, missing_proj_data, overbroad, email))
+    scored.sort()
+    if scored:
+        print(scored[0][3])
 PY
       )"
       unset _IAM_POLICY_JSON
