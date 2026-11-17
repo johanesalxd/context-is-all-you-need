@@ -888,14 +888,15 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
     assert "synth_commerce.shadow_auto_tbl_001" in fake_bq.deleted_tables
     assert "synth_commerce.shadow_auto_tbl_001" in fake_bq.created_tables
 
-    # Verify B1 REST payload shapes (EntryLink TARGET/SOURCE, assignments, translated DQ rules)
+    # Verify B1/M4 REST payload shapes (EntryLink SOURCE=BQ col / TARGET=term, assignments, DQ rules)
     entry_link_posts = [p for m, u, p in rest_calls if m == "POST" and "/entryLinks?" in u]
     assert len(entry_link_posts) == 1
     refs = entry_link_posts[0]["entryReferences"]  # type: ignore[index]
     by_type = {r["type"]: r for r in refs}
-    assert by_type["TARGET"]["path"] == "Schema.tier_code"
-    assert "/tables/customers" in by_type["TARGET"]["name"]
-    assert "/terms/premier" in by_type["SOURCE"]["name"]
+    assert by_type["SOURCE"]["path"] == "Schema.tier_code"
+    assert "/tables/customers" in by_type["SOURCE"]["name"]
+    assert f"projects/{synth_num}/locations/asia-southeast1/entryGroups/@dataplex/entries/projects/{synth_num}/" in by_type["TARGET"]["name"]
+    assert "/terms/premier" in by_type["TARGET"]["name"]
 
     aspect_patches = [(u, p) for m, u, p in rest_calls if m == "PATCH" and "/entries/" in u]
     aspect_urls = [u for u, _p in aspect_patches]
@@ -1162,6 +1163,24 @@ def test_grading_persona_targets_secondary_numerics_and_graph_signal() -> None:
     )
     assert failed_sg_leak is False
     assert "persona" in reason.lower()
+
+    # Unfiltered 4-row scan containing SG's 346480.0 MUST FAIL sg_coldchain RLS scope check
+    unfiltered_sg, unfiltered_reason = grade_agent_outcome(
+        r4_rung,
+        persona_id="sg_coldchain",
+        numeric_value=28.4,
+        rows_preview=[
+            {"country_code": "MY", "gross_margin_sgd": 210000.0},
+            {"country_code": "TH", "gross_margin_sgd": 180000.0},
+            {"country_code": "SG", "gross_margin_sgd": 346480.0},
+            {"country_code": "ID", "gross_margin_sgd": 106120.0},
+        ],
+        answer_summary="SG margin 28.4% and 346480.0 SGD",
+        sql_or_gql="SELECT country_code, gross_margin_sgd FROM ds.mart_r2",
+        referenced_tables=["ds.mart_r2"],
+    )
+    assert unfiltered_sg is False
+    assert "rls scope mismatch" in unfiltered_reason.lower()
 
     passed_sg, reason_sg = grade_agent_outcome(
         r4_rung,

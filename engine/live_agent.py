@@ -286,6 +286,12 @@ def _resolve_grading_spec(rung: Mapping[str, Any], persona_id: str | None) -> di
                 chosen_key = first_key
                 chosen = first_val
         if chosen is not None:
+            variants = rung.get("identity_variants")
+            rows_cap = chosen.get("row_count") if chosen.get("row_count") is not None else chosen.get("rows_visible")
+            if rows_cap is None and isinstance(variants, Mapping) and chosen_key in variants:
+                var_entry = variants[chosen_key]
+                if isinstance(var_entry, Mapping):
+                    rows_cap = var_entry.get("rows_visible")
             merged = dict(spec)
             if "target_value" in chosen:
                 merged.update(chosen)
@@ -300,6 +306,7 @@ def _resolve_grading_spec(rung: Mapping[str, Any], persona_id: str | None) -> di
                         "persona_id": chosen_key or "persona",
                         "value": chosen["value"],
                         "tolerance": chosen.get("tolerance", merged.get("tolerance", 0.01)),
+                        "rows_visible": rows_cap,
                     }
                 return merged
             merged.update(chosen)
@@ -362,6 +369,11 @@ def grade_agent_outcome(
     persona_tol_raw = _coerce_float(persona_target.get("tolerance")) if isinstance(persona_target, Mapping) else None
     persona_tol = persona_tol_raw if persona_tol_raw is not None else tolerance
     persona_name = str(persona_target.get("persona_id") or effective_persona) if isinstance(persona_target, Mapping) else effective_persona
+    persona_rows_cap = (
+        int(persona_target["rows_visible"])
+        if isinstance(persona_target, Mapping) and persona_target.get("rows_visible") is not None
+        else None
+    )
 
     observed_num = numeric_value
     if observed_num is None and rows_preview:
@@ -401,7 +413,29 @@ def grade_agent_outcome(
                 )
 
     if persona_val is not None:
-        if not any(_numbers_close(obs, persona_val, tolerance=persona_tol) for obs in answer_and_row_nums):
+        if persona_rows_cap is not None and rows_preview:
+            if len(rows_preview) > persona_rows_cap:
+                return (
+                    False,
+                    f"Persona RLS scope mismatch for {persona_name}: expected <= {persona_rows_cap} rows, got {len(rows_preview)}",
+                )
+            for row in rows_preview:
+                if not isinstance(row, Mapping):
+                    continue
+                for rv_key in ("rows_visible", "row_count"):
+                    if row.get(rv_key) is not None:
+                        rv_val = _coerce_float(row.get(rv_key))
+                        if rv_val is not None and rv_val > persona_rows_cap:
+                            return (
+                                False,
+                                f"Persona RLS scope mismatch for {persona_name}: {rv_key}={int(rv_val)} exceeds {persona_rows_cap}",
+                            )
+        persona_candidates = (
+            [*([observed_num] if observed_num is not None else []), *_extract_row_numerics(rows_preview)]
+            if rows_preview
+            else answer_and_row_nums
+        )
+        if not any(_numbers_close(obs, persona_val, tolerance=persona_tol) for obs in persona_candidates):
             return (
                 False,
                 f"Persona target mismatch for {persona_name}: expected {persona_val} (±{persona_tol})",

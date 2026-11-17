@@ -628,8 +628,8 @@ def _create_or_update_entry_link(
     primary_body = {
         "entryLinkType": link_type,
         "entryReferences": [
-            {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "TARGET"},
-            {"name": term_entry_name, "type": "SOURCE"},
+            {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "SOURCE"},
+            {"name": term_entry_name, "type": "TARGET"},
         ],
     }
     status, resp = rest.request("POST", url, payload=primary_body, allow_statuses=(200, 201, 400, 409))
@@ -637,8 +637,8 @@ def _create_or_update_entry_link(
         swapped_body = {
             "entryLinkType": link_type,
             "entryReferences": [
-                {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "SOURCE"},
-                {"name": term_entry_name, "type": "TARGET"},
+                {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "TARGET"},
+                {"name": term_entry_name, "type": "SOURCE"},
             ],
         }
         status2, resp2 = rest.request("POST", url, payload=swapped_body, allow_statuses=(200, 201, 409))
@@ -881,7 +881,7 @@ def run_provision(
                 linked_tbl = link_spec["table"]
                 linked_col = link_spec["column"]
                 term_entry = (
-                    f"projects/{project_id}/locations/{bq_location}/entryGroups/@dataplex/entries/"
+                    f"projects/{proj_num}/locations/{bq_location}/entryGroups/@dataplex/entries/"
                     f"projects/{proj_num}/locations/{bq_location}/glossaries/{g_id}/terms/{t_id}"
                 )
                 _poll_entry_exists(rest, project_id=project_id, bq_location=bq_location, entry_name=term_entry)
