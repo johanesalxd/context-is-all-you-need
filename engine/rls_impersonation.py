@@ -44,6 +44,9 @@ _USER_EMAIL_REDACTION_REGEX = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
 _PROJECT_NUMBER_PATH_REGEX = re.compile(r"(projects/)[0-9]{6,}\b")
+_HYPHENATED_NUMERIC_PROJECT_RE = re.compile(
+    r"^([a-z][a-z0-9]*(?:-[a-z0-9]+)+)-([0-9]{4,})$"
+)
 
 _REDACTED_SA = "redacted-sa@example-project-id.iam.gserviceaccount.com"
 _REDACTED_USER = "redacted-user@example.com"
@@ -418,8 +421,29 @@ def redact_sensitive_identifiers(
             if cleaned and cleaned != _PLACEHOLDER_PROJECT:
                 tokens_to_scrub.add(cleaned)
 
+    truncated_prefixes: list[tuple[str, str]] = []
+    project_digit_tokens: set[str] = set()
+    if env_pnum and env_pnum.isdigit() and len(env_pnum) >= 6:
+        project_digit_tokens.add(env_pnum)
+
     for token in sorted(tokens_to_scrub, key=len, reverse=True):
         result = result.replace(token, _PLACEHOLDER_PROJECT)
+        match = _HYPHENATED_NUMERIC_PROJECT_RE.match(token)
+        if match:
+            truncated_prefixes.append((match.group(1), match.group(2)))
+            project_digit_tokens.add(match.group(2))
+
+    for prefix, _digits in truncated_prefixes:
+        trunc_re = re.compile(
+            rf"\b{re.escape(prefix)}-[0-9]*(?=\.{{2,3}}|\u2026|$)"
+        )
+        result = trunc_re.sub(_PLACEHOLDER_PROJECT, result)
+
+    for digits in sorted(project_digit_tokens, key=len, reverse=True):
+        reason_re = re.compile(rf"\bunverified_headline_numeric:{re.escape(digits)}\b")
+        result = reason_re.sub(
+            f"unverified_headline_numeric:{_PLACEHOLDER_PROJECT}", result
+        )
 
     return result
 

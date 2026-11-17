@@ -10,6 +10,7 @@ import pytest
 
 from engine.leak_check import main as leak_main, scan_repo_for_leaks, scan_text_for_leaks
 from engine.pack_loader import DEFAULT_REPO_ROOT
+from engine.rls_impersonation import redact_sensitive_identifiers
 
 
 def test_repo_passes_zero_leak_scan() -> None:
@@ -135,3 +136,26 @@ def test_leak_check_cli_exits_zero_cleanly() -> None:
     )
     assert res.returncode == 0
     assert "RuntimeWarning" not in res.stderr
+
+
+def test_leak_check_flags_truncated_project_id_slices() -> None:
+    truncated = "acme-sandbox-" + "98..."
+    findings = scan_text_for_leaks(
+        f'Executed 1 row(s) via SELECT * FROM `{truncated}',
+        path_label="truncated_slice_probe.txt",
+    )
+    assert any(f.rule == "gcp_truncated_project_id" for f in findings)
+
+
+def test_redact_sensitive_identifiers_scrubs_truncated_prefix_and_trust_digits() -> None:
+    fake_proj = "acme-sandbox-" + "987654"
+    trunc_slice = "acme-sandbox-" + "98..."
+    raw = (
+        f"Executed 1 row(s) via SELECT margin FROM `{trunc_slice} "
+        f"| unverified_headline_numeric:" + "987654"
+    )
+    scrubbed = redact_sensitive_identifiers(raw, live_project_id=fake_proj)
+    assert trunc_slice not in scrubbed
+    assert "987654" not in scrubbed
+    assert "unverified_headline_numeric:example-project-id" in scrubbed
+    assert scan_text_for_leaks(scrubbed, path_label="scrubbed_probe.txt") == []

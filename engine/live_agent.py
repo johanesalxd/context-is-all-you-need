@@ -31,6 +31,7 @@ from engine.rls_impersonation import (
     is_valid_customer_sa,
     parse_role_sa_map,
     redact_bundle_data,
+    redact_sensitive_identifiers,
     resolve_agent_sa_map,
 )
 from engine.trust_classifier import TrustTier, classify_outcome, strip_sql_literals_and_comments
@@ -652,8 +653,48 @@ def _is_model_unavailable_error(err: Exception) -> bool:
     )
 
 
-def _format_args_summary(args: Mapping[str, Any]) -> str:
-    raw = json.dumps(dict(args), ensure_ascii=True)
+def _collect_scrub_tokens(value: Any, base_tokens: Sequence[str] = ()) -> list[str]:
+    tokens = [str(t) for t in base_tokens if t and str(t) != "example-project-id"]
+    try:
+        raw_dump = value if isinstance(value, str) else json.dumps(value, ensure_ascii=True)
+    except TypeError:
+        raw_dump = str(value)
+    tokens.extend(_PROJECT_NUM_IN_PATH_RE.findall(raw_dump))
+    return tokens
+
+
+def _scrub_for_output(
+    value: Any,
+    *,
+    live_project_id: str | None,
+    extra_tokens: Sequence[str] = (),
+) -> Any:
+    tokens = _collect_scrub_tokens(value, extra_tokens)
+    if isinstance(value, str):
+        return redact_sensitive_identifiers(
+            value,
+            extra_tokens=tokens,
+            live_project_id=live_project_id,
+        )
+    return redact_bundle_data(
+        value,
+        extra_tokens=tokens,
+        live_project_id=live_project_id,
+    )
+
+
+def _format_args_summary(
+    args: Mapping[str, Any],
+    *,
+    live_project_id: str | None = None,
+    extra_tokens: Sequence[str] = (),
+) -> str:
+    scrubbed_args = _scrub_for_output(
+        dict(args),
+        live_project_id=live_project_id,
+        extra_tokens=extra_tokens,
+    )
+    raw = json.dumps(scrubbed_args, ensure_ascii=True)
     return raw[:180] + ("..." if len(raw) > 180 else "")
 
 
@@ -850,6 +891,17 @@ def run_live_agent_arm(
         target_dataset = tool_ctx.dataset_id
         declarations = _build_governed_declarations()
 
+    scrub_pid = (
+        tool_ctx.project_id
+        if tool_ctx.project_id and tool_ctx.project_id != "example-project-id"
+        else project_id
+    )
+    base_scrub_tokens: list[str] = [
+        tok
+        for tok in (tool_ctx.project_id, project_id, os.environ.get("PROJECT_NUMBER", ""))
+        if tok and tok != "example-project-id"
+    ]
+
     from google import genai
     from google.genai import types
 
@@ -967,13 +1019,24 @@ def run_live_agent_arm(
                 status = "timeout"
                 error_retries += 1
                 result_payload = {"error": f"Execution budget ({timeout_s:.0f}s) exhausted before tool {fn_name}."}
+                safe_timeout_payload = _scrub_for_output(
+                    result_payload,
+                    live_project_id=scrub_pid,
+                    extra_tokens=base_scrub_tokens,
+                )
+                timeout_preview_raw = json.dumps(safe_timeout_payload, ensure_ascii=True)
                 tool_trace.append(
                     {
                         "turn": turn_idx,
                         "tool_name": fn_name,
-                        "args_summary": _format_args_summary(raw_args),
+                        "args_summary": _format_args_summary(
+                            raw_args,
+                            live_project_id=scrub_pid,
+                            extra_tokens=base_scrub_tokens,
+                        ),
                         "status": status,
-                        "output_preview": json.dumps(result_payload, ensure_ascii=True),
+                        "output_preview": timeout_preview_raw[:240]
+                        + ("..." if len(timeout_preview_raw) > 240 else ""),
                     }
                 )
                 response_parts.append(
@@ -1003,26 +1066,49 @@ def run_live_agent_arm(
                     if fn_name == "search_certified_tables":
                         exploratory_queries += 1
                         result_payload = tool_ctx.search_certified_tables(str(raw_args.get("search_term") or "*"))
-                        catalog_snippets.append(
+                        raw_snippet = (
                             f"search_certified_tables({raw_args.get('search_term')}): "
                             + ", ".join(
                                 f"{t['table_name']}[{t['certification_status']}]"
                                 for t in (result_payload.get("tables") or [])[:5]
                             )
                         )
+                        catalog_snippets.append(
+                            _scrub_for_output(
+                                raw_snippet,
+                                live_project_id=scrub_pid,
+                                extra_tokens=base_scrub_tokens,
+                            )
+                        )
                     elif fn_name == "lookup_catalog_context":
                         exploratory_queries += 1
                         result_payload = tool_ctx.lookup_catalog_context(raw_args.get("table_names") or [])
+                        safe_lookup_args = _scrub_for_output(
+                            raw_args.get("table_names"),
+                            live_project_id=scrub_pid,
+                            extra_tokens=base_scrub_tokens,
+                        )
+                        safe_lookup_ctx = _scrub_for_output(
+                            str(result_payload.get("lookup_context") or ""),
+                            live_project_id=scrub_pid,
+                            extra_tokens=base_scrub_tokens,
+                        )
                         catalog_snippets.append(
-                            f"lookup_catalog_context({raw_args.get('table_names')}): "
-                            + str(result_payload.get("lookup_context") or "")[:240]
+                            f"lookup_catalog_context({safe_lookup_args}): {safe_lookup_ctx[:240]}"
                         )
                     elif fn_name == "get_verified_metric_contract":
                         exploratory_queries += 1
                         result_payload = tool_ctx.get_verified_metric_contract(str(raw_args.get("topic") or ""))
-                        catalog_snippets.append(
+                        raw_snippet = (
                             f"get_verified_metric_contract({raw_args.get('topic')}): "
                             + ",".join(sorted((result_payload.get("matched_contracts") or {}).keys()))
+                        )
+                        catalog_snippets.append(
+                            _scrub_for_output(
+                                raw_snippet,
+                                live_project_id=scrub_pid,
+                                extra_tokens=base_scrub_tokens,
+                            )
                         )
                     elif fn_name == "execute_select_sql":
                         last_sql = str(raw_args.get("sql") or "")
@@ -1046,12 +1132,21 @@ def run_live_agent_arm(
                 error_retries += 1
                 result_payload = {"error": str(tool_err)}
 
-            preview_raw = json.dumps(result_payload, ensure_ascii=True)
+            safe_payload = _scrub_for_output(
+                result_payload,
+                live_project_id=scrub_pid,
+                extra_tokens=base_scrub_tokens,
+            )
+            preview_raw = json.dumps(safe_payload, ensure_ascii=True)
             tool_trace.append(
                 {
                     "turn": turn_idx,
                     "tool_name": fn_name,
-                    "args_summary": _format_args_summary(raw_args),
+                    "args_summary": _format_args_summary(
+                        raw_args,
+                        live_project_id=scrub_pid,
+                        extra_tokens=base_scrub_tokens,
+                    ),
                     "status": status,
                     "output_preview": preview_raw[:240] + ("..." if len(preview_raw) > 240 else ""),
                 }
@@ -1071,42 +1166,71 @@ def run_live_agent_arm(
         if not final_text:
             final_text = str(getattr(response, "text", "") or "").strip() if "response" in locals() else ""
 
-    answer_summary, numeric_value, _unit = _parse_final_agent_json(final_text)
-    if numeric_value is None and last_rows:
-        numeric_value = _extract_scalar_from_rows(last_rows)
+    safe_last_sql = _scrub_for_output(
+        last_sql,
+        live_project_id=scrub_pid,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_last_refs = _scrub_for_output(
+        last_refs,
+        live_project_id=scrub_pid,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_rows_preview = _scrub_for_output(
+        last_rows[:20],
+        live_project_id=scrub_pid,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_question = _scrub_for_output(
+        question,
+        live_project_id=scrub_pid,
+        extra_tokens=base_scrub_tokens,
+    )
+    raw_answer_summary, numeric_value, _unit = _parse_final_agent_json(final_text)
+    if numeric_value is None and safe_rows_preview:
+        numeric_value = _extract_scalar_from_rows(safe_rows_preview)
+    answer_summary = _scrub_for_output(
+        raw_answer_summary,
+        live_project_id=scrub_pid,
+        extra_tokens=base_scrub_tokens,
+    )
     if not answer_summary:
         answer_summary = (
-            f"Executed {len(last_rows)} row(s) via {last_sql[:80]}..."
-            if last_sql
+            f"Executed {len(safe_rows_preview)} row(s) via {safe_last_sql[:80]}..."
+            if safe_last_sql
             else "No final response returned."
         )
 
-    catalog_context_summary = " | ".join(catalog_snippets)[:1000]
+    catalog_context_summary = _scrub_for_output(
+        " | ".join(catalog_snippets),
+        live_project_id=scrub_pid,
+        extra_tokens=base_scrub_tokens,
+    )[:1000]
     observed_signals = extract_observed_signals(
         tool_trace=tool_trace,
-        sql_or_gql=last_sql,
-        referenced_tables=last_refs,
+        sql_or_gql=safe_last_sql,
+        referenced_tables=safe_last_refs,
         catalog_context_summary=catalog_context_summary,
         has_persona_isolation=has_persona_isolation,
     )
-    query_lang = _detect_query_language(last_sql)
+    query_lang = _detect_query_language(safe_last_sql)
     passed_grading, grading_reason = grade_agent_outcome(
         rung,
         answer_summary=answer_summary,
         numeric_value=numeric_value,
-        sql_or_gql=last_sql,
-        rows_preview=last_rows[:20],
-        referenced_tables=last_refs,
+        sql_or_gql=safe_last_sql,
+        rows_preview=safe_rows_preview,
+        referenced_tables=safe_last_refs,
         persona_id=resolved_persona,
     )
     trust_tier, trust_reasons = _finalize_trust_classification(
         arm=arm,
-        sql_or_gql=last_sql,
+        sql_or_gql=safe_last_sql,
         query_language=query_lang,
         answer_summary=answer_summary,
-        question=question,
+        question=safe_question,
         numeric_value=numeric_value,
-        rows_preview=last_rows[:20],
+        rows_preview=safe_rows_preview,
         observed_signals=observed_signals,
         catalog_context_summary=catalog_context_summary,
         error_retries=error_retries,
@@ -1120,7 +1244,7 @@ def run_live_agent_arm(
         numeric_value=numeric_value,
         passed_grading=passed_grading,
         grading_reason=grading_reason,
-        sql_or_gql=last_sql,
+        sql_or_gql=safe_last_sql,
         query_language=query_lang,
         trust_tier=trust_tier,
         trust_reasons=trust_reasons,
@@ -1131,14 +1255,13 @@ def run_live_agent_arm(
         exploratory_queries=exploratory_queries,
         error_retries=error_retries,
         latency_ms=latency_ms,
-        rows_preview=last_rows[:20],
+        rows_preview=safe_rows_preview,
         model_id=active_model,
         model_location=model_location,
         persona_id=resolved_persona,
     )
-    scrub_pid = tool_ctx.project_id if tool_ctx.project_id and tool_ctx.project_id != "example-project-id" else project_id
     raw_dump = json.dumps(raw_result.to_dict(), ensure_ascii=True)
-    extra_toks = [tool_ctx.project_id, project_id, os.environ.get("PROJECT_NUMBER", "")]
+    extra_toks = list(base_scrub_tokens)
     extra_toks.extend(_PROJECT_NUM_IN_PATH_RE.findall(raw_dump))
     redacted_dict = redact_bundle_data(
         raw_result.to_dict(),
@@ -1175,6 +1298,11 @@ def run_offline_mock_arm(
     root = repo_root or DEFAULT_REPO_ROOT
     settings = resolve_phase2_settings(root, pack_id=pack_id)
     project_id = settings["PROJECT_ID"]
+    base_scrub_tokens = [
+        tok
+        for tok in (project_id, os.environ.get("PROJECT_NUMBER", ""))
+        if tok and tok != "example-project-id"
+    ]
     model_id = settings["AGENT_MODEL_ID"]
     model_location = settings["AGENT_MODEL_LOCATION"]
     resolved_persona = _resolve_persona_id(rung, persona_id)
@@ -1211,6 +1339,37 @@ def run_offline_mock_arm(
     payload = str(arm_data.get("context_payload") or "")
     cost = dict(arm_data.get("cost") or {})
 
+    safe_sql_or_gql = _scrub_for_output(
+        sql_or_gql,
+        live_project_id=project_id,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_rows_preview = _scrub_for_output(
+        rows_preview,
+        live_project_id=project_id,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_answer_summary = _scrub_for_output(
+        answer_summary,
+        live_project_id=project_id,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_mechanism = _scrub_for_output(
+        mechanism,
+        live_project_id=project_id,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_payload = _scrub_for_output(
+        payload,
+        live_project_id=project_id,
+        extra_tokens=base_scrub_tokens,
+    )
+    safe_question = _scrub_for_output(
+        str(rung.get("question") or ""),
+        live_project_id=project_id,
+        extra_tokens=base_scrub_tokens,
+    )
+
     if arm == "blind":
         tool_trace = [
             {
@@ -1223,9 +1382,13 @@ def run_offline_mock_arm(
             {
                 "turn": 2,
                 "tool_name": "execute_select_sql",
-                "args_summary": _format_args_summary({"sql": sql_or_gql}),
+                "args_summary": _format_args_summary(
+                    {"sql": safe_sql_or_gql},
+                    live_project_id=project_id,
+                    extra_tokens=base_scrub_tokens,
+                ),
                 "status": "ok",
-                "output_preview": json.dumps({"row_count": len(rows_preview)}, ensure_ascii=True),
+                "output_preview": json.dumps({"row_count": len(safe_rows_preview)}, ensure_ascii=True),
             },
         ]
     else:
@@ -1247,12 +1410,16 @@ def run_offline_mock_arm(
             {
                 "turn": 2,
                 "tool_name": "execute_select_sql",
-                "args_summary": _format_args_summary({"sql": sql_or_gql}),
+                "args_summary": _format_args_summary(
+                    {"sql": safe_sql_or_gql},
+                    live_project_id=project_id,
+                    extra_tokens=base_scrub_tokens,
+                ),
                 "status": "ok",
-                "output_preview": json.dumps({"row_count": len(rows_preview)}, ensure_ascii=True),
+                "output_preview": json.dumps({"row_count": len(safe_rows_preview)}, ensure_ascii=True),
             },
         ]
-        if any(tok in mechanism.lower() for tok in ("contract", "measure", "graph", "metric", "semantic")):
+        if any(tok in safe_mechanism.lower() for tok in ("contract", "measure", "graph", "metric", "semantic")):
             tool_trace.insert(
                 2,
                 {
@@ -1266,26 +1433,26 @@ def run_offline_mock_arm(
 
     observed_signals = extract_observed_signals(
         tool_trace=tool_trace,
-        sql_or_gql=sql_or_gql,
+        sql_or_gql=safe_sql_or_gql,
         referenced_tables=[],
-        catalog_context_summary=f"{mechanism} | {payload}",
-        has_persona_isolation=("rls" in mechanism.lower() or "row access" in mechanism.lower()),
+        catalog_context_summary=f"{safe_mechanism} | {safe_payload}",
+        has_persona_isolation=("rls" in safe_mechanism.lower() or "row access" in safe_mechanism.lower()),
     )
 
     if rung.get("grading"):
         passed_grading, grading_reason = grade_agent_outcome(
             rung,
-            answer_summary=answer_summary,
+            answer_summary=safe_answer_summary,
             numeric_value=numeric_value,
-            sql_or_gql=sql_or_gql,
-            rows_preview=rows_preview,
+            sql_or_gql=safe_sql_or_gql,
+            rows_preview=safe_rows_preview,
             persona_id=resolved_persona,
         )
     else:
         passed_grading = arm == "governed"
         grading_reason = "No grading block in rung; inferred from arm."
 
-    query_lang = str(arm_data.get("query_language") or _detect_query_language(sql_or_gql))
+    query_lang = str(arm_data.get("query_language") or _detect_query_language(safe_sql_or_gql))
     error_retries = int(
         arm_data["error_retries"]
         if arm_data.get("error_retries") is not None
@@ -1312,43 +1479,43 @@ def run_offline_mock_arm(
     )
     trust_tier, trust_reasons = _finalize_trust_classification(
         arm=arm,
-        sql_or_gql=sql_or_gql,
+        sql_or_gql=safe_sql_or_gql,
         query_language=query_lang,
-        answer_summary=answer_summary,
-        question=str(rung.get("question") or ""),
+        answer_summary=safe_answer_summary,
+        question=safe_question,
         numeric_value=numeric_value,
-        rows_preview=rows_preview,
+        rows_preview=safe_rows_preview,
         observed_signals=observed_signals,
-        catalog_context_summary=payload,
+        catalog_context_summary=safe_payload,
         error_retries=error_retries,
         passed_grading=passed_grading,
     )
 
     raw_result = AgentRunResult(
         arm=arm,
-        answer_summary=answer_summary,
+        answer_summary=safe_answer_summary,
         numeric_value=numeric_value,
         passed_grading=passed_grading,
         grading_reason=grading_reason,
-        sql_or_gql=sql_or_gql,
+        sql_or_gql=safe_sql_or_gql,
         query_language=query_lang,
         trust_tier=trust_tier,
         trust_reasons=trust_reasons,
         observed_signals=observed_signals,
         tool_trace=tool_trace,
-        catalog_context_summary=payload[:500] if arm == "governed" else "",
+        catalog_context_summary=safe_payload[:500] if arm == "governed" else "",
         tokens_used=tokens_used,
         exploratory_queries=exploratory_queries,
         error_retries=error_retries,
         latency_ms=latency_ms,
-        rows_preview=rows_preview,
+        rows_preview=safe_rows_preview,
         model_id=model_id,
         model_location=model_location,
         persona_id=resolved_persona,
     )
     redacted_dict = redact_bundle_data(
         raw_result.to_dict(),
-        extra_tokens=[os.environ.get("PROJECT_NUMBER", "")],
+        extra_tokens=base_scrub_tokens,
         live_project_id=project_id,
     )
     return AgentRunResult(**redacted_dict)
