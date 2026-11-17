@@ -961,6 +961,7 @@ def test_shell_scripts_syntax_permissions_and_teardown_guards(tmp_path: Path) ->
     }
     gcloud_stub.write_text(
         "#!/usr/bin/env bash\n"
+        'if [[ -n "${GCLOUD_LOG:-}" ]]; then echo "$*" >> "${GCLOUD_LOG}"; fi\n'
         'if [[ "$*" == *"auth list"* ]]; then\n'
         '  echo "Created enterprise-certificate-proxy configuration file [tmp]."\n'
         '  echo "runner@example.com"\n'
@@ -1032,21 +1033,45 @@ def test_shell_scripts_syntax_permissions_and_teardown_guards(tmp_path: Path) ->
     assert ok_zero_flag.returncode == 88, ok_zero_flag.stderr
     assert f"PROVISION_PRINCIPALS=user:runner@example.com|serviceAccount:{valid_sa}" in ok_zero_flag.stdout
 
-    # 4) --provision-rls-sas creates both sandbox persona SAs when opted in
+    # 4) --provision-rls-sas creates dedicated least-privilege sandbox SAs with project jobUser
+    # + SA-level TokenCreator (never project-wide dataViewer and never touching valid_sa)
+    gcloud_log = tmp_path / "gcloud_calls.log"
+    opt_in_env = dict(empty_env, GCLOUD_LOG=str(gcloud_log))
     ok_opt_in = subprocess.run(
         ["bash", str(provision_path), "--pack", "sentinel_pack", "--provision-rls-sas"],
-        env=empty_env,
+        env=opt_in_env,
         capture_output=True,
         text=True,
         check=False,
     )
     assert ok_opt_in.returncode == 88, ok_opt_in.stderr
-    expected_cfo_sa = "rls-cfo-regional@" + "sandbox-demo-42" + ".iam." + sa_suffix
-    expected_sg_sa = "sg-coldchain@" + "sandbox-demo-42" + ".iam." + sa_suffix
+    expected_sg_sa = "meridian-sg-coldchain@" + "sandbox-demo-42" + ".iam." + sa_suffix
+    expected_denied_sa = "meridian-denied-probe@" + "sandbox-demo-42" + ".iam." + sa_suffix
     assert (
-        f"PROVISION_PRINCIPALS=serviceAccount:{expected_cfo_sa}"
-        f"|serviceAccount:{expected_sg_sa}"
+        f"PROVISION_PRINCIPALS=user:runner@example.com|serviceAccount:{expected_sg_sa}"
     ) in ok_opt_in.stdout
+    log_text = gcloud_log.read_text(encoding="utf-8")
+    assert "iam service-accounts create meridian-sg-coldchain" in log_text
+    assert "iam service-accounts create meridian-denied-probe" in log_text
+    assert f"--member=serviceAccount:{expected_sg_sa} --role=roles/bigquery.jobUser" in log_text
+    assert f"--member=serviceAccount:{expected_denied_sa} --role=roles/bigquery.jobUser" in log_text
+    assert "roles/bigquery.dataViewer" not in log_text
+    assert valid_sa not in log_text
+    assert "iam service-accounts add-iam-policy-binding " + expected_sg_sa in log_text
+    assert "iam service-accounts add-iam-policy-binding " + expected_denied_sa in log_text
+    assert "--role=roles/iam.serviceAccountTokenCreator" in log_text
+
+    # 5) teardown_pack.sh --dry-run --delete-rls-sas surfaces dedicated SA cleanup
+    td_sas = subprocess.run(
+        ["bash", str(teardown_path), "--dry-run", "--delete-rls-sas"],
+        env=env_ok,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert td_sas.returncode == 0
+    assert "meridian-sg-coldchain" in td_sas.stdout
+    assert "meridian-denied-probe" in td_sas.stdout
 
     # Ensure CLI module executes cleanly
     help_res = subprocess.run(
