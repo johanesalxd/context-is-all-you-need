@@ -156,6 +156,11 @@ if gcloud iam service-accounts describe "${SG_RLS_SA_EMAIL}" --project="${PROJEC
 fi
 
 export PROJECT_ID DATASET_ID BQ_LOCATION RUNNER_SA_EMAIL
+bq add-iam-policy-binding \
+  --member="serviceAccount:${RUNNER_SA_EMAIL}" \
+  --role="roles/bigquery.dataOwner" \
+  "${PROJECT_ID}:${DATASET_ID}.cold_chain_margin_gold" >/dev/null
+
 uv run --project "${REPO_ROOT}" python - <<'PY'
 import os
 from google.cloud import bigquery
@@ -191,7 +196,7 @@ FILTER USING (TRUE)
 client.query(rls_sql, location=bq_location).result()
 PY
 
-ROLE_SA_MAP_JSON="{\"cfo_regional\":\"${RUNNER_SA_EMAIL}\",\"sg_coldchain\":\"${SG_RLS_SA_EMAIL}\"}"
+ROLE_SA_MAP_JSON="{\"sg_coldchain\":\"${SG_RLS_SA_EMAIL}\"}"
 ENV_FILE_TMP="$(mktemp)"
 trap 'rm -f "${ENV_FILE_TMP}"' EXIT
 cat > "${ENV_FILE_TMP}" <<EOF
