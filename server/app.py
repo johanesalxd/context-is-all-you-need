@@ -8,7 +8,9 @@ HTTP HMAC assertion headers (external multi-tenant gateways can wire
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Mapping
+import hmac
 import os
 from pathlib import Path
 import re
@@ -90,6 +92,40 @@ def create_app(
             content={"detail": "Invalid request payload", "errors": safe_errors},
         )
 
+    rate_buckets: dict[str, deque[float]] = {}
+
+    def _resolve_share_token() -> str:
+        resolve_env_settings(DEFAULT_REPO_ROOT, env_file=env_file)
+        return os.environ.get("DEMO_SHARE_TOKEN", "").strip()
+
+    def _enforce_access_and_rate_limit(http_req: Request) -> None:
+        expected_token = _resolve_share_token()
+        if expected_token:
+            supplied = (
+                http_req.headers.get("x-demo-key", "").strip()
+                or http_req.query_params.get("key", "").strip()
+            )
+            if not supplied or not hmac.compare_digest(supplied, expected_token):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Valid demo share key required (open via shared ?key=... link).",
+                )
+
+        rpm_limit = int(os.environ.get("RUN_RUNG_RPM_LIMIT", "30"))
+        if rpm_limit > 0:
+            now_ts = time.monotonic()
+            forwarded = http_req.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            client_ip = forwarded or (http_req.client.host if http_req.client else "local")
+            bucket = rate_buckets.setdefault(client_ip, deque())
+            while bucket and (now_ts - bucket[0]) > 60.0:
+                bucket.popleft()
+            if len(bucket) >= rpm_limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded ({rpm_limit} live queries per minute).",
+                )
+            bucket.append(now_ts)
+
     @application.get("/api/health")
     def health() -> dict[str, Any]:
         settings = resolve_env_settings(DEFAULT_REPO_ROOT, env_file=env_file)
@@ -101,10 +137,12 @@ def create_app(
                 (live_pid and live_pid != _PLACEHOLDER_PROJECT) or bq_client is not None
             ),
             "bq_location": settings["BQ_LOCATION"],
+            "share_token_required": bool(_resolve_share_token()),
         }
 
     @application.post("/api/run-rung")
-    def run_rung(req: RunRungRequest) -> dict[str, Any]:
+    def run_rung(req: RunRungRequest, http_req: Request) -> dict[str, Any]:
+        _enforce_access_and_rate_limit(http_req)
         started = time.perf_counter()
         if not _ID_SLUG_REGEX.match(req.pack_id):
             raise HTTPException(status_code=400, detail="Invalid pack_id format")

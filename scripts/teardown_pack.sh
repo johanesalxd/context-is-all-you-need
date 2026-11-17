@@ -51,6 +51,8 @@ BQ_LOCATION="${BQ_LOCATION:-asia-southeast1}"
 DRY_RUN=0
 CONFIRM_YES=0
 DELETE_RLS_SAS=0
+DELETE_CLOUD_RUN=0
+SERVICE_NAME="${SERVICE_NAME:-context-is-all-you-need}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -66,8 +68,12 @@ while [[ $# -gt 0 ]]; do
       DELETE_RLS_SAS=1
       shift
       ;;
+    --delete-cloud-run)
+      DELETE_CLOUD_RUN=1
+      shift
+      ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--yes] [--delete-rls-sas]"
+      echo "Usage: $0 [--dry-run] [--yes] [--delete-rls-sas] [--delete-cloud-run]"
       exit 0
       ;;
     *)
@@ -88,6 +94,9 @@ fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "[DRY-RUN] Would delete BigQuery dataset ${PROJECT_ID}.${DATASET_ID} (location=${BQ_LOCATION}) and all its contents."
+  if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
+    echo "[DRY-RUN] Would delete Cloud Run service ${SERVICE_NAME} (${BQ_LOCATION}) and meridian-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+  fi
   if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
     echo "[DRY-RUN] Would remove project jobUser bindings and delete dedicated RLS SAs: meridian-sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com, meridian-denied-probe@${PROJECT_ID}.iam.gserviceaccount.com"
   fi
@@ -126,4 +135,18 @@ if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
       echo "Deleted dedicated RLS sandbox SA: ${sa_email}"
     fi
   done
+fi
+
+if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
+  gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${BQ_LOCATION}" --quiet >/dev/null 2>&1 || true
+  runner_sa="meridian-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+  gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${runner_sa}" \
+    --role="roles/bigquery.jobUser" \
+    --all \
+    --quiet >/dev/null 2>&1 || true
+  if gcloud iam service-accounts describe "${runner_sa}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud iam service-accounts delete "${runner_sa}" --project="${PROJECT_ID}" --quiet >/dev/null
+    echo "Deleted Cloud Run runtime SA: ${runner_sa}"
+  fi
 fi

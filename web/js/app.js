@@ -327,6 +327,14 @@
     }
 
     const params = new URLSearchParams(window.location.search);
+    const urlDemoKey = params.get("key");
+    if (urlDemoKey) {
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem("context_demo_key", urlDemoKey);
+        }
+      } catch (_e) {}
+    }
     const initMode = VALID_MODES.has(params.get("mode")) ? params.get("mode") : "stage";
     const initTheme = VALID_THEMES.has(params.get("theme")) ? params.get("theme") : "paper";
     const initBeat = VALID_BEATS.has(params.get("beat")) ? params.get("beat") : "compare";
@@ -530,9 +538,16 @@
       }
 
       try {
+        const reqHeaders = { "Content-Type": "application/json" };
+        try {
+          const savedKey = window.sessionStorage && window.sessionStorage.getItem("context_demo_key");
+          if (savedKey) {
+            reqHeaders["X-Demo-Key"] = savedKey;
+          }
+        } catch (_e) {}
         const response = await fetch("/api/run-rung", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: reqHeaders,
           body: JSON.stringify(payload)
         });
         const elapsedMs = Math.round(performance.now() - startedAt);
@@ -900,6 +915,22 @@
               attrs: { type: "button", title: "Cycle Beat Focus (Key B)", disabled: state.isHorizon ? true : null },
               onClick: () => cycleBeatB()
             }, "Focus ", el("span", { className: "kbd-hint", text: "B" })),
+            window.location.protocol !== "file:" && !state.isHorizon
+              ? el("button", {
+                  className: "btn btn-primary",
+                  text: state.liveLoading ? "Running..." : "▶ Verify Live BQ",
+                  attrs: {
+                    type: "button",
+                    disabled: state.liveLoading ? true : null,
+                    title: "Execute live BigQuery / Property Graph / RLS query via /api/run-rung"
+                  },
+                  onClick: () => {
+                    const targetMode = state.beat === "blind" ? "blind" : "governed";
+                    state.liveTargetMode = targetMode;
+                    handleRunLiveQuery();
+                  }
+                })
+              : null,
             tokenRetryPill
           )
         )
@@ -1025,7 +1056,21 @@
         }
       }
 
-      const canvas = el("main", { className: "stage-canvas" }, canvasChildren);
+      const stageLiveBanner = state.liveResult
+        ? el("div", {
+            className: `live-result-banner is-${state.liveResult.kind}`,
+            attrs: { role: "status", "aria-live": "polite" }
+          },
+            el("span", { text: state.liveResult.message }),
+            el("button", {
+              className: "btn",
+              text: "Dismiss",
+              attrs: { type: "button" },
+              onClick: () => setState({ liveResult: null })
+            })
+          )
+        : null;
+      const canvas = el("main", { className: "stage-canvas" }, stageLiveBanner, canvasChildren);
 
       // Bottom 10% Eval & Trust Bar
       const evalDots = el("span", { className: "eval-dots", attrs: { "aria-hidden": "true" } });

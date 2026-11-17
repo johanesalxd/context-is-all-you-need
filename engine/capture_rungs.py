@@ -426,11 +426,19 @@ def _execute_query_rows(
 ) -> list[dict[str, Any]]:
     from google.cloud import bigquery
 
-    job_config = bigquery.QueryJobConfig(
-        dry_run=dry_run,
-        use_query_cache=False,
-        default_dataset=f"{project_id}.{dataset_id}",
-    )
+    max_bytes = int(os.environ.get("BQ_MAX_BYTES_BILLED", str(100 * 1024 * 1024)))
+    config_kwargs: dict[str, Any] = {
+        "dry_run": dry_run,
+        "use_query_cache": False,
+        "default_dataset": f"{project_id}.{dataset_id}",
+    }
+    if not dry_run and max_bytes > 0:
+        config_kwargs["maximum_bytes_billed"] = max_bytes
+    try:
+        job_config = bigquery.QueryJobConfig(**config_kwargs)
+    except TypeError:
+        config_kwargs.pop("maximum_bytes_billed", None)
+        job_config = bigquery.QueryJobConfig(**config_kwargs)
     job = client.query(sql, job_config=job_config, location=location)
     if dry_run:
         return []
