@@ -17,6 +17,20 @@ def test_demo_share_token_blocks_unauthorized_and_accepts_header_or_query(
 ) -> None:
     monkeypatch.setenv("DEMO_SHARE_TOKEN", "secret-stage-token-123")
     monkeypatch.setenv("PROJECT_ID", "example-project-id")
+    # By default REQUIRE_TOKEN_FOR_RUN_RUNG is false (zero-prompt Stage demo),
+    # while live agent token gating defaults to true.
+    monkeypatch.delenv("REQUIRE_TOKEN_FOR_RUN_RUNG", raising=False)
+    default_app = create_app(env_file=tmp_path / "nonexistent.env")
+    default_client = TestClient(default_app)
+    default_health = default_client.get("/api/health").json()
+    assert default_health["share_token_required"] is False
+    assert default_health["live_agent_enabled"] is True
+    assert default_health["live_agent_token_required"] is True
+    assert default_health["agent_model_id"] == "gemini-3.8-flash"
+    assert default_health["agent_model_location"] == "global"
+
+    # When REQUIRE_TOKEN_FOR_RUN_RUNG=true, /api/run-rung enforces DEMO_SHARE_TOKEN
+    monkeypatch.setenv("REQUIRE_TOKEN_FOR_RUN_RUNG", "true")
     app = create_app(env_file=tmp_path / "nonexistent.env")
     client = TestClient(app)
 
@@ -68,12 +82,14 @@ def test_rate_limiter_enforces_rpm_ceiling(tmp_path: Path, monkeypatch) -> None:
     for _ in range(2):
         res = client.post(
             "/api/run-rung",
+            headers={"X-Forwarded-For": "10.0.0.5, 203.0.113.10"},
             json={"pack_id": "meridian_q3_sgd", "rung_id": "r1_schema", "mode": "governed"},
         )
         assert res.status_code == 200
 
     throttled = client.post(
         "/api/run-rung",
+        headers={"X-Forwarded-For": "192.0.2.99, 203.0.113.10"},
         json={"pack_id": "meridian_q3_sgd", "rung_id": "r1_schema", "mode": "governed"},
     )
     assert throttled.status_code == 429
@@ -91,6 +107,11 @@ def test_deploy_and_teardown_cloud_run_dry_run_flags() -> None:
     assert res.returncode == 0, res.stderr
     assert "[DRY-RUN] Cloud Run foundation deployment plan:" in res.stdout
     assert "meridian-web-runner@" in res.stdout
+    assert "meridian-blind-agent@" in res.stdout
+    assert "meridian-governed-agent@" in res.stdout
+    assert "aiplatform.user" in res.stdout
+    deploy_src = deploy_script.read_text(encoding="utf-8")
+    assert "cold_chain_margin_gold" not in deploy_src
 
     teardown_script = DEFAULT_REPO_ROOT / "scripts" / "teardown_pack.sh"
     res_td = subprocess.run(
@@ -103,3 +124,4 @@ def test_deploy_and_teardown_cloud_run_dry_run_flags() -> None:
     )
     assert res_td.returncode == 0, res_td.stderr
     assert "Cloud Run service" in res_td.stdout
+    assert "Phase 2 context layer" in res_td.stdout

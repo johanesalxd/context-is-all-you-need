@@ -47,12 +47,24 @@ load_env_defaults "${REPO_ROOT}/.env.example"
 
 PROJECT_ID="${PROJECT_ID:-}"
 DATASET_ID="${DATASET_ID:-}"
+PACK_ID="${PACK_ID:-meridian_q3_sgd}"
 BQ_LOCATION="${BQ_LOCATION:-asia-southeast1}"
 DRY_RUN=0
 CONFIRM_YES=0
 DELETE_RLS_SAS=0
 DELETE_CLOUD_RUN=0
+TEARDOWN_CONTEXT_LAYER=1
 SERVICE_NAME="${SERVICE_NAME:-context-is-all-you-need}"
+
+run_repo_python() {
+  if command -v uv >/dev/null 2>&1; then
+    uv run --project "${REPO_ROOT}" python "$@"
+  elif [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+    "${REPO_ROOT}/.venv/bin/python" "$@"
+  else
+    return 127
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,6 +76,18 @@ while [[ $# -gt 0 ]]; do
       CONFIRM_YES=1
       shift
       ;;
+    --pack)
+      PACK_ID="$2"
+      shift 2
+      ;;
+    --teardown-context-layer)
+      TEARDOWN_CONTEXT_LAYER=1
+      shift
+      ;;
+    --skip-context-layer)
+      TEARDOWN_CONTEXT_LAYER=0
+      shift
+      ;;
     --delete-rls-sas)
       DELETE_RLS_SAS=1
       shift
@@ -73,7 +97,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--yes] [--delete-rls-sas] [--delete-cloud-run]"
+      echo "Usage: $0 [--pack PACK_ID] [--dry-run] [--yes] [--teardown-context-layer] [--delete-rls-sas] [--delete-cloud-run]"
       exit 0
       ;;
     *)
@@ -93,6 +117,16 @@ if [[ ! "${DATASET_ID}" =~ ^[A-Za-z_][A-Za-z0-9_]{0,1023}$ ]]; then
 fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
+  if [[ "${TEARDOWN_CONTEXT_LAYER}" -eq 1 ]]; then
+    echo "[DRY-RUN] Would tear down Phase 2 context layer for pack=${PACK_ID} before deleting ${PROJECT_ID}.${DATASET_ID}."
+    if [[ -f "${REPO_ROOT}/scripts/provision_context_layer.py" ]]; then
+      ctx_args=(--pack "${PACK_ID}" --teardown --dry-run)
+      if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
+        ctx_args+=(--delete-agent-sas)
+      fi
+      PROJECT_ID="example-project-id" run_repo_python "${REPO_ROOT}/scripts/provision_context_layer.py" "${ctx_args[@]}" >/dev/null 2>&1 || true
+    fi
+  fi
   echo "[DRY-RUN] Would delete BigQuery dataset ${PROJECT_ID}.${DATASET_ID} (location=${BQ_LOCATION}) and all its contents."
   if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
     echo "[DRY-RUN] Would delete Cloud Run service ${SERVICE_NAME} (${BQ_LOCATION}) and meridian-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -108,8 +142,16 @@ if [[ "${CONFIRM_YES}" -ne 1 ]]; then
   exit 1
 fi
 
+if [[ "${TEARDOWN_CONTEXT_LAYER}" -eq 1 && -f "${REPO_ROOT}/scripts/provision_context_layer.py" ]]; then
+  ctx_args=(--pack "${PACK_ID}" --teardown)
+  if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
+    ctx_args+=(--delete-agent-sas)
+  fi
+  run_repo_python "${REPO_ROOT}/scripts/provision_context_layer.py" "${ctx_args[@]}"
+fi
+
 export PROJECT_ID DATASET_ID BQ_LOCATION
-uv run --project "${REPO_ROOT}" python - <<'PY'
+run_repo_python - <<'PY'
 import os
 from google.cloud import bigquery
 
@@ -140,11 +182,13 @@ fi
 if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
   gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${BQ_LOCATION}" --quiet >/dev/null 2>&1 || true
   runner_sa="meridian-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
-  gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${runner_sa}" \
-    --role="roles/bigquery.jobUser" \
-    --all \
-    --quiet >/dev/null 2>&1 || true
+  for runner_role in roles/bigquery.jobUser roles/aiplatform.user; do
+    gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
+      --member="serviceAccount:${runner_sa}" \
+      --role="${runner_role}" \
+      --all \
+      --quiet >/dev/null 2>&1 || true
+  done
   if gcloud iam service-accounts describe "${runner_sa}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     gcloud iam service-accounts delete "${runner_sa}" --project="${PROJECT_ID}" --quiet >/dev/null
     echo "Deleted Cloud Run runtime SA: ${runner_sa}"

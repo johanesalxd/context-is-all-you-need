@@ -203,6 +203,13 @@ def scan_repo_for_leaks(
                 target_files.append(candidate)
     else:
         target_files = _list_repo_files(resolved_root)
+        results_dir = resolved_root / "results"
+        if results_dir.is_dir():
+            seen = {p.resolve() for p in target_files}
+            for f in sorted(results_dir.rglob("*")):
+                if f.is_file() and f.resolve() not in seen:
+                    seen.add(f.resolve())
+                    target_files.append(f)
 
     findings: list[LeakFinding] = []
     for file_path in target_files:

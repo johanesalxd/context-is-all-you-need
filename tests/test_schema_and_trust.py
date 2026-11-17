@@ -1083,3 +1083,48 @@ def test_shell_scripts_syntax_permissions_and_teardown_guards(tmp_path: Path) ->
     )
     assert help_res.returncode == 0
     assert "--offline-fixture" in help_res.stdout
+
+
+def test_phase2_pack_loader_helpers_and_rls_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.pack_loader import (
+        discover_rls_target,
+        load_context_layer,
+        parse_bool_flag,
+        resolve_phase2_settings,
+    )
+
+    assert parse_bool_flag("true", default=False) is True
+    assert parse_bool_flag("0", default=True) is False
+    assert parse_bool_flag(None, default=True) is True
+
+    monkeypatch.setenv("PROJECT_ID", "example-project-id")
+    settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=tmp_path / "missing.env")
+    assert settings["BLIND_DATASET_ID"]
+    assert settings["AGENT_MODEL_ID"] == "gemini-3.8-flash"
+    assert settings["AGENT_MODEL_LOCATION"] == "global"
+
+    packs_dir = tmp_path / "packs"
+    p_dir = packs_dir / "acme_test"
+    (p_dir / "sql").mkdir(parents=True)
+    (p_dir / "sql" / "03_rls.sql").write_text(
+        "CREATE OR REPLACE ROW ACCESS POLICY rls_cfo_all ON `${PROJECT_ID}.${DATASET_ID}.mart_test_r2` GRANT TO ('user:a@example.com') FILTER USING (TRUE);",
+        encoding="utf-8",
+    )
+    (p_dir / "context_layer.yaml").write_text(
+        "glossary:\n  glossary_id: '${DATASET_ID}-gloss'\n  location: '${BQ_LOCATION}'\n",
+        encoding="utf-8",
+    )
+    ctx = load_context_layer(
+        "acme_test",
+        packs_dir=packs_dir,
+        project_id="example-project-id",
+        dataset_id="acme_ds",
+        bq_location="asia-southeast1",
+    )
+    assert ctx["glossary"]["glossary_id"] == "acme_ds-gloss"
+    tbl, pol = discover_rls_target("acme_test", packs_dir=packs_dir)
+    assert tbl == "mart_test_r2"
+    assert pol == "rls_cfo_all"

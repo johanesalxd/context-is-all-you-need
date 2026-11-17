@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 import hmac
 import os
 from pathlib import Path
 import re
+import threading
 import time
 from typing import Any, Literal
 
@@ -31,13 +33,16 @@ from engine.capture_rungs import (
     list_active_row_access_policies,
     resolve_persona_bigquery_client,
 )
+from engine.live_agent import AgentRunResult, run_live_agent_arm
 from engine.pack_loader import (
     DEFAULT_REPO_ROOT,
     discover_packs,
     load_raw_pack,
+    parse_bool_flag,
     render_bundle_placeholders,
     resolve_bq_location,
     resolve_env_settings,
+    resolve_phase2_settings,
 )
 from engine.rls_impersonation import (
     parse_role_sa_map,
@@ -46,7 +51,7 @@ from engine.rls_impersonation import (
 )
 from engine.trust_classifier import classify_rung_outcome
 
-__all__ = ["RunRungRequest", "app", "create_app"]
+__all__ = ["RunAgentRequest", "RunRungRequest", "app", "create_app"]
 
 _ID_SLUG_REGEX = re.compile(r"^[a-z0-9_]+$")
 _PLACEHOLDER_PROJECT = "example-project-id"
@@ -64,6 +69,17 @@ class RunRungRequest(BaseModel):
     live: bool | None = None
 
 
+class RunAgentRequest(BaseModel):
+    """Strict allowlisted request payload for running the live Gemini Blind vs Governed agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pack_id: str = Field(min_length=1, max_length=64)
+    rung_id: str = Field(min_length=1, max_length=64)
+    arm: Literal["blind", "governed", "both"] = "both"
+    persona_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 def create_app(
     *,
     packs_dir: Path | None = None,
@@ -71,8 +87,9 @@ def create_app(
     env_file: Path | None = None,
     bq_client: Any = None,
     impersonated_client_factory: Callable[[str], Any] | None = None,
+    live_agent_runner: Callable[..., AgentRunResult] | None = None,
 ) -> FastAPI:
-    """Creates a FastAPI app exposing /api/health, /api/run-rung, and static web/."""
+    """Creates a FastAPI app exposing /api/health, /api/run-rung, /api/run-agent, and static web/."""
     resolved_packs_dir = packs_dir or (DEFAULT_REPO_ROOT / "packs")
     resolved_web_dir = web_dir or (DEFAULT_REPO_ROOT / "web")
 
@@ -93,43 +110,75 @@ def create_app(
         )
 
     rate_buckets: dict[str, deque[float]] = {}
+    state_lock = threading.Lock()
+    agent_semaphore = threading.BoundedSemaphore(2)
+    daily_counter = {"date": "", "count": 0}
 
     def _resolve_share_token() -> str:
         resolve_env_settings(DEFAULT_REPO_ROOT, env_file=env_file)
         return os.environ.get("DEMO_SHARE_TOKEN", "").strip()
 
-    def _enforce_access_and_rate_limit(http_req: Request) -> None:
-        expected_token = _resolve_share_token()
-        if expected_token:
-            supplied = (
-                http_req.headers.get("x-demo-key", "").strip()
-                or http_req.query_params.get("key", "").strip()
-            )
-            if not supplied or not hmac.compare_digest(supplied, expected_token):
-                raise HTTPException(
-                    status_code=401,
-                    detail="Valid demo share key required (open via shared ?key=... link).",
-                )
+    def _extract_client_ip(http_req: Request) -> str:
+        parts = [
+            p.strip()
+            for p in http_req.headers.get("x-forwarded-for", "").split(",")
+            if p.strip()
+        ]
+        if parts:
+            return parts[-1]
+        return http_req.client.host if http_req.client else "local"
 
+    def _check_rate_limit(http_req: Request) -> None:
         rpm_limit = int(os.environ.get("RUN_RUNG_RPM_LIMIT", "30"))
         if rpm_limit > 0:
             now_ts = time.monotonic()
-            forwarded = http_req.headers.get("x-forwarded-for", "").split(",")[0].strip()
-            client_ip = forwarded or (http_req.client.host if http_req.client else "local")
-            bucket = rate_buckets.setdefault(client_ip, deque())
-            while bucket and (now_ts - bucket[0]) > 60.0:
-                bucket.popleft()
-            if len(bucket) >= rpm_limit:
+            client_ip = _extract_client_ip(http_req)
+            with state_lock:
+                bucket = rate_buckets.setdefault(client_ip, deque())
+                while bucket and (now_ts - bucket[0]) > 60.0:
+                    bucket.popleft()
+                if len(bucket) >= rpm_limit:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Rate limit exceeded ({rpm_limit} live queries per minute).",
+                    )
+                bucket.append(now_ts)
+
+    def _verify_share_token(http_req: Request, *, require_token: bool, fail_closed_on_missing: bool) -> None:
+        expected_token = _resolve_share_token()
+        if not require_token:
+            return
+        if not expected_token:
+            if fail_closed_on_missing:
                 raise HTTPException(
-                    status_code=429,
-                    detail=f"Rate limit exceeded ({rpm_limit} live queries per minute).",
+                    status_code=503,
+                    detail="DEMO_SHARE_TOKEN is not configured on the server.",
                 )
-            bucket.append(now_ts)
+            return
+        supplied = (
+            http_req.headers.get("x-demo-key", "").strip()
+            or http_req.query_params.get("key", "").strip()
+        )
+        if not supplied or not hmac.compare_digest(supplied, expected_token):
+            raise HTTPException(
+                status_code=401,
+                detail="Valid demo share key required (open via shared ?key=... link).",
+            )
+
+    def _enforce_access_and_rate_limit(http_req: Request) -> None:
+        settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=env_file)
+        req_token = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_RUN_RUNG"), default=False)
+        _verify_share_token(http_req, require_token=req_token, fail_closed_on_missing=True)
+        _check_rate_limit(http_req)
 
     @application.get("/api/health")
     def health() -> dict[str, Any]:
-        settings = resolve_env_settings(DEFAULT_REPO_ROOT, env_file=env_file)
+        settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=env_file)
         live_pid = settings["PROJECT_ID"]
+        token_configured = bool(_resolve_share_token())
+        req_run_rung = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_RUN_RUNG"), default=False)
+        req_live_agent = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_LIVE_AGENT"), default=True)
+        live_agent_enabled = parse_bool_flag(settings.get("ENABLE_LIVE_AGENT"), default=True)
         return {
             "status": "ok",
             "packs": discover_packs(resolved_packs_dir),
@@ -137,7 +186,11 @@ def create_app(
                 (live_pid and live_pid != _PLACEHOLDER_PROJECT) or bq_client is not None
             ),
             "bq_location": settings["BQ_LOCATION"],
-            "share_token_required": bool(_resolve_share_token()),
+            "agent_model_id": settings["AGENT_MODEL_ID"],
+            "agent_model_location": settings["AGENT_MODEL_LOCATION"],
+            "share_token_required": bool(req_run_rung and token_configured),
+            "live_agent_enabled": live_agent_enabled,
+            "live_agent_token_required": req_live_agent,
         }
 
     @application.post("/api/run-rung")
@@ -398,6 +451,120 @@ def create_app(
                 status_code=status_code,
                 detail=f"Query execution failed ({type(exc).__name__}): {safe_err}",
             ) from exc
+
+    @application.post("/api/run-agent")
+    def run_agent(req: RunAgentRequest, http_req: Request) -> dict[str, Any]:
+        settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=env_file)
+        if not parse_bool_flag(settings.get("ENABLE_LIVE_AGENT"), default=True):
+            raise HTTPException(status_code=503, detail="Live agent endpoint is disabled (ENABLE_LIVE_AGENT=false).")
+
+        req_live_token = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_LIVE_AGENT"), default=True)
+        _verify_share_token(http_req, require_token=req_live_token, fail_closed_on_missing=True)
+        _check_rate_limit(http_req)
+
+        if not _ID_SLUG_REGEX.match(req.pack_id):
+            raise HTTPException(status_code=400, detail="Invalid pack_id format")
+        if not _ID_SLUG_REGEX.match(req.rung_id):
+            raise HTTPException(status_code=400, detail="Invalid rung_id format")
+        if req.persona_id is not None and not _ID_SLUG_REGEX.match(req.persona_id):
+            raise HTTPException(status_code=400, detail="Invalid persona_id format")
+
+        available_packs = discover_packs(resolved_packs_dir)
+        if req.pack_id not in available_packs:
+            raise HTTPException(status_code=404, detail=f"Unknown pack_id: {req.pack_id}")
+
+        live_project_id = settings["PROJECT_ID"]
+        if live_agent_runner is None and (not live_project_id or live_project_id == _PLACEHOLDER_PROJECT):
+            raise HTTPException(
+                status_code=503,
+                detail="Live GCP project is not configured for live agent execution.",
+            )
+
+        raw_bundle = load_raw_pack(req.pack_id, packs_dir=resolved_packs_dir)
+        bq_location = resolve_bq_location(raw_bundle, env_settings=settings)
+        rendered_bundle = render_bundle_placeholders(
+            raw_bundle,
+            project_id=live_project_id if live_project_id else _PLACEHOLDER_PROJECT,
+            dataset_id=settings["DATASET_ID"],
+            bq_location=bq_location,
+        )
+        matching_rungs = [r for r in rendered_bundle["rungs"] if r.get("id") == req.rung_id]
+        if not matching_rungs:
+            raise HTTPException(status_code=404, detail=f"Unknown rung_id: {req.rung_id}")
+        raw_rung = matching_rungs[0]
+
+        valid_personas = {str(p.get("id")) for p in rendered_bundle.get("personas", [])}
+        if req.persona_id is not None and valid_personas and req.persona_id not in valid_personas and req.persona_id != "default":
+            raise HTTPException(status_code=404, detail=f"Unknown persona_id: {req.persona_id}")
+
+        if not agent_semaphore.acquire(blocking=False):
+            raise HTTPException(
+                status_code=429,
+                detail="Live agent concurrency limit reached (max 2 concurrent runs). Retry shortly.",
+            )
+
+        arms_to_run = ["blind", "governed"] if req.arm == "both" else [req.arm]
+        runner = live_agent_runner or run_live_agent_arm
+        arms_output: dict[str, Any] = {}
+        active_model_id = settings["AGENT_MODEL_ID"]
+        active_model_location = settings["AGENT_MODEL_LOCATION"]
+        try:
+            daily_limit = int(settings.get("DAILY_AGENT_CALL_LIMIT") or "200")
+            today_str = datetime.now(timezone.utc).date().isoformat()
+            with state_lock:
+                if daily_counter["date"] != today_str:
+                    daily_counter["date"] = today_str
+                    daily_counter["count"] = 0
+                if (daily_counter["count"] + len(arms_to_run)) > daily_limit:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Daily live agent call cap reached ({daily_limit} calls/day).",
+                    )
+                daily_counter["count"] += len(arms_to_run)
+
+            for arm_name in arms_to_run:
+                res = runner(
+                    pack_id=req.pack_id,
+                    rung=raw_rung,
+                    arm=arm_name,
+                    persona_id=req.persona_id,
+                    packs_dir=resolved_packs_dir,
+                )
+                res_dict = res.to_dict() if hasattr(res, "to_dict") else dict(res)
+                if res_dict.get("model_id"):
+                    active_model_id = str(res_dict["model_id"])
+                if res_dict.get("model_location"):
+                    active_model_location = str(res_dict["model_location"])
+                arms_output[arm_name] = res_dict
+        except HTTPException:
+            raise
+        except Exception as exc:
+            status_code = 403 if getattr(exc, "code", None) == 403 else 500
+            safe_err = redact_sensitive_identifiers(
+                str(exc),
+                extra_tokens=[live_project_id],
+                live_project_id=live_project_id,
+            )
+            raise HTTPException(
+                status_code=status_code,
+                detail=f"Live agent execution failed ({type(exc).__name__}): {safe_err}",
+            ) from exc
+        finally:
+            agent_semaphore.release()
+
+        return redact_bundle_data(
+            {
+                "pack_id": req.pack_id,
+                "rung_id": req.rung_id,
+                "persona_id": req.persona_id or raw_rung.get("default_persona") or "default",
+                "model_id": active_model_id,
+                "model_location": active_model_location,
+                "bq_location": bq_location,
+                "arms": arms_output,
+            },
+            extra_tokens=[live_project_id],
+            live_project_id=live_project_id,
+        )
 
     if resolved_web_dir.is_dir():
         application.mount(

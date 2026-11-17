@@ -62,11 +62,17 @@ def test_leak_scanner_catches_all_forbidden_patterns(
             f"Expected leak rule {expected_rule} for sample {content!r}, got {rules}"
         )
 
-    # Dynamic PROJECT_ID leak in tmp_path repo
+    # Dynamic PROJECT_ID leak in tmp_path repo & results/*.jsonl
     (tmp_path / "bad_config.txt").write_text(f"project = {live_pid}\n", encoding="utf-8")
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "live_eval_runs.jsonl").write_text(
+        f'{{"project": "{live_pid}", "sa": "agent@{live_pid}.iam.gserviceaccount.com"}}\n',
+        encoding="utf-8",
+    )
     (tmp_path / ".env").write_text(f'PROJECT_ID="{live_pid}"\n', encoding="utf-8")
     repo_findings = scan_repo_for_leaks(tmp_path)
     assert any(f.rule == "live_project_id_leak" for f in repo_findings)
+    assert any("results/live_eval_runs.jsonl" in f.path for f in repo_findings)
 
     # Safe placeholder identifiers must produce 0 findings
     monkeypatch.setenv("PROJECT_ID", "example-project-id")
@@ -91,12 +97,16 @@ def test_engine_and_server_have_zero_hardcoded_scenario_identifiers() -> None:
         "arctic" + "haul",
         "ln-" + "409",
     ]
+    targets: list[Path] = []
     for folder_name in ("engine", "server"):
-        folder = DEFAULT_REPO_ROOT / folder_name
-        for py_file in sorted(folder.rglob("*.py")):
-            lowered = py_file.read_text(encoding="utf-8").lower()
-            for phrase in forbidden_phrases:
-                assert phrase not in lowered, f"Forbidden scenario reference {phrase!r} in {py_file}"
+        targets.extend(sorted((DEFAULT_REPO_ROOT / folder_name).rglob("*.py")))
+    prov_ctx = DEFAULT_REPO_ROOT / "scripts" / "provision_context_layer.py"
+    if prov_ctx.is_file():
+        targets.append(prov_ctx)
+    for py_file in targets:
+        lowered = py_file.read_text(encoding="utf-8").lower()
+        for phrase in forbidden_phrases:
+            assert phrase not in lowered, f"Forbidden scenario reference {phrase!r} in {py_file}"
 
 
 def test_leak_check_cli_exits_zero_cleanly() -> None:
