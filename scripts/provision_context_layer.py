@@ -585,6 +585,20 @@ def _is_already_exists_error(status: int, resp: Any) -> bool:
     return False
 
 
+def _sanitize_dataplex_id(raw_id: str, *, fallback_prefix: str = "link") -> str:
+    """Normalizes a Dataplex resource ID to [a-z][a-z0-9-]{0,61}[a-z0-9]."""
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", raw_id.strip().lower())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
+    if not cleaned or not ("a" <= cleaned[0] <= "z"):
+        cleaned = f"{fallback_prefix}-{cleaned}".strip("-")
+    cleaned = cleaned[:63].rstrip("-")
+    if not cleaned or not ("a" <= cleaned[0] <= "z"):
+        cleaned = f"{fallback_prefix}-id"
+    if not cleaned[-1].isalnum():
+        cleaned = f"{cleaned[:62]}0"
+    return cleaned
+
+
 def _iter_term_column_links(term: Mapping[str, Any]) -> list[dict[str, str]]:
     """Normalizes glossary term linked_columns (list) or legacy single linked_table/linked_column."""
     t_id = str(term.get("term_id") or "").strip()
@@ -597,12 +611,12 @@ def _iter_term_column_links(term: Mapping[str, Any]) -> list[dict[str, str]]:
         if not tbl or not col:
             continue
         ltype = str(raw.get("link_type") or "definition").strip() or "definition"
-        lid = str(raw.get("entry_link_id") or f"{tbl}-{col}-{t_id}").strip()
+        lid = _sanitize_dataplex_id(str(raw.get("entry_link_id") or f"{tbl}-{col}-{t_id}"))
         links.append({"table": tbl, "column": col, "link_type": ltype, "entry_link_id": lid})
     if not links and term.get("linked_table") and term.get("linked_column"):
         tbl = str(term["linked_table"]).strip()
         col = str(term["linked_column"]).strip()
-        lid = str(term.get("entry_link_id") or f"{tbl}-{col}-{t_id}").strip()
+        lid = _sanitize_dataplex_id(str(term.get("entry_link_id") or f"{tbl}-{col}-{t_id}"))
         links.append({"table": tbl, "column": col, "link_type": "definition", "entry_link_id": lid})
     return links
 
@@ -654,6 +668,13 @@ def _create_or_update_entry_link(
     if _is_already_exists_error(status, resp):
         return
     if status == 400:
+        err_text = (resp if isinstance(resp, str) else json.dumps(resp or {}, ensure_ascii=True)).lower()
+        orientation_err = any(
+            tok in err_text
+            for tok in ("entryreference", "entry reference", "source", "target", "entrylinktype", "link type")
+        )
+        if not orientation_err:
+            raise RuntimeError(f"HTTP 400 for POST {url}: {err_text[:500]}")
         swapped_body = {
             "entryLinkType": link_type,
             "entryReferences": [
