@@ -7,6 +7,9 @@ release_badges:
   - capability: "Knowledge Catalog Business Glossary"
     stage: "GA"
     region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
 
 question: "Which sales channel led Closed Q3 Singapore Premier segment AOV?"
 
@@ -37,7 +40,7 @@ blind:
       'Premier_Promo_Trial', 'Premier_Loyalty', 'Enterprise_Corporate', 'Enterprise_Direct'
   sql_or_gql: |
     SELECT
-      ROUND(AVG(o.net_realized_revenue_sgd), 2) AS aov_sgd,
+      ROUND(AVG(o.amt_net_settled_sgd), 2) AS aov_sgd,
       o.sales_channel,
       COUNT(*) AS order_count
     FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
@@ -67,7 +70,7 @@ governed:
   context_mechanism: "Knowledge Catalog Business Glossary Term Binding (`Premier Customer` -> `tier_code = 'PRM_HV'`)"
   context_payload: |
     {
-      "glossary": "meridian_enterprise_glossary",
+      "glossary": "meridian-commerce-glossary",
       "term": "Premier Customer",
       "canonical_predicate": "c.tier_code = 'PRM_HV' AND c.trailing_12m_spend_sgd >= 5000.00 AND c.return_rate < 0.08",
       "excluded_distractors": ["segment_label LIKE '%Premier%'", "PRM_TRIAL"],
@@ -75,10 +78,10 @@ governed:
     }
   sql_or_gql: |
     SELECT
-      ROUND(AVG(o.net_realized_revenue_sgd), 2) AS aov_sgd,
+      ROUND(AVG(o.amt_net_settled_sgd), 2) AS aov_sgd,
       o.sales_channel,
       COUNT(*) AS order_count,
-      ROUND(SUM(o.net_realized_revenue_sgd), 2) AS total_net_revenue_sgd
+      ROUND(SUM(o.amt_net_settled_sgd), 2) AS total_net_revenue_sgd
     FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
     JOIN `${PROJECT_ID}.${DATASET_ID}.customers` AS c
       ON o.customer_id = c.customer_id
@@ -100,8 +103,15 @@ governed:
   rationale: "Resolves canonical Business Glossary term Premier Customer deterministically to tier_code = 'PRM_HV' (5/5 pass)."
 
 xray_summary:
-  context_added: "Knowledge Catalog Business Glossary binding 'Premier Customer' to tier_code = 'PRM_HV' and explicit threshold guardrails."
+  context_added: "Knowledge Catalog Business Glossary in asia-southeast1 binding 'Premier Customer' to tier_code = 'PRM_HV' and explicit threshold guardrails (Gemini PayGo via global endpoint)."
   gcp_primitives:
-    - "Knowledge Catalog Business Glossary (GA)"
-    - "Knowledge Catalog Glossary Term-to-Column Linking (GA)"
+    - "Knowledge Catalog Business Glossary (GA · asia-southeast1)"
+    - "Knowledge Catalog Glossary Term-to-Column Linking (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
   negative_control_assertion: "Queries matching segment_label LIKE '%Premier%' fail glossary reconciliation against PRM_HV cohort invariants."
+
+grading:
+  target_value: 612.5
+  tolerance: 0.01
+  required_strings:
+    - "B2B Corporate Portal"

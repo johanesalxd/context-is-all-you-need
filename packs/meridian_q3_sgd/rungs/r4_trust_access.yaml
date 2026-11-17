@@ -13,39 +13,42 @@ release_badges:
   - capability: "BigQuery RLS & EntryGroup IAM"
     stage: "GA"
     region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
 
 question: "Did Cold-Chain Gross Margin really drop 410 bps in Q3—and what does each role see?"
 
 poll:
-  prompt: "Myth-Buster #4: Your dataset has 190 automated clone tables plus `staging_cold_chain_oct11`. Why did a blind agent raise a board panic over a -410 bps cold-chain margin crash?"
+  prompt: "Myth-Buster #4: Your dataset has 190 automated clone tables plus `mart_coldchain_q3_r1`. Why did a blind agent raise a board panic over a -410 bps cold-chain margin crash?"
   options:
     - key: "A"
       text: "The model hallucinated random numbers without running any query."
     - key: "B"
-      text: "It queried an uncertified Oct 11 staging clone missing late-Q3 supplier rebates (24.3%) instead of the certified Knowledge Catalog Data Product (28.4%)."
+      text: "It queried an uncertified Oct 11 preliminary snapshot (`mart_coldchain_q3_r1`) missing late-Q3 supplier rebates (24.3%) instead of the certified Knowledge Catalog Data Product `mart_coldchain_q3_r2` (28.4%)."
     - key: "C"
       text: "BigQuery deleted the SG rows automatically."
     - key: "D"
       text: "RLS policies alter gross margin percentages globally."
   correct_key: "B"
-  reveal_takeaway: "Real enterprise lakes accumulate hundreds of uncertified staging clones (190 shadow_auto_tbl_* tables here). Knowledge Catalog Data Products + Auto Data Quality route agents exclusively to certified cold_chain_margin_gold (28.4%, -15 bps YoY), while BigQuery RLS enforces identity-scoped visibility (SGD 842,600.00 vs SGD 346,480.00)."
+  reveal_takeaway: "Real enterprise lakes accumulate hundreds of uncertified snapshots sharing identical physical schemas (190 shadow_auto_tbl_* tables plus mart_coldchain_q3_r1). Knowledge Catalog Data Products + Auto Data Quality route agents exclusively to certified mart_coldchain_q3_r2 (28.4%, -15 bps YoY), while BigQuery RLS enforces identity-scoped visibility (SGD 842,600.00 vs SGD 346,480.00)."
 
 blind:
   answer_headline: "24.3% (-410 bps drop)"
-  answer_detail: "False executive alarm: blind discovery scanned uncertified staging_cold_chain_oct11 amid 190 shadow_auto_tbl_* tables, missing late-Q3 supplier rebate settlements."
+  answer_detail: "False executive alarm: blind discovery scanned uncertified mart_coldchain_q3_r1 (close_batch_code = 'B26Q3_R1') amid 190 identically schemaed shadow_auto_tbl_* tables, missing late-Q3 supplier rebate settlements."
   numeric_value: 24.3
   unit: "%"
   query_language: "SQL"
-  context_mechanism: "Uncertified table discovery across 190 shadow clones (`staging_cold_chain_oct11`)"
+  context_mechanism: "Uncertified table discovery across 190 shadow clones (`mart_coldchain_q3_r1`)"
   context_payload: |
-    Dataset discovery returned 190 shadow_auto_tbl_* clones + staging_cold_chain_oct11.
+    Dataset discovery returned 190 shadow_auto_tbl_* clones + mart_coldchain_q3_r1 + mart_coldchain_q3_r2 with identical column schemas.
     No Knowledge Catalog Data Product certification or Auto Data Quality gate applied.
   sql_or_gql: |
     SELECT
       ROUND(100.0 * SUM(gross_margin_sgd) / NULLIF(SUM(net_revenue_sgd), 0), 1) AS gross_margin_pct,
       ROUND(SUM(gross_margin_sgd), 2) AS gross_margin_sgd,
       COUNT(*) AS rows_scanned
-    FROM `${PROJECT_ID}.${DATASET_ID}.staging_cold_chain_oct11`
+    FROM `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r1`
     WHERE quarter = '2026-Q3'
   tokens_used: 3480
   exploratory_queries: 6
@@ -53,21 +56,23 @@ blind:
   eval_pass_count: 1
   eval_total_runs: 5
   trust_tier: "TIER_3_REVIEW_REQUIRED"
-  rationale: "Scanned uncertified staging clone (rebate_settled = FALSE) amid 190 shadow tables."
+  rationale: "Scanned uncertified Oct 11 snapshot (close_batch_code = 'B26Q3_R1') amid 190 identically schemaed shadow tables."
 
 governed:
   answer_headline: "28.4% (-15 bps YoY) · SGD 842,600.00"
-  answer_detail: "Certified Knowledge Catalog Data Product cold_chain_margin_gold confirms steady 28.4% gross margin (-15 bps YoY, SGD 842,600.00 across 4 SEA markets; SGD 346,480.00 under SG RLS)."
+  answer_detail: "Certified Knowledge Catalog Data Product mart_coldchain_q3_r2 confirms steady 28.4% gross margin (-15 bps YoY, SGD 842,600.00 across 4 SEA markets; SGD 346,480.00 under SG RLS)."
   numeric_value: 28.4
   unit: "%"
   query_language: "SQL"
   context_mechanism: "Knowledge Catalog Certified Data Product + Auto Data Quality + BigQuery Row Access Policies"
   context_payload: |
     {
-      "data_product": "Cold-Chain Margin Gold (Certified 2026-10-14T08:30:00Z)",
-      "authoritative_table": "${PROJECT_ID}.${DATASET_ID}.cold_chain_margin_gold",
-      "auto_data_quality_assertions": ["rebate_settled = TRUE", "no_null_country_code"],
-      "excluded_clones": ["staging_cold_chain_oct11", "shadow_auto_tbl_001..190"],
+      "data_product": "Cold-Chain Margin Q3 R2 (Certified 2026-Q3-FINAL)",
+      "authoritative_table": "${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r2",
+      "aspect_type": "data-product-certification (CERTIFIED, close_cycle='2026-Q3-FINAL')",
+      "auto_data_quality_scan": "meridian-coldchain-dq",
+      "auto_data_quality_assertions": ["close_batch_code IN ('B26Q3_R2')", "country_code IS NOT NULL"],
+      "excluded_clones": ["mart_coldchain_q3_r1", "shadow_auto_tbl_001..190"],
       "row_access_policies": {
         "cfo_regional": "rls_cfo_regional_all_markets -> FILTER USING (TRUE)",
         "sg_coldchain": "rls_sg_coldchain_country_sg -> FILTER USING (country_code = 'SG')"
@@ -78,7 +83,7 @@ governed:
       ROUND(100.0 * SUM(gross_margin_sgd) / NULLIF(SUM(net_revenue_sgd), 0), 1) AS gross_margin_pct,
       ROUND(SUM(gross_margin_sgd), 2) AS gross_margin_sgd,
       COUNT(*) AS rows_visible
-    FROM `${PROJECT_ID}.${DATASET_ID}.cold_chain_margin_gold`
+    FROM `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r2`
     WHERE quarter = '2026-Q3'
   tokens_used: 590
   exploratory_queries: 1
@@ -86,7 +91,7 @@ governed:
   eval_pass_count: 5
   eval_total_runs: 5
   trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
-  rationale: "Routed strictly to certified Data Product cold_chain_margin_gold with active BigQuery Row Access Policies (5/5 pass)."
+  rationale: "Routed strictly to certified Data Product mart_coldchain_q3_r2 with active BigQuery Row Access Policies (5/5 pass)."
 
 identity_variants:
   cfo_regional:
@@ -107,10 +112,25 @@ identity_variants:
     policy_note: "BigQuery Row Access Policy FILTER USING (country_code = 'SG') transparently filters MY/TH/ID rows at storage scan."
 
 xray_summary:
-  context_added: "Knowledge Catalog Data Product certification, Auto Data Quality rebate checks, EntryGroup IAM separation, and BigQuery Row Access Policies."
+  context_added: "Knowledge Catalog Data Product certification, Auto Data Quality close-batch checks, EntryGroup IAM separation, and BigQuery Row Access Policies in asia-southeast1 (Gemini PayGo via global endpoint)."
   gcp_primitives:
-    - "Knowledge Catalog Data Products (GA)"
-    - "Knowledge Catalog Auto Data Quality (GA)"
-    - "BigQuery Row-Level Security (GA)"
-    - "Knowledge Catalog EntryGroup IAM (GA)"
-  negative_control_assertion: "Unauthorized principal or staging clone fails policy/certification checks with explicit access denial or TIER_3_REVIEW_REQUIRED downgrade."
+    - "Knowledge Catalog Data Products (GA · asia-southeast1)"
+    - "Knowledge Catalog Auto Data Quality (GA · asia-southeast1)"
+    - "BigQuery Row-Level Security (GA · asia-southeast1)"
+    - "Knowledge Catalog EntryGroup IAM (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "Unauthorized principal or preliminary mart_coldchain_q3_r1 fails policy/certification checks with explicit access denial or TIER_3_REVIEW_REQUIRED downgrade."
+
+grading:
+  target_value: 28.4
+  tolerance: 0.1
+  allow_ratio_normalization: true
+  disallowed_tables:
+    - "mart_coldchain_q3_r1"
+  persona_targets:
+    cfo_regional:
+      value: 842600.0
+      tolerance: 0.01
+    sg_coldchain:
+      value: 346480.0
+      tolerance: 0.01

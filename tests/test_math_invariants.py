@@ -69,11 +69,11 @@ def _create_sqlite_db(tables: dict[str, list[dict]]) -> sqlite3.Connection:
             fulfillment_tier TEXT NOT NULL,
             order_date TEXT NOT NULL,
             order_status TEXT NOT NULL,
-            gross_item_sgd REAL NOT NULL,
-            gross_total_sgd REAL NOT NULL,
-            gst_sgd REAL NOT NULL,
+            amt_gross_billed_sgd REAL NOT NULL,
+            amt_item_subtotal_sgd REAL NOT NULL,
+            amt_gst_sgd REAL NOT NULL,
             fulfillment_fee_sgd REAL NOT NULL,
-            net_realized_revenue_sgd REAL NOT NULL
+            amt_net_settled_sgd REAL NOT NULL
         );
         CREATE TABLE order_lines (
             order_line_id TEXT PRIMARY KEY,
@@ -97,27 +97,21 @@ def _create_sqlite_db(tables: dict[str, list[dict]]) -> sqlite3.Connection:
             temp_excursion_celsius REAL NOT NULL,
             excursion_minutes INTEGER NOT NULL
         );
-        CREATE TABLE cold_chain_margin_gold (
+        CREATE TABLE mart_coldchain_q3_r2 (
             country_code TEXT NOT NULL,
             quarter TEXT NOT NULL,
             net_revenue_sgd REAL NOT NULL,
             gross_margin_sgd REAL NOT NULL,
             gross_margin_pct REAL NOT NULL,
-            rebate_settled INTEGER NOT NULL,
-            certified_at TEXT,
-            prior_year_margin_pct REAL NOT NULL,
-            yoy_delta_bps INTEGER NOT NULL
+            close_batch_code TEXT NOT NULL
         );
-        CREATE TABLE staging_cold_chain_oct11 (
+        CREATE TABLE mart_coldchain_q3_r1 (
             country_code TEXT NOT NULL,
             quarter TEXT NOT NULL,
             net_revenue_sgd REAL NOT NULL,
             gross_margin_sgd REAL NOT NULL,
             gross_margin_pct REAL NOT NULL,
-            rebate_settled INTEGER NOT NULL,
-            certified_at TEXT,
-            prior_year_margin_pct REAL NOT NULL,
-            yoy_delta_bps INTEGER NOT NULL
+            close_batch_code TEXT NOT NULL
         );
         CREATE TABLE vendor_sla_ledger (
             event_id TEXT PRIMARY KEY,
@@ -200,8 +194,57 @@ def test_naming_and_release_stage_honesty() -> None:
         assert rungs_by_num[rnum]["governed"]["eval_pass_count"] == 5
         assert rungs_by_num[rnum]["governed"]["trust_tier"] == "TIER_1_VERIFIED_OR_COMPILED"
 
-    r1_badges = {b["capability"]: b["stage"] for b in rungs_by_num[1]["release_badges"]}
-    assert r1_badges["Knowledge Catalog lookupContext"] == "Preview"
+    r1_badges = {b["capability"]: b for b in rungs_by_num[1]["release_badges"]}
+    assert r1_badges["Knowledge Catalog lookupContext"]["stage"] == "Preview"
+    assert r1_badges["BigQuery Schema + Data Insights"]["region_scope"] == "asia-southeast1"
+    assert r1_badges["Gemini PayGo Inference"]["stage"] == "GA"
+    assert r1_badges["Gemini PayGo Inference"]["region_scope"] == "global endpoint"
+
+    eval_meth = bundle.get("eval_methodology", {})
+    assert "asia-southeast1" in eval_meth.get("regional_honesty_label", "")
+    assert "global" in eval_meth.get("regional_honesty_label", "").lower()
+
+    for rnum in range(1, 7):
+        assert "grading" in rungs_by_num[rnum], f"Missing grading block on R{rnum}"
+        badges = {b["capability"]: b for b in rungs_by_num[rnum]["release_badges"]}
+        assert any("global" in b["region_scope"].lower() for b in badges.values())
+        assert any("asia-southeast1" in b["region_scope"] for b in badges.values())
+
+    assert rungs_by_num[1]["grading"] == {
+        "target_value": 1312450.0,
+        "tolerance": 0.01,
+        "unit": "SGD",
+    }
+    assert rungs_by_num[2]["grading"] == {
+        "target_value": 612.5,
+        "tolerance": 0.01,
+        "required_strings": ["B2B Corporate Portal"],
+    }
+    assert rungs_by_num[3]["grading"] == {
+        "target_value": 31.8,
+        "tolerance": 0.1,
+        "allow_ratio_normalization": True,
+    }
+    assert rungs_by_num[4]["grading"] == {
+        "target_value": 28.4,
+        "tolerance": 0.1,
+        "allow_ratio_normalization": True,
+        "disallowed_tables": ["mart_coldchain_q3_r1"],
+        "persona_targets": {
+            "cfo_regional": {"value": 842600.0, "tolerance": 0.01},
+            "sg_coldchain": {"value": 346480.0, "tolerance": 0.01},
+        },
+    }
+    assert rungs_by_num[5]["grading"] == {
+        "target_value": 19380.0,
+        "tolerance": 0.01,
+        "secondary_numerics": [{"name": "exposed_order_count", "value": 38, "tolerance": 0}],
+    }
+    assert rungs_by_num[6]["grading"] == {
+        "target_value": 18960.0,
+        "tolerance": 0.01,
+        "secondary_numerics": [{"name": "qualifying_shipments", "value": 14, "tolerance": 0}],
+    }
 
     horizon = {c["id"]: c for c in bundle["horizon_cards"]}
     assert horizon["knowledge_studio"]["release_badge"] == "Preview"
@@ -265,8 +308,8 @@ def test_sql_execution_of_rungs_in_sqlite() -> None:
         drift_row = conn.execute(
             """
             SELECT
-              MAX(ABS(ROUND(ol_sum, 2) - ROUND(o.net_realized_revenue_sgd, 2))) AS max_drift,
-              ABS(SUM(ol_sum) - SUM(o.net_realized_revenue_sgd)) AS agg_drift
+              MAX(ABS(ROUND(ol_sum, 2) - ROUND(o.amt_net_settled_sgd, 2))) AS max_drift,
+              ABS(SUM(ol_sum) - SUM(o.amt_net_settled_sgd)) AS agg_drift
             FROM orders AS o
             JOIN (
               SELECT order_id, SUM(net_line_revenue_sgd) AS ol_sum
@@ -279,11 +322,31 @@ def test_sql_execution_of_rungs_in_sqlite() -> None:
         assert round(drift_row["max_drift"], 2) == 0.0
         assert round(drift_row["agg_drift"], 2) == 0.0
 
+        # ERP schema ambiguity invariants on orders
+        erp_check = conn.execute(
+            """
+            SELECT
+              SUM(amt_item_subtotal_sgd) AS all_subtotal,
+              SUM(CASE WHEN order_status != 'COMPLETED' THEN amt_item_subtotal_sgd ELSE 0.0 END) AS noncomp_subtotal,
+              SUM(CASE WHEN order_status != 'COMPLETED' THEN amt_net_settled_sgd ELSE 0.0 END) AS noncomp_settled,
+              MIN(CASE WHEN order_status != 'COMPLETED' THEN amt_item_subtotal_sgd ELSE NULL END) AS min_noncomp_subtotal,
+              SUM(CASE WHEN order_status = 'COMPLETED' THEN amt_item_subtotal_sgd ELSE 0.0 END) AS comp_subtotal
+            FROM orders
+            WHERE country_code = 'SG'
+              AND order_date BETWEEN '2026-07-01' AND '2026-09-30'
+            """
+        ).fetchone()
+        assert erp_check["all_subtotal"] == pytest.approx(1545137.73, abs=0.01)
+        assert erp_check["noncomp_settled"] == pytest.approx(0.0, abs=1e-6)
+        assert erp_check["min_noncomp_subtotal"] > 0.0
+        assert erp_check["comp_subtotal"] > 1312450.00  # partial returns remain inside amt_item_subtotal_sgd
+
         # R1 Blind & Governed
         r1_blind = conn.execute(_to_sqlite_sql(rungs[1]["blind"]["sql_or_gql"])).fetchone()
         r1_gov = conn.execute(_to_sqlite_sql(rungs[1]["governed"]["sql_or_gql"])).fetchone()
-        assert r1_blind["gross_total_sgd"] == pytest.approx(1684200.00, abs=0.01)
-        assert r1_gov["net_realized_revenue_sgd"] == pytest.approx(1312450.00, abs=0.01)
+        assert r1_blind["amt_gross_billed_sgd"] == pytest.approx(1684200.00, abs=0.01)
+        assert r1_gov["amt_net_settled_sgd"] == pytest.approx(1312450.00, abs=0.01)
+        assert r1_gov["completed_order_count"] == 3400
 
         # R2 Blind & Governed + Glossary thresholds + overall 640 orders / 495.63 AOV
         r2_blind = conn.execute(_to_sqlite_sql(rungs[2]["blind"]["sql_or_gql"])).fetchone()
@@ -305,8 +368,8 @@ def test_sql_execution_of_rungs_in_sqlite() -> None:
 
         r2_all_hv = conn.execute(
             """
-            SELECT COUNT(*) AS cnt, ROUND(SUM(o.net_realized_revenue_sgd), 2) AS rev,
-                   ROUND(AVG(o.net_realized_revenue_sgd), 2) AS aov
+            SELECT COUNT(*) AS cnt, ROUND(SUM(o.amt_net_settled_sgd), 2) AS rev,
+                   ROUND(AVG(o.amt_net_settled_sgd), 2) AS aov
             FROM orders o JOIN customers c ON o.customer_id = c.customer_id
             WHERE o.country_code = 'SG' AND o.order_status = 'COMPLETED' AND c.tier_code = 'PRM_HV'
             """
@@ -345,10 +408,10 @@ def test_sql_execution_of_rungs_in_sqlite() -> None:
               FROM parcel_legs GROUP BY order_id
             )
             SELECT
-              ROUND(100.0 * SUM(o.net_realized_revenue_sgd - line_m.cogs_sgd - o.fulfillment_fee_sgd - leg_m.leg_cost_sgd)
-                    / SUM(o.net_realized_revenue_sgd), 1) AS margin_pct,
-              ROUND(SUM(o.net_realized_revenue_sgd - line_m.cogs_sgd - o.fulfillment_fee_sgd - leg_m.leg_cost_sgd), 2) AS margin_sgd,
-              ROUND(SUM(o.net_realized_revenue_sgd), 2) AS rev_sgd
+              ROUND(100.0 * SUM(o.amt_net_settled_sgd - line_m.cogs_sgd - o.fulfillment_fee_sgd - leg_m.leg_cost_sgd)
+                    / SUM(o.amt_net_settled_sgd), 1) AS margin_pct,
+              ROUND(SUM(o.amt_net_settled_sgd - line_m.cogs_sgd - o.fulfillment_fee_sgd - leg_m.leg_cost_sgd), 2) AS margin_sgd,
+              ROUND(SUM(o.amt_net_settled_sgd), 2) AS rev_sgd
             FROM orders o
             JOIN line_m USING (order_id)
             JOIN leg_m USING (order_id)
@@ -380,7 +443,7 @@ def test_sql_execution_of_rungs_in_sqlite() -> None:
 
         r5_rows = conn.execute(
             """
-            SELECT DISTINCT o.order_id, o.net_realized_revenue_sgd
+            SELECT DISTINCT o.order_id, o.amt_net_settled_sgd
             FROM cold_chain_batches b
             JOIN sku_lot_allocations lot ON b.batch_id = lot.batch_id
             JOIN order_lines ol ON lot.lot_id = ol.lot_id
@@ -392,7 +455,7 @@ def test_sql_execution_of_rungs_in_sqlite() -> None:
             """
         ).fetchall()
         assert len(r5_rows) == 38
-        r5_rev = round(sum(r["net_realized_revenue_sgd"] for r in r5_rows), 2)
+        r5_rev = round(sum(r["amt_net_settled_sgd"] for r in r5_rows), 2)
         assert r5_rev == pytest.approx(19380.00, abs=0.01)
         assert round(r5_rev / len(r5_rows), 2) == pytest.approx(510.00, abs=0.01)
 
@@ -428,13 +491,25 @@ def test_sql_property_graph_rls_contracts_and_placeholder_hygiene() -> None:
     assert "CREATE OR REPLACE PROPERTY GRAPH `${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph`" in pg_sql
     assert "LABEL CustomerOrder" in pg_sql
     assert "LABEL Order\n" not in pg_sql  # Avoid unescaped GQL reserved keyword Order
-    assert "MEASURE(SUM(net_realized_revenue_sgd))" in pg_sql
+    assert "MEASURE(SUM(amt_net_settled_sgd))" in pg_sql
     assert "MEASURE(SUM(fulfillment_fee_sgd))" in pg_sql
     assert "MEASURE(SUM(cogs_line_sgd))" in pg_sql
     assert "MEASURE(SUM(leg_cost_sgd))" in pg_sql
     # Every MEASURE source column must also be declared as a dimension property
-    for col in ("net_realized_revenue_sgd", "fulfillment_fee_sgd", "cogs_line_sgd", "leg_cost_sgd"):
+    for col in ("amt_net_settled_sgd", "fulfillment_fee_sgd", "cogs_line_sgd", "leg_cost_sgd"):
         assert pg_sql.count(col) >= 2
+
+    tables_sql = (sql_dir / "01_tables.sql").read_text(encoding="utf-8")
+    assert "CREATE OR REPLACE TABLE `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r1`" in tables_sql
+    assert "CREATE OR REPLACE TABLE `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r2`" in tables_sql
+    for col in (
+        "amt_gross_billed_sgd",
+        "amt_item_subtotal_sgd",
+        "amt_gst_sgd",
+        "fulfillment_fee_sgd",
+        "amt_net_settled_sgd",
+    ):
+        assert col in tables_sql
 
     r5_yaml = yaml.safe_load((PACK_DIR / "rungs" / "r5_graph.yaml").read_text(encoding="utf-8"))
     r5_gql = r5_yaml["governed"]["sql_or_gql"]
@@ -446,11 +521,13 @@ def test_sql_property_graph_rls_contracts_and_placeholder_hygiene() -> None:
     rls_sql = (sql_dir / "03_rls.sql").read_text(encoding="utf-8")
     assert "${RLS_CFO_PRINCIPAL}" in rls_sql
     assert "${RLS_SG_PRINCIPAL}" in rls_sql
+    assert "ON `${PROJECT_ID}.${DATASET_ID}.mart_coldchain_q3_r2`" in rls_sql
     assert "FILTER USING (TRUE)" in rls_sql
     assert "FILTER USING (country_code = 'SG')" in rls_sql
 
     shadow_sql = (sql_dir / "02_shadow_clones.sql").read_text(encoding="utf-8")
-    assert "staging_cold_chain_oct11" in shadow_sql
+    assert "staging_cold_chain_oct11" not in shadow_sql
+    assert "close_batch_code STRING" in shadow_sql
     assert shadow_sql.count("shadow_auto_tbl_") >= 190
     assert "shadow_auto_tbl_001" in shadow_sql
     assert "shadow_auto_tbl_190" in shadow_sql
@@ -460,6 +537,24 @@ def test_sql_property_graph_rls_contracts_and_placeholder_hygiene() -> None:
     assert (contracts_dir / "SiamFrost_Logistics_MSA_2025.md").exists()
     assert (contracts_dir / "StraitsTemp_Cargo_MSA_2025.md").exists()
     assert (contracts_dir / "sla_overlay.sql").exists()
+
+    # Legacy column and table giveaway names must be completely eliminated from the pack
+    legacy_re = re.compile(
+        r"\b(net_realized_revenue_sgd|gross_total_sgd|gross_item_sgd|gst_sgd|cold_chain_margin_gold|staging_cold_chain_oct11|rebate_settled|certified_at)\b"
+    )
+    for path in PACK_DIR.rglob("*"):
+        if not path.is_file() or path.suffix not in {".py", ".yaml", ".sql", ".md"}:
+            continue
+        if path.name == "context_layer.yaml":
+            # Only legacy_tables_to_drop may reference legacy R4 table names
+            non_drop_lines = [
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if "cold_chain_margin_gold" not in line and "staging_cold_chain_oct11" not in line
+            ]
+            assert not legacy_re.search("\n".join(non_drop_lines)), f"Unexpected legacy name in {path}"
+        else:
+            assert not legacy_re.search(path.read_text(encoding="utf-8")), f"Legacy name found in {path}"
 
     # Zero-leak placeholder check across pack files (patterns built without literal leaked strings)
     leak_patterns = [
@@ -476,3 +571,82 @@ def test_sql_property_graph_rls_contracts_and_placeholder_hygiene() -> None:
             text = path.read_text(encoding="utf-8")
             for pattern in leak_patterns:
                 assert not pattern.search(text), f"Leak pattern {pattern.pattern} matched in {path}"
+
+
+def test_context_layer_yaml_contract() -> None:
+    ctx_path = PACK_DIR / "context_layer.yaml"
+    assert ctx_path.exists()
+    ctx = yaml.safe_load(ctx_path.read_text(encoding="utf-8"))
+
+    required_keys = {
+        "blind_dataset_tables",
+        "shadow_table_prefix",
+        "shadow_table_count",
+        "legacy_tables_to_drop",
+        "glossary",
+        "aspect_types",
+        "data_quality_scans",
+        "unstructured_contracts",
+        "verified_metric_contracts",
+    }
+    assert required_keys.issubset(ctx.keys())
+
+    assert ctx["blind_dataset_tables"] == [
+        "customers",
+        "orders",
+        "order_lines",
+        "parcel_legs",
+        "cold_chain_batches",
+        "sku_lot_allocations",
+        "mart_coldchain_q3_r1",
+        "mart_coldchain_q3_r2",
+        "vendor_sla_ledger",
+    ]
+    for excluded in ("sla_overlay", "sla_overlay_extracted", "contract_docs_obj"):
+        assert excluded not in ctx["blind_dataset_tables"]
+    assert ctx["shadow_table_prefix"] == "shadow_auto_tbl_"
+    assert ctx["shadow_table_count"] == 190
+    assert set(ctx["legacy_tables_to_drop"]) == {
+        "cold_chain_margin_gold",
+        "staging_cold_chain_oct11",
+    }
+
+    assert ctx["glossary"]["glossary_id"] == "meridian-commerce-glossary"
+    terms = {t["term_id"]: t for t in ctx["glossary"]["terms"]}
+    assert "premier-customer" in terms
+    assert "PRM_HV" in terms["premier-customer"]["description"]
+    assert terms["premier-customer"]["linked_columns"] == [
+        {"table": "customers", "column": "tier_code", "link_type": "definition"}
+    ]
+
+    aspects = {a["aspect_type_id"]: a for a in ctx["aspect_types"]}
+    cert = aspects["data-product-certification"]
+    assigns = {a["table"]: a["data"] for a in cert["assignments"]}
+    assert assigns["mart_coldchain_q3_r2"]["certification_status"] == "CERTIFIED"
+    assert assigns["mart_coldchain_q3_r1"]["certification_status"] == "UNCERTIFIED_STALE"
+
+    dq = {d["scan_id"]: d for d in ctx["data_quality_scans"]}["meridian-coldchain-dq"]
+    assert dq["target_table"] == "mart_coldchain_q3_r2"
+    assert dq["catalog_publishing_enabled"] is True
+
+    uc = ctx["unstructured_contracts"]
+    assert uc["object_table"] == "contract_docs_obj"
+    assert uc["extraction_staging_table"] == "sla_overlay_extracted"
+    assert uc["fallback_table"] == "sla_overlay"
+    assert uc["target_vendor_filter"] == "ArcticHaul"
+    assert uc["expected_invariants"] == {
+        "temp_threshold_c": 2.0,
+        "duration_threshold_min": 45,
+        "credit_rate": 0.12,
+        "quarterly_cap_sgd": 35000.0,
+    }
+
+    vmc = ctx["verified_metric_contracts"]
+    assert set(vmc.keys()) == {"r3_metrics", "r5_graph", "r6_contracts"}
+    assert "amt_net_settled_sgd" in json.dumps(vmc)
+    assert "meridian_supply_graph" in json.dumps(vmc["r5_graph"])
+    assert "sla_overlay" in json.dumps(vmc["r6_contracts"])
+    # Verified metric contracts describe rules/patterns, never precomputed target sums
+    for answer_literal in ("1312450", "19380", "18960"):
+        assert answer_literal not in json.dumps(vmc)
+

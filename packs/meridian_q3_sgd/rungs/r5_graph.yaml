@@ -7,6 +7,9 @@ release_badges:
   - capability: "BigQuery Property Graph (ISO GQL + MEASURE())"
     stage: "GA"
     region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
 
 question: "Which SG Premier orders & revenue are exposed to delayed Tier-2 Batch #LN-409?"
 
@@ -36,7 +39,7 @@ blind:
     Agent guessed lot_id LIKE '%409%' and segment_label LIKE '%Premier%', missing opaque lot mappings in sku_lot_allocations.
   sql_or_gql: |
     SELECT
-      ROUND(SUM(o.net_realized_revenue_sgd), 2) AS exposed_revenue_sgd,
+      ROUND(SUM(o.amt_net_settled_sgd), 2) AS exposed_revenue_sgd,
       COUNT(DISTINCT o.order_id) AS exposed_order_count
     FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
     JOIN `${PROJECT_ID}.${DATASET_ID}.customers` AS c
@@ -72,13 +75,13 @@ governed:
     }
   sql_or_gql: |
     SELECT
-      ROUND(SUM(net_realized_revenue_sgd), 2) AS exposed_revenue_sgd,
+      ROUND(SUM(amt_net_settled_sgd), 2) AS exposed_revenue_sgd,
       COUNT(*) AS exposed_order_count,
-      ROUND(AVG(net_realized_revenue_sgd), 2) AS exposed_aov_sgd
+      ROUND(AVG(amt_net_settled_sgd), 2) AS exposed_aov_sgd
     FROM (
       SELECT DISTINCT
         order_id,
-        net_realized_revenue_sgd
+        amt_net_settled_sgd
       FROM GRAPH_TABLE(
         `${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph`
         MATCH
@@ -93,7 +96,7 @@ governed:
           AND c.tier_code = 'PRM_HV'
         RETURN
           o.order_id AS order_id,
-          o.net_realized_revenue_sgd AS net_realized_revenue_sgd
+          o.amt_net_settled_sgd AS amt_net_settled_sgd
       )
     )
   tokens_used: 680
@@ -105,9 +108,18 @@ governed:
   rationale: "Deterministic 4-hop ISO GQL traversal over BigQuery Property Graph aligned with PRM_HV glossary (5/5 pass)."
 
 xray_summary:
-  context_added: "4-hop BigQuery Property Graph traversal connecting ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and PRM_HV Customer."
+  context_added: "4-hop BigQuery Property Graph traversal in asia-southeast1 connecting ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and PRM_HV Customer (Gemini PayGo via global endpoint)."
   gcp_primitives:
-    - "BigQuery Property Graph (GA in asia-southeast1)"
-    - "ISO GQL GRAPH_TABLE Pattern Matching (GA)"
-    - "Knowledge Catalog Business Glossary (GA)"
+    - "BigQuery Property Graph (GA · asia-southeast1)"
+    - "ISO GQL GRAPH_TABLE Pattern Matching (GA · asia-southeast1)"
+    - "Knowledge Catalog Business Glossary (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
   negative_control_assertion: "Direct string-pattern join misses opaque warehouse lots LOT-SG-8841 and LOT-SG-8842 (80% revenue gap)."
+
+grading:
+  target_value: 19380.0
+  tolerance: 0.01
+  secondary_numerics:
+    - name: "exposed_order_count"
+      value: 38
+      tolerance: 0

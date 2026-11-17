@@ -9,7 +9,10 @@ release_badges:
     region_scope: "asia-southeast1"
   - capability: "Knowledge Catalog lookupContext"
     stage: "Preview"
-    region_scope: "Global / Preview"
+    region_scope: "asia-southeast1 (Preview)"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
 
 question: "What was Singapore's Closed Q3 Net Realized Revenue?"
 
@@ -19,7 +22,7 @@ poll:
     - key: "A"
       text: "5/5 — Frontier reasoning models automatically infer ex-GST and completed-order rules from column names."
     - key: "B"
-      text: "0/5 — Without column descriptions and Data Insights predicates, it sums gross_total_sgd including 9% GST and cancelled orders (+28% inflation)."
+      text: "0/5 — Without column descriptions and Data Insights predicates, it sums amt_gross_billed_sgd including 9% GST and cancelled orders (+28% inflation)."
     - key: "C"
       text: "3/5 — It fails only because SQL syntax is wrong in BigQuery Standard SQL."
     - key: "D"
@@ -29,7 +32,7 @@ poll:
 
 blind:
   answer_headline: "SGD 1,684,200.00"
-  answer_detail: "Overstated by SGD 371,750.00 (+28.3%) because the blind agent summed gross_total_sgd (including 9% Singapore GST) across all SG rows including CANCELLED and RETURNED orders."
+  answer_detail: "Overstated by SGD 371,750.00 (+28.3%) because the blind agent summed amt_gross_billed_sgd (including 9% Singapore GST) across all SG rows including CANCELLED and RETURNED orders."
   numeric_value: 1684200.0
   unit: "SGD"
   query_language: "SQL"
@@ -37,12 +40,13 @@ blind:
   context_payload: |
     Table: ${PROJECT_ID}.${DATASET_ID}.orders
     Columns exposed without descriptions:
-      order_id STRING, country_code STRING, order_date DATE,
-      order_status STRING, gross_item_sgd FLOAT64, gross_total_sgd FLOAT64,
-      gst_sgd FLOAT64, net_realized_revenue_sgd FLOAT64
+      order_id STRING, customer_id STRING, country_code STRING,
+      sales_channel STRING, fulfillment_tier STRING, order_date DATE,
+      order_status STRING, amt_gross_billed_sgd FLOAT64, amt_item_subtotal_sgd FLOAT64,
+      amt_gst_sgd FLOAT64, fulfillment_fee_sgd FLOAT64, amt_net_settled_sgd FLOAT64
   sql_or_gql: |
     SELECT
-      ROUND(SUM(gross_total_sgd), 2) AS gross_total_sgd,
+      ROUND(SUM(amt_gross_billed_sgd), 2) AS amt_gross_billed_sgd,
       COUNT(*) AS order_count
     FROM `${PROJECT_ID}.${DATASET_ID}.orders`
     WHERE country_code = 'SG'
@@ -53,7 +57,7 @@ blind:
   eval_pass_count: 0
   eval_total_runs: 5
   trust_tier: "TIER_3_REVIEW_REQUIRED"
-  rationale: "Ungrounded scan over gross_total_sgd without order_status = 'COMPLETED' or ex-GST semantics."
+  rationale: "Ungrounded scan over amt_gross_billed_sgd without order_status = 'COMPLETED' or ex-GST semantics."
 
 governed:
   answer_headline: "SGD 1,312,450.00"
@@ -65,16 +69,19 @@ governed:
   context_payload: |
     {
       "lookup_context_stage": "Preview",
+      "data_region": "asia-southeast1",
+      "inference_endpoint": "global",
       "table": "${PROJECT_ID}.${DATASET_ID}.orders",
       "column_descriptions": {
-        "gross_total_sgd": "Gross invoice total INCLUDING 9% SG GST and unadjusted for cancellations/returns. Do NOT report as net realized revenue.",
-        "net_realized_revenue_sgd": "Governed Net Realized Revenue in SGD: ex-GST, net of returns, 0.00 for CANCELLED/RETURNED orders."
+        "amt_gross_billed_sgd": "Gross invoice amount billed to customer INCLUDING 9% SG GST across all statuses (incl. CANCELLED/RETURNED). Do NOT use for Net Realized Revenue.",
+        "amt_item_subtotal_sgd": "Ex-GST item subtotal BEFORE deducting cancellations and full/partial returns (remains positive on CANCELLED/RETURNED orders).",
+        "amt_net_settled_sgd": "Governed Net Realized Revenue in SGD: ex-GST, net of partial/full returns, and strictly 0.00 on CANCELLED/RETURNED orders. Reconciles to order_lines.net_line_revenue_sgd."
       },
       "data_insights_predicate": "country_code = 'SG' AND order_status = 'COMPLETED' AND order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'"
     }
   sql_or_gql: |
     SELECT
-      ROUND(SUM(o.net_realized_revenue_sgd), 2) AS net_realized_revenue_sgd,
+      ROUND(SUM(o.amt_net_settled_sgd), 2) AS amt_net_settled_sgd,
       COUNT(*) AS completed_order_count
     FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
     WHERE o.country_code = 'SG'
@@ -89,9 +96,15 @@ governed:
   rationale: "Grounded via column descriptions and Data Insights filter predicates (4/5 pass; remaining 1/5 edge risk motivates R2 Glossary governance)."
 
 xray_summary:
-  context_added: "Enriched BigQuery column OPTIONS(description), PK/FK NOT ENFORCED metadata, Data Insights Q3 predicates, and Knowledge Catalog lookupContext (Preview)."
+  context_added: "Enriched BigQuery column OPTIONS(description), PK/FK NOT ENFORCED metadata, Data Insights Q3 predicates in asia-southeast1, Knowledge Catalog lookupContext (Preview), and Gemini PayGo inference (global endpoint)."
   gcp_primitives:
-    - "BigQuery Schema & Column Descriptions (GA)"
-    - "BigQuery Data Insights (GA)"
-    - "Knowledge Catalog lookupContext (Preview)"
+    - "BigQuery Schema & Column Descriptions (GA · asia-southeast1)"
+    - "BigQuery Data Insights (GA · asia-southeast1)"
+    - "Knowledge Catalog lookupContext (Preview · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
   negative_control_assertion: "Unannotated orders scan triggers blind inflation (+28.3% GST/cancellation error) and classifies as TIER_3_REVIEW_REQUIRED."
+
+grading:
+  target_value: 1312450.0
+  tolerance: 0.01
+  unit: "SGD"

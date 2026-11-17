@@ -10,9 +10,9 @@ release_badges:
   - capability: "BigQuery Object Tables"
     stage: "GA"
     region_scope: "asia-southeast1"
-  - capability: "AI.GENERATE / DocAI"
+  - capability: "BigQuery AI.GENERATE (Gemini PayGo Inference)"
     stage: "GA"
-    region_scope: "asia-southeast1"
+    region_scope: "global endpoint (Object Table in asia-southeast1)"
 
 question: "How much vendor SLA credit is recoverable on Q3 Cold-Chain excursions?"
 
@@ -118,9 +118,17 @@ governed:
   rationale: "Deterministic SQL join against compiled 480-token sla_overlay extracted from ArcticHaul_Amendment_2.md (5/5 pass)."
 
 xray_summary:
-  context_added: "Structured 480-token sla_overlay table compiled from contracts/ArcticHaul_Amendment_2.md (> 2.0 C for >= 45m -> 12%, cap SGD 35K)."
+  context_added: "Structured 480-token sla_overlay table in asia-southeast1 compiled via Object Table contract_docs_obj (asia-southeast1) and BigQuery AI.GENERATE / Gemini PayGo Inference (global endpoint) from contracts/ArcticHaul_Amendment_2.md (> 2.0 C for >= 45m -> 12%, cap SGD 35K)."
   gcp_primitives:
-    - "Gemini Enterprise Drive Connector (GA)"
-    - "BigQuery Object Tables (GA)"
-    - "BigQuery AI.GENERATE / DocAI (GA)"
+    - "Gemini Enterprise Drive Connector (GA · Global / asia-southeast1)"
+    - "BigQuery Object Tables (GA · asia-southeast1)"
+    - "BigQuery AI.GENERATE / Gemini PayGo Inference (GA · global endpoint)"
   negative_control_assertion: "Base vendor_sla_ledger scan alone misses 11 moderate biologic excursions and understates credit recovery by 92.5%."
+
+grading:
+  target_value: 18960.0
+  tolerance: 0.01
+  secondary_numerics:
+    - name: "qualifying_shipments"
+      value: 14
+      tolerance: 0

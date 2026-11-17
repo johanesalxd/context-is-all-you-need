@@ -21,7 +21,10 @@ personas:
 
 invariants:
   r1_blind_sg_gross_total_sgd: 1684200.0
+  r1_sg_all_orders_item_subtotal_sgd: 1545137.73
   r1_governed_sg_net_realized_revenue_sgd: 1312450.0
+  r1_sg_completed_order_count: 3400
+  r1_non_completed_net_settled_sgd: 0.0
   r1_header_to_line_max_drift_sgd: 0.0
   r1_header_to_line_aggregate_drift_sgd: 0.0
   r2_blind_winning_channel: "Mobile App"
@@ -77,3 +80,10 @@ horizon_cards:
       - "Databricks Unity Catalog (per-user OIDC)"
       - "Snowflake Horizon Catalog (Workload Identity Federation)"
       - "AWS Glue Data Catalog (IAM role delegation)"
+
+eval_methodology:
+  regional_honesty_label: "Data, Graph, Catalog & RLS in asia-southeast1 · Gemini PayGo Inference via global Endpoint"
+  data_and_governance_region: "asia-southeast1"
+  llm_inference_endpoint: "global"
+  deterministic_seed: 20261126
+  note: "BigQuery tables, Property Graph, Knowledge Catalog glossary/aspects/DQ, BigQuery RLS, and Cloud Storage contracts are co-located in asia-southeast1; Gemini PayGo model inference routes through the global endpoint."
