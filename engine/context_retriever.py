@@ -45,8 +45,9 @@ _LOOKUP_CONTEXT_MAX_CHARS = 3600
 _CATALOG_INSPECT_MAX_WORKERS = 16
 _GOVERNANCE_POLICY_NOTE = (
     "Query CERTIFIED Data Products (certification_status == 'CERTIFIED') as authoritative; "
-    "never query or UNION UNCERTIFIED_STALE, DEPRECATED, or uncertified tables when a CERTIFIED Data Product exists."
+    "never query or UNION UNCERTIFIED_STALE or DEPRECATED tables—execution against them is blocked by governance policy."
 )
+_BLOCKED_CERTIFICATION_STATUSES = frozenset({"UNCERTIFIED_STALE", "DEPRECATED"})
 _CONTRACT_STOPWORDS = frozenset(
     {
         "metric",
@@ -646,6 +647,37 @@ class GovernedToolContext:
         self.catalog_client = catalog_client
         self.context_layer = dict(context_layer or {})
         self.max_bytes = max_bytes
+        self._cert_lock = threading.Lock()
+        self._table_cert_cache: dict[str, str] = {}
+        self._known_tables_cache: set[str] | None = None
+
+    def _cache_table_certification(self, table_leaf: str, cert_status: str) -> None:
+        cleaned = str(cert_status or "UNTAGGED").strip().upper() or "UNTAGGED"
+        with self._cert_lock:
+            self._table_cert_cache[table_leaf] = cleaned
+
+    def _known_table_names(self) -> set[str]:
+        with self._cert_lock:
+            if self._known_tables_cache is not None:
+                return set(self._known_tables_cache)
+        try:
+            dataset_ref = f"{self.project_id}.{self.dataset_id}"
+            names = {str(tbl.table_id) for tbl in self.metadata_bq_client.list_tables(dataset_ref)}
+        except Exception:
+            names = set()
+        if names:
+            with self._cert_lock:
+                self._known_tables_cache = set(names)
+        return names
+
+    @staticmethod
+    def _extract_certification_status(aspects_summary: Mapping[str, Any]) -> str:
+        cert_info = aspects_summary.get("certification")
+        if isinstance(cert_info, Mapping):
+            status = str(cert_info.get("certification_status") or "").strip().upper()
+            if status:
+                return status
+        return "UNTAGGED"
 
     def _entry_name(self, table_leaf: str) -> str:
         return (
@@ -736,7 +768,9 @@ class GovernedToolContext:
                 kc_error = str(err)
 
             cert = aspect_summary.get("certification") or {}
-            cert_status = str(cert.get("certification_status") or "UNTAGGED")
+            cert_status = self._extract_certification_status(aspect_summary)
+            if kc_error is None:
+                self._cache_table_certification(tbl_leaf, cert_status)
             has_curated_aspect = (
                 bool(aspect_summary.get("has_curated_aspect"))
                 if kc_error is None
@@ -763,7 +797,7 @@ class GovernedToolContext:
             return None
 
         rank = 0 if cert_status == "CERTIFIED" else (2 if "UNCERTIFIED" in cert_status or "STALE" in cert_status else 1)
-        return {
+        result: dict[str, Any] = {
             "table_name": f"{self.dataset_id}.{tbl_leaf}",
             "fqn": f"{self.project_id}.{self.dataset_id}.{tbl_leaf}",
             "certification_status": cert_status,
@@ -774,6 +808,9 @@ class GovernedToolContext:
             "_sort_rank": rank,
             **({"catalog_note": kc_error} if kc_error else {}),
         }
+        if cert_status in _BLOCKED_CERTIFICATION_STATUSES:
+            result["query_blocked_by_governance_policy"] = True
+        return result
 
     def _configured_aspect_type_ids(self) -> list[str]:
         ids: list[str] = []
@@ -978,6 +1015,8 @@ class GovernedToolContext:
         bq_fallback.sort()
         live_bq_names = {str(tbl.table_id) for tbl in bq_tables}
         if live_bq_names:
+            with self._cert_lock:
+                self._known_tables_cache = set(live_bq_names)
             kc_ordered = [lf for lf in kc_ordered if lf in live_bq_names]
         ordered_tables = [*kc_ordered, *bq_fallback]
 
@@ -1070,11 +1109,11 @@ class GovernedToolContext:
         aspects: dict[str, Any] = {}
         glossary_definitions: list[dict[str, Any]] = []
 
-        def _fetch_entry() -> dict[str, Any]:
+        def _fetch_entry() -> tuple[bool, dict[str, Any]]:
             try:
-                return self.catalog_client.lookup_entry(entry_name, view="ALL")
+                return True, self.catalog_client.lookup_entry(entry_name, view="ALL")
             except AgentContextError:
-                return {}
+                return False, {}
 
         def _fetch_links() -> list[dict[str, Any]]:
             try:
@@ -1086,11 +1125,14 @@ class GovernedToolContext:
             fut_entry = pool.submit(_fetch_entry)
             fut_links = pool.submit(_fetch_links)
             fut_bq = pool.submit(self._fetch_bq_table_safe, f"{self.project_id}.{self.dataset_id}.{leaf}")
-            looked = fut_entry.result()
+            entry_ok, looked = fut_entry.result()
             links = fut_links.result()
             tbl_obj = fut_bq.result()
 
         aspects = self._extract_aspects_summary(looked)
+        cert_status = self._extract_certification_status(aspects)
+        if entry_ok:
+            self._cache_table_certification(leaf, cert_status)
 
         term_entries_to_fetch: list[str] = []
         parsed_links: list[dict[str, Any]] = []
@@ -1167,7 +1209,7 @@ class GovernedToolContext:
                     ],
                 }
 
-        return {
+        detail: dict[str, Any] = {
             "table_name": f"{self.dataset_id}.{leaf}",
             "fqn": f"{self.project_id}.{self.dataset_id}.{leaf}",
             "description": tbl_desc,
@@ -1177,6 +1219,9 @@ class GovernedToolContext:
             "glossary_definitions": glossary_definitions,
             "table_constraints": constraints_info,
         }
+        if cert_status in _BLOCKED_CERTIFICATION_STATUSES:
+            detail["query_blocked_by_governance_policy"] = True
+        return detail
 
     def lookup_catalog_context(self, table_names: Sequence[str] | str) -> dict[str, Any]:
         if isinstance(table_names, str):
@@ -1340,7 +1385,123 @@ class GovernedToolContext:
             )
         return response
 
+    def _configured_graph_leaves(self) -> set[str]:
+        contracts = self.context_layer.get("verified_metric_contracts")
+        if not isinstance(contracts, Mapping):
+            return set()
+        leaves: set[str] = set()
+        for body in contracts.values():
+            if not isinstance(body, Mapping):
+                continue
+            raw_name = self._resolve_placeholders(str(body.get("graph_name") or "")).strip().strip("`")
+            leaf = raw_name.rsplit(".", 1)[-1].strip().lower()
+            if leaf:
+                leaves.add(leaf)
+        return leaves
+
+    def _extract_sql_table_leaves_for_governance(self, sql: str) -> list[str]:
+        if not isinstance(sql, str) or not sql.strip():
+            return []
+        stripped_code = strip_sql_literals_and_comments(sql)
+        ident_seg = r"(?:`[^`]+`|[A-Za-z0-9_$-]+)"
+        scan_sql = re.sub(
+            rf"\bGRAPH_TABLE\s*\(\s*(?:`[^`]+`|{ident_seg}(?:\s*\.\s*{ident_seg})*)",
+            "GRAPH_TABLE(",
+            stripped_code,
+            flags=re.IGNORECASE,
+        )
+        cte_names = {
+            m.group(1).lower()
+            for m in re.finditer(
+                r"(?:\bWITH(?:\s+RECURSIVE)?|,)\s*`?([A-Za-z_][A-Za-z0-9_$]*)`?\s+AS\s*\(",
+                scan_sql,
+                flags=re.IGNORECASE,
+            )
+        }
+        graph_leaves = self._configured_graph_leaves()
+        known_tables = self._known_table_names()
+        with self._cert_lock:
+            cached_leaves = set(self._table_cert_cache.keys())
+
+        found: list[str] = []
+        seen: set[str] = set()
+
+        def _record(leaf_raw: str) -> None:
+            leaf = leaf_raw.strip("`").strip()
+            if not leaf or leaf.upper() == "INFORMATION_SCHEMA":
+                return
+            low = leaf.lower()
+            if low in graph_leaves or low in seen:
+                return
+            seen.add(low)
+            found.append(leaf)
+
+        qual_pat = re.compile(
+            rf"(`[^`.\s]+(?:\.[^`.\s]+){{1,2}}`|{ident_seg}(?:\.{ident_seg}){{1,2}})"
+        )
+        for m in qual_pat.finditer(scan_sql):
+            parts = [p.strip("`") for p in m.group(1).split(".") if p.strip("`")]
+            if len(parts) == 2:
+                ds, leaf = parts
+            elif len(parts) == 3:
+                _, ds, leaf = parts
+            else:
+                continue
+            if ds == self.dataset_id:
+                _record(leaf)
+
+        sql_keywords = {
+            "select",
+            "with",
+            "unnest",
+            "lateral",
+            "graph_table",
+            "graph_expand",
+            "table",
+            "values",
+        }
+        scalar_from_prefix = re.compile(r"\b(?:EXTRACT|SUBSTRING|TRIM)\s*\([^()]*\bFROM\s*$", re.IGNORECASE)
+        unqual_pat = re.compile(r"\b(?:FROM|JOIN)\s+(`?[A-Za-z_][A-Za-z0-9_$-]*`?)(?!\s*[.(])", re.IGNORECASE)
+        for m in unqual_pat.finditer(scan_sql):
+            before_ident = scan_sql[max(0, m.start(1) - 60) : m.start(1)]
+            if scalar_from_prefix.search(before_ident):
+                continue
+            ident = m.group(1).strip("`")
+            low = ident.lower()
+            if low in sql_keywords or low in cte_names or low in graph_leaves:
+                continue
+            if known_tables and ident not in known_tables and ident not in cached_leaves:
+                continue
+            _record(ident)
+
+        return found
+
+    def _enforce_governance_certification_before_dry_run(self, sql: str) -> None:
+        table_leaves = self._extract_sql_table_leaves_for_governance(sql)
+        if not table_leaves:
+            return
+        for leaf in table_leaves:
+            with self._cert_lock:
+                cert_status = self._table_cert_cache.get(leaf)
+            if cert_status is None:
+                try:
+                    looked = self.catalog_client.lookup_entry(self._entry_name(leaf), view="ALL")
+                except AgentContextError as err:
+                    raise AgentSqlSecurityError(
+                        f"Governance policy blocked query: failed to verify certification aspect for "
+                        f"{self.dataset_id}.{leaf}: {err}"
+                    ) from err
+                aspects = self._extract_aspects_summary(looked)
+                cert_status = self._extract_certification_status(aspects)
+                self._cache_table_certification(leaf, cert_status)
+            if cert_status in _BLOCKED_CERTIFICATION_STATUSES:
+                raise AgentSqlSecurityError(
+                    f"Governance policy blocked query: table {self.dataset_id}.{leaf} has "
+                    f"certification_status={cert_status!r}; query the CERTIFIED Data Product instead."
+                )
+
     def execute_select_sql(self, sql: str, *, timeout_s: float | None = None) -> dict[str, Any]:
+        self._enforce_governance_certification_before_dry_run(sql)
         gate = validate_agent_sql_gate(
             self.sql_bq_client,
             sql,

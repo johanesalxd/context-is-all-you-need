@@ -447,6 +447,50 @@ def test_trust_classifier_sql_normalization_and_reconciliation() -> None:
     ok_metric, actual, _ = reconcile_outcome_metric(100.0, [{"x": 40.0}, {"x": 60.0}])
     assert ok_metric and actual == 100.0
 
+    # Narrow hyphenated alphanumeric tag tokens (letters-hyphen-digits) + SQL string/date year literals -> TIER_1
+    tag_and_sql_year = classify_outcome(
+        sql_or_gql=(
+            "SELECT SUM(exposed_amount) AS exposed_amount FROM GRAPH_TABLE(g MATCH (n) "
+            "WHERE n.created_date >= DATE '2026-07-01' COLUMNS (19380.0 AS exposed_amount))"
+        ),
+        query_language="GQL",
+        answer_headline="Tier-2 Synth Stream Batch #TX-409 (ISO-3166) total exposure was SGD 19,380.00 during Q3 2026.",
+        numeric_value=19380.0,
+        result_rows=[{"exposed_amount": 19380.0}],
+        context_mechanism="GRAPH_TABLE",
+    )
+    assert tag_and_sql_year.tier == TrustTier.TIER_1_VERIFIED_OR_COMPILED
+    assert tag_and_sql_year.reasons == ()
+
+    # Unquoted numeric year in SQL (not a string/date literal) must NOT exempt headline year
+    unquoted_sql_year = classify_outcome(
+        sql_or_gql="SELECT 19380.0 AS exposed_amount FROM synth_gov.orders WHERE fiscal_year = 2026",
+        query_language="SQL",
+        answer_headline="Exposed amount was SGD 19,380.00 in 2026.",
+        numeric_value=19380.0,
+        result_rows=[{"exposed_amount": 19380.0}],
+        context_mechanism="knowledge_catalog",
+    )
+    assert unquoted_sql_year.tier == TrustTier.TIER_3_REVIEW_REQUIRED
+    assert "unverified_headline_numeric:2026" in unquoted_sql_year.reasons
+
+    # ISO currency hyphen, hyphenated decimal, or negative loss still audited; fabricated money headline stays TIER_3
+    assert reconcile_prose_numbers("Impact was SGD-500 on metric-42.5.", result_rows=[{"x": 10}]) == (
+        "500",
+        "42.5",
+    )
+    assert reconcile_prose_numbers("Loss was -500.", result_rows=[{"x": 10}]) == ("-500",)
+    fabricated_money = classify_outcome(
+        sql_or_gql="SELECT net_revenue AS val FROM synth_gov.orders",
+        query_language="SQL",
+        answer_headline="Total completed revenue was SGD 1,684,200.",
+        numeric_value=1312450.0,
+        result_rows=[{"val": 1312450.0}],
+        context_mechanism="knowledge_catalog",
+    )
+    assert fabricated_money.tier == TrustTier.TIER_3_REVIEW_REQUIRED
+    assert "unverified_headline_numeric:1,684,200" in fabricated_money.reasons
+
 
 def test_rls_impersonation_hmac_sa_validation_and_redaction(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "0123456789abcdef0123456789abcdef"

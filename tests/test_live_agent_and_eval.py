@@ -2098,7 +2098,10 @@ def test_symmetric_turn_config_thinking_budget_and_tool_declarations(
     blind_sys = str(blind_cfg.system_instruction).replace("synth_blind", "<DATASET>")
     gov_sys = str(gov_cfg.system_instruction).replace("synth_gov", "<DATASET>")
     assert blind_sys == gov_sys
-    assert "do not run redundant follow-up queries" in gov_sys
+    assert "never run redundant follow-up queries" in gov_sys
+    assert 'GRAPH_EXPAND("example-project-id.<DATASET>.<graph>"' in gov_sys
+    assert "GRAPH_TABLE(`example-project-id.<DATASET>.<graph>`" in gov_sys
+    assert "mart" not in gov_sys.lower()
 
     gov_decls = {d.name: d for d in gov_cfg.tools[0].function_declarations}
     assert "Business Glossary term definitions" in gov_decls["lookup_catalog_context"].description
@@ -2170,4 +2173,199 @@ def test_get_verified_metric_contract_prevents_multi_contract_cross_match() -> N
     assert list(g_ctx.get_verified_metric_contract("contribution ratio")["matched_contracts"].keys()) == [
         "r3_metrics"
     ]
+
+
+def test_governance_execution_block_uncertified_stale_deprecated_and_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from google.cloud import bigquery
+    import yaml
+
+    from engine.context_retriever import AgentContextError, AgentSqlSecurityError
+    from engine.live_agent import run_live_agent_arm
+    from engine.trust_classifier import TrustTier
+
+    proj = "example-project-id"
+    monkeypatch.setenv("PROJECT_ID", proj)
+    monkeypatch.setenv("DATASET_ID", "synth_gov")
+    monkeypatch.setenv("BLIND_DATASET_ID", "synth_blind")
+    monkeypatch.setenv("BQ_LOCATION", "asia-southeast1")
+    monkeypatch.setenv("AGENT_MODEL_ID", "gemini-3.8-flash")
+    monkeypatch.setenv("AGENT_MODEL_LOCATION", "global")
+
+    packs_dir = tmp_path / "packs"
+    pack_dir = packs_dir / "synth_pack"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "context_layer.yaml").write_text(
+        yaml.safe_dump({"glossary": {"terms": []}, "verified_metric_contracts": {}}),
+        encoding="utf-8",
+    )
+
+    gov_tables = {
+        "alpha_curated_cert": {"table_type": "TABLE", "schema": [bigquery.SchemaField("margin_pct", "FLOAT64")]},
+        "gamma_stale_mart": {
+            "table_type": "TABLE",
+            "schema": [bigquery.SchemaField("margin_pct", "FLOAT64")],
+            "description": "Stale snapshot",
+        },
+        "delta_deprecated_mart": {
+            "table_type": "TABLE",
+            "schema": [bigquery.SchemaField("margin_pct", "FLOAT64")],
+            "description": "Deprecated mart",
+        },
+        "orders": {"table_type": "TABLE", "schema": [bigquery.SchemaField("order_ts", "TIMESTAMP")]},
+        "broken_lookup_tbl": {
+            "table_type": "TABLE",
+            "schema": [bigquery.SchemaField("val", "FLOAT64")],
+            "description": "Broken catalog entry",
+        },
+    }
+
+    def _dry_run(sql: str, _cfg: Any, _loc: str) -> Any:
+        refs = []
+        for leaf in ("alpha_curated_cert", "orders"):
+            if leaf in sql or "GRAPH_TABLE" in sql:
+                refs.append(SimpleNamespace(project=proj, dataset_id="synth_gov", table_id=leaf))
+        if not refs:
+            refs.append(SimpleNamespace(project=proj, dataset_id="synth_gov", table_id="alpha_curated_cert"))
+        return _FakeDryRunJob(referenced_tables=refs, total_bytes_processed=1024)
+
+    def _rows(sql: str, is_dry: bool) -> list[dict[str, Any]]:
+        if is_dry:
+            return []
+        return [{"margin_pct": 28.4}]
+
+    gov_bq = _FakeAgentBQClient(
+        tables_by_dataset={"synth_gov": gov_tables},
+        dry_run_handler=_dry_run,
+        rows_by_sql=_rows,
+    )
+
+    def _transport(_m: str, url: str, _p: dict | None, _h: dict) -> dict[str, Any]:
+        if ":searchEntries" in url:
+            return {"results": []}
+        if ":lookupEntryLinks" in url:
+            return {"entryLinks": []}
+        if ":lookupContext" in url:
+            return {"context": "Authoritative table is alpha_curated_cert."}
+        if ":lookupEntry" in url:
+            if "broken_lookup_tbl" in url:
+                raise AgentContextError("503 catalog unavailable")
+            if "gamma_stale_mart" in url:
+                return {"aspects": {"999.asia-southeast1.data-product-certification": {"data": {"certification_status": "UNCERTIFIED_STALE"}}}}
+            if "delta_deprecated_mart" in url:
+                return {"aspects": {"999.asia-southeast1.data-product-certification": {"data": {"certification_status": "DEPRECATED"}}}}
+            if "alpha_curated_cert" in url:
+                return {"aspects": {"999.asia-southeast1.data-product-certification": {"data": {"certification_status": "CERTIFIED"}}}}
+            return {"aspects": {}}
+        return {}
+
+    cat_client = DataplexCatalogRestClient(project_id=proj, bq_location="asia-southeast1", http_transport=_transport)
+    g_ctx = GovernedToolContext(
+        project_id=proj,
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email=f"gov@{proj}.iam.gserviceaccount.com",
+        sql_sa_email=f"gov@{proj}.iam.gserviceaccount.com",
+        catalog_client=cat_client,
+        context_layer={
+            "verified_metric_contracts": {
+                "r5_graph": {
+                    "graph_name": "${PROJECT_ID}.${DATASET_ID}.synth_supply_graph",
+                    "display_name": "Synth Supply Chain Graph",
+                }
+            }
+        },
+    )
+
+    # 1. Discovery and lookup keep UNCERTIFIED_STALE / DEPRECATED visible and mark them blocked
+    disc = g_ctx.search_certified_tables("*")
+    assert "blocked by governance policy" in disc["governance_policy"].lower()
+    by_name = {t["table_name"]: t for t in disc["tables"]}
+    assert by_name["synth_gov.gamma_stale_mart"]["query_blocked_by_governance_policy"] is True
+    assert by_name["synth_gov.delta_deprecated_mart"]["query_blocked_by_governance_policy"] is True
+    assert "query_blocked_by_governance_policy" not in by_name["synth_gov.alpha_curated_cert"]
+
+    detail = g_ctx.lookup_catalog_context(["gamma_stale_mart"])
+    assert detail["tables"][0]["query_blocked_by_governance_policy"] is True
+
+    # 2. Execution blocks UNCERTIFIED_STALE, DEPRECATED, and aspect-lookup failures BEFORE BigQuery dry_run
+    with pytest.raises(AgentSqlSecurityError, match="UNCERTIFIED_STALE"):
+        g_ctx.execute_select_sql(f"SELECT margin_pct FROM `{proj}.synth_gov.gamma_stale_mart`")
+    with pytest.raises(AgentSqlSecurityError, match="DEPRECATED"):
+        g_ctx.execute_select_sql(f"SELECT margin_pct FROM `{proj}.synth_gov.delta_deprecated_mart`")
+    with pytest.raises(AgentSqlSecurityError, match="failed to verify certification aspect"):
+        g_ctx.execute_select_sql(f"SELECT val FROM `{proj}.synth_gov.broken_lookup_tbl`")
+    assert gov_bq.queries == []
+
+    # 3. Valid CERTIFIED/UNTAGGED queries with EXTRACT(... FROM col) and GRAPH_TABLE pass cleanly
+    ok_extract = g_ctx.execute_select_sql(
+        f"SELECT EXTRACT(YEAR FROM order_ts) AS yr FROM `{proj}.synth_gov.orders` JOIN `{proj}.synth_gov.alpha_curated_cert` ON TRUE"
+    )
+    assert ok_extract["row_count"] == 1
+    ok_graph = g_ctx.execute_select_sql(
+        f"SELECT margin_pct FROM GRAPH_TABLE(`{proj}.synth_gov.synth_supply_graph` MATCH (o) COLUMNS (o.margin_pct))"
+    )
+    assert ok_graph["row_count"] == 1
+
+    # 4. End-to-end blocked attempt in run_live_agent_arm stays visible in trace, error_retries, signal, and TIER_3
+    class _BlockedThenRecoverModels:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    usage_metadata=SimpleNamespace(total_token_count=300),
+                    candidates=[SimpleNamespace(content=None)],
+                    function_calls=[
+                        SimpleNamespace(
+                            name="execute_select_sql",
+                            args={"sql": f"SELECT margin_pct FROM `{proj}.synth_gov.gamma_stale_mart`"},
+                        )
+                    ],
+                    text="",
+                )
+            if self.calls == 2:
+                return SimpleNamespace(
+                    usage_metadata=SimpleNamespace(total_token_count=300),
+                    candidates=[SimpleNamespace(content=None)],
+                    function_calls=[
+                        SimpleNamespace(
+                            name="execute_select_sql",
+                            args={"sql": f"SELECT margin_pct FROM `{proj}.synth_gov.alpha_curated_cert`"},
+                        )
+                    ],
+                    text="",
+                )
+            return SimpleNamespace(
+                usage_metadata=SimpleNamespace(total_token_count=200),
+                candidates=[SimpleNamespace(content=None)],
+                function_calls=[],
+                text='```json\n{"answer_summary": "Margin was 28.4%.", "numeric_value": 28.4, "unit": "%"}\n```',
+            )
+
+    res = run_live_agent_arm(
+        pack_id="synth_pack",
+        rung={
+            "id": "r4_test",
+            "question": "What is verified margin?",
+            "region": "asia-southeast1",
+            "grading": {"target_value": 28.4, "tolerance": 0.1},
+        },
+        arm="governed",
+        repo_root=tmp_path,
+        packs_dir=packs_dir,
+        genai_client=SimpleNamespace(models=_BlockedThenRecoverModels()),
+        governed_tool_ctx=g_ctx,
+    )
+    assert res.error_retries == 1
+    assert any(s["tool_name"] == "execute_select_sql" and s["status"] == "blocked" for s in res.tool_trace)
+    assert "GOVERNANCE_POLICY_BLOCKED" in res.observed_signals
+    assert res.trust_tier == TrustTier.TIER_3_REVIEW_REQUIRED.value
+
 
