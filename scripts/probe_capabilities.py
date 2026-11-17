@@ -12,6 +12,10 @@ import sys
 import urllib.error
 import urllib.request
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from engine.pack_loader import DEFAULT_REPO_ROOT, resolve_env_settings
 from engine.rls_impersonation import redact_bundle_data
 
