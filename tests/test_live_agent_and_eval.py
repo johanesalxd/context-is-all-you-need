@@ -1733,10 +1733,12 @@ def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> 
         "zeta_unannotated": {"table_type": "TABLE", "schema": [bigquery.SchemaField("x", "STRING")]},
     }
     gov_bq = _FakeAgentBQClient(tables_by_dataset={"synth_gov": gov_tables})
-    long_context_text = "CONTEXT_LINE\n" * 400
+    long_context_text = "CONTEXT_LINE\n" * 600
+    seen_search_queries: list[str] = []
 
     def _transport(_m: str, url: str, payload: dict | None, _h: dict) -> dict[str, Any]:
         if ":searchEntries" in url:
+            seen_search_queries.append(str((payload or {}).get("query") or ""))
             token = (payload or {}).get("pageToken")
             if not token:
                 return {
@@ -1823,6 +1825,12 @@ def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> 
         sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
         catalog_client=cat_client,
         context_layer={
+            "aspect_types": [{"aspect_type_id": "data-product-certification"}],
+            "glossary": {
+                "terms": [
+                    {"term_id": "premier-customer", "display_name": "Premier Customer"},
+                ]
+            },
             "verified_metric_contracts": {
                 "r3_metrics": {
                     "metric_name": "regional_margin_pct",
@@ -1830,14 +1838,22 @@ def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> 
                     "formula": "MEASURE(margin_pct) -- unrelated revenue note",
                 },
                 "r5_graph": {
-                    "metric_name": "same_day_contribution_margin",
-                    "display_name": "Same-Day Contribution Margin",
-                    "formula": "GRAPH_TABLE(ops MATCH ...)",
+                    "graph_name": "${PROJECT_ID}.${DATASET_ID}.synth_supply_graph",
+                    "display_name": "Synth Supply 4-Hop Graph",
+                    "description": "Property graph tracing supplier batch excursions and lot allocations for Premier Customer orders.",
+                    "edge_chain": "(SupplierBatch)<-[:SUPPLIED_IN_BATCH]-(LotAllocation)-[:BELONGS_TO_ORDER]->(Order)",
+                    "node_labels": ["SupplierBatch (batch_id)", "LotAllocation (lot_id)"],
+                    "edge_labels": ["SUPPLIED_IN_BATCH", "ALLOCATED_FROM_LOT"],
+                    "formula": "GRAPH_TABLE(synth_supply_graph MATCH ...)",
                 },
-            }
+            },
         },
     )
     discovered = g_ctx.search_certified_tables("*")
+    assert any("fully_qualified_name:p1.synth_gov" in q for q in seen_search_queries)
+    assert any("aspect:p1.asia-southeast1.data-product-certification" in q for q in seen_search_queries)
+    assert not any("dataset=" in q for q in seen_search_queries)
+
     found_names = [t["table_name"] for t in discovered["tables"]]
     assert found_names == [
         "synth_gov.alpha_curated_cert",
@@ -1847,18 +1863,33 @@ def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> 
     assert discovered["total_matched"] == 3
     assert discovered["uncertified_omitted"] == 1
     assert "CERTIFIED" in discovered["governance_policy"]
+    assert discovered["property_graphs"][0]["graph_name"] == "synth_gov.synth_supply_graph"
+    assert discovered["property_graphs"][0]["contract_topic"] == "r5_graph"
 
-    # 3. lookup_catalog_context caps snippet at 1800 chars & preserves structured glossary + governance_policy
+    # Non-wildcard search for graph concept also surfaces matching property_graphs
+    batch_search = g_ctx.search_certified_tables("batch")
+    assert batch_search["property_graphs"][0]["fqn"] == "p1.synth_gov.synth_supply_graph"
+
+    # 3. lookup_catalog_context caps snippet at 3600 chars & preserves structured glossary + governance_policy
     ctx_res = g_ctx.lookup_catalog_context(["alpha_curated_cert", "beta_glossary_only"])
-    assert len(ctx_res["lookup_context"]) == 1800
+    assert len(ctx_res["lookup_context"]) == 3600
     assert "CERTIFIED" in ctx_res["governance_policy"]
     assert ctx_res["tables"][1]["glossary_definitions"][0]["display_name"] == "Premier Customer"
 
-    # 4. get_verified_metric_contract returns {} on unmatched / generic stop-word topics & does not trigger signal
-    for miss_topic in ("AOV", "Net Realized Revenue", "", "metric total value", "unrelated revenue"):
+    # 4. get_verified_metric_contract removes available_topics, suppresses retries on miss, and indexes graph structural terms cleanly
+    for miss_topic in (
+        "AOV",
+        "Net Realized Revenue",
+        "Premier Customer Net Realized Revenue",
+        "gross margin",
+        "",
+        "metric total value",
+        "unrelated revenue",
+    ):
         miss = g_ctx.get_verified_metric_contract(miss_topic)
         assert miss["matched_contracts"] == {}
-        assert "lookup_catalog_context" in miss["note"]
+        assert "available_topics" not in miss
+        assert "Do NOT retry get_verified_metric_contract" in miss["note"]
         signals = extract_observed_signals(
             sql_or_gql="SELECT 1",
             tool_trace=[
@@ -1872,11 +1903,75 @@ def test_retriever_catalog_facts_context_cap_contracts_and_scalar_priority() -> 
         assert "VERIFIED_METRIC_CONTRACT" not in signals
 
     hit_r3 = g_ctx.get_verified_metric_contract("r3")
+    assert "available_topics" not in hit_r3
     assert list(hit_r3["matched_contracts"].keys()) == ["r3_metrics"]
-    hit_r5 = g_ctx.get_verified_metric_contract("same-day contribution")
-    assert list(hit_r5["matched_contracts"].keys()) == ["r5_graph"]
+    hit_r5_lot = g_ctx.get_verified_metric_contract("batch lot allocation")
+    assert list(hit_r5_lot["matched_contracts"].keys()) == ["r5_graph"]
+    hit_r5_name = g_ctx.get_verified_metric_contract("Synth Supply Graph")
+    assert list(hit_r5_name["matched_contracts"].keys()) == ["r5_graph"]
 
-    # 5. _extract_scalar_from_rows prioritizes aov, exposed_revenue, contribution_margin over generic revenue/margin
+    # 5. _extract_scalar_from_rows prioritizes percentage/ratio/net-settled keys over count/total/gross revenue
+    assert _extract_scalar_from_rows([{"orders_net_realized_rev_completed": 1312450.0, "total_orders": 3900}]) == pytest.approx(1312450.0)
+    assert _extract_scalar_from_rows([{"net_revenue_sgd": 1220000.0, "gross_margin_pct": 28.4}]) == pytest.approx(28.4)
     assert _extract_scalar_from_rows([{"total_net_revenue_sgd": 147000.0, "aov_sgd": 612.5}]) == pytest.approx(612.5)
     assert _extract_scalar_from_rows([{"total_revenue": 90000.0, "exposed_revenue_amt": 42000.0}]) == pytest.approx(42000.0)
     assert _extract_scalar_from_rows([{"gross_margin": 50000.0, "contribution_margin_pct": 18.4}]) == pytest.approx(18.4)
+
+    # 6. Large dataset (>40 tables) with entrySource descriptions in searchEntries fast-skips get_table on unannotated clones
+    large_tables = {f"clone_tbl_{i:03d}": {"table_type": "TABLE", "schema": []} for i in range(1, 51)}
+    large_tables["curated_orders"] = {
+        "table_type": "TABLE",
+        "schema": [bigquery.SchemaField("order_id", "STRING")],
+        "description": "Curated orders fact",
+    }
+    get_table_calls: list[str] = []
+
+    class _CountingBQ(_FakeAgentBQClient):
+        def get_table(self, table_id: str) -> Any:
+            get_table_calls.append(table_id.split(".")[-1])
+            return super().get_table(table_id)
+
+    large_bq = _CountingBQ(tables_by_dataset={"synth_gov": large_tables})
+
+    def _large_transport(_m: str, url: str, payload: dict | None, _h: dict) -> dict[str, Any]:
+        if ":searchEntries" in url:
+            q_str = str((payload or {}).get("query") or "")
+            if "aspect:" in q_str:
+                return {"results": []}
+            results = [
+                {
+                    "linkedResource": "//bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/curated_orders",
+                    "dataplexEntry": {
+                        "name": "projects/p1/locations/asia-southeast1/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/curated_orders",
+                        "entrySource": {"description": "Curated orders fact"},
+                    },
+                }
+            ]
+            for i in range(1, 51):
+                results.append(
+                    {
+                        "linkedResource": f"//bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/clone_tbl_{i:03d}",
+                        "dataplexEntry": {
+                            "name": f"projects/p1/locations/asia-southeast1/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/p1/datasets/synth_gov/tables/clone_tbl_{i:03d}",
+                            "entrySource": {"description": ""},
+                        },
+                    }
+                )
+            return {"results": results}
+        return {"aspects": {}}
+
+    g_large = GovernedToolContext(
+        project_id="p1",
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=large_bq,
+        sql_bq_client=large_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=DataplexCatalogRestClient(project_id="p1", bq_location="asia-southeast1", http_transport=_large_transport),
+    )
+    large_res = g_large.search_certified_tables("*")
+    assert large_res["total_matched"] == 1
+    assert large_res["uncertified_omitted"] == 50
+    assert get_table_calls == ["curated_orders"]

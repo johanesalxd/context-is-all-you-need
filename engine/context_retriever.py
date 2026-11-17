@@ -41,8 +41,8 @@ _DEFAULT_MAX_BYTES_BILLED = 104_857_600  # 100 MB
 _DATAPLEX_BASE = "https://dataplex.googleapis.com/v1"
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 _MAX_DISCOVERY_TABLES = 25
-_LOOKUP_CONTEXT_MAX_CHARS = 1800
-_CATALOG_INSPECT_MAX_WORKERS = 10
+_LOOKUP_CONTEXT_MAX_CHARS = 3600
+_CATALOG_INSPECT_MAX_WORKERS = 16
 _GOVERNANCE_POLICY_NOTE = (
     "Query CERTIFIED Data Products (certification_status == 'CERTIFIED') as authoritative; "
     "never query or UNION UNCERTIFIED_STALE, DEPRECATED, or uncertified tables when a CERTIFIED Data Product exists."
@@ -63,6 +63,21 @@ _CONTRACT_STOPWORDS = frozenset(
         "pct",
         "rate",
         "amount",
+        "margin",
+        "gross",
+        "net",
+        "revenue",
+        "order",
+        "orders",
+        "customer",
+        "customers",
+        "line",
+        "lines",
+        "country",
+        "date",
+        "tier",
+        "status",
+        "completed",
     }
 )
 _AUTO_STRUCTURAL_ASPECT_TYPES = frozenset(
@@ -722,7 +737,11 @@ class GovernedToolContext:
 
             cert = aspect_summary.get("certification") or {}
             cert_status = str(cert.get("certification_status") or "UNTAGGED")
-            has_curated_aspect = bool(aspect_summary.get("has_curated_aspect")) or bool(kc_hint.get("has_curated_aspect"))
+            has_curated_aspect = (
+                bool(aspect_summary.get("has_curated_aspect"))
+                if kc_error is None
+                else bool(kc_hint.get("has_curated_aspect"))
+            )
             if cert_status != "CERTIFIED" and not has_curated_aspect and not effective_desc:
                 try:
                     links = self.catalog_client.lookup_entry_links(entry_name)
@@ -756,30 +775,116 @@ class GovernedToolContext:
             **({"catalog_note": kc_error} if kc_error else {}),
         }
 
+    def _configured_aspect_type_ids(self) -> list[str]:
+        ids: list[str] = []
+        raw_aspects = self.context_layer.get("aspect_types")
+        if isinstance(raw_aspects, list):
+            for entry in raw_aspects:
+                if isinstance(entry, Mapping):
+                    aid = str(entry.get("aspect_type_id") or entry.get("id") or "").strip()
+                    if aid and aid not in ids:
+                        ids.append(aid)
+        cert_cfg = self.context_layer.get("certification_aspect")
+        if isinstance(cert_cfg, Mapping):
+            aid = str(cert_cfg.get("aspect_type_id") or cert_cfg.get("id") or "").strip()
+            if aid and aid not in ids:
+                ids.append(aid)
+        return ids
+
+    @staticmethod
+    def _tokenize_identifier_text(text: str) -> list[str]:
+        tokens: list[str] = []
+        seen: set[str] = set()
+        for raw in re.split(r"[^A-Za-z0-9]+", text or ""):
+            if len(raw) >= 2:
+                low = raw.lower()
+                if low not in seen:
+                    seen.add(low)
+                    tokens.append(low)
+            for camel in re.findall(r"[A-Z]+(?=[A-Z][a-z]|[^A-Za-z]|$)|[A-Z]?[a-z]+", raw):
+                if len(camel) >= 2:
+                    clow = camel.lower()
+                    if clow not in seen:
+                        seen.add(clow)
+                        tokens.append(clow)
+        return tokens
+
+    def _resolve_placeholders(self, raw: str) -> str:
+        return (
+            (raw or "")
+            .replace("${PROJECT_ID}", self.project_id)
+            .replace("${DATASET_ID}", self.dataset_id)
+            .replace("${BQ_LOCATION}", self.bq_location)
+        )
+
+    def _extract_property_graphs(self, term: str, tokens: Sequence[str], *, is_wildcard: bool) -> list[dict[str, Any]]:
+        contracts = self.context_layer.get("verified_metric_contracts")
+        if not isinstance(contracts, Mapping):
+            return []
+        graphs: list[dict[str, Any]] = []
+        for key, body in contracts.items():
+            if not isinstance(body, Mapping) or not body.get("graph_name"):
+                continue
+            resolved_fqn = self._resolve_placeholders(str(body.get("graph_name") or "")).strip().strip("`")
+            leaf = resolved_fqn.rsplit(".", 1)[-1] if resolved_fqn else ""
+            if not leaf:
+                continue
+            graph_item = {
+                "contract_topic": str(key),
+                "graph_name": f"{self.dataset_id}.{leaf}",
+                "fqn": f"{self.project_id}.{self.dataset_id}.{leaf}",
+                "display_name": str(body.get("display_name") or ""),
+                "description": str(body.get("description") or ""),
+                "edge_chain": str(body.get("edge_chain") or ""),
+            }
+            if is_wildcard or not tokens:
+                graphs.append(graph_item)
+                continue
+            haystack = " ".join(
+                [
+                    graph_item["contract_topic"],
+                    graph_item["graph_name"],
+                    graph_item["display_name"],
+                    graph_item["description"],
+                    graph_item["edge_chain"],
+                    " ".join(str(x) for x in (body.get("node_labels") or [])),
+                    " ".join(str(x) for x in (body.get("edge_labels") or [])),
+                ]
+            ).lower()
+            if any(tok in haystack for tok in tokens):
+                graphs.append(graph_item)
+        return graphs
+
     def search_certified_tables(self, search_term: str) -> dict[str, Any]:
         term = (search_term or "").strip()
         is_wildcard = term.lower() in {"", "*", "all"}
+        tokens = [t.lower() for t in re.split(r"[^A-Za-z0-9_]+", term) if len(t) >= 2]
         kc_ordered: list[str] = []
         seen_tables: set[str] = set()
         kc_hints: dict[str, dict[str, Any]] = {}
+        dataset_ref = f"{self.project_id}.{self.dataset_id}"
+        marker = f"/datasets/{self.dataset_id}/tables/"
+
+        def _list_bq_tables() -> list[Any]:
+            try:
+                return list(self.metadata_bq_client.list_tables(dataset_ref))
+            except Exception:
+                return []
 
         if is_wildcard:
             wildcard_specs: list[tuple[str, int, int, bool]] = [
-                (f"dataset={self.dataset_id}", 100, 3, False),
-                (f"dataset={self.dataset_id} aspect:dataplex-types.global.data-quality", 50, 1, True),
+                (f"fully_qualified_name:{self.project_id}.{self.dataset_id}", 100, 3, False),
+                (f"{self.dataset_id} aspect:dataplex-types.global.data-quality", 50, 1, True),
             ]
-            cert_cfg = self.context_layer.get("certification_aspect")
-            if isinstance(cert_cfg, Mapping):
-                cert_aspect_id = str(cert_cfg.get("aspect_type_id") or cert_cfg.get("id") or "").strip()
-                if cert_aspect_id:
-                    wildcard_specs.append(
-                        (
-                            f"dataset={self.dataset_id} aspect:{self.project_id}.{self.bq_location}.{cert_aspect_id}",
-                            50,
-                            1,
-                            True,
-                        )
+            for aid in self._configured_aspect_type_ids():
+                wildcard_specs.append(
+                    (
+                        f"{self.dataset_id} aspect:{self.project_id}.{self.bq_location}.{aid}",
+                        50,
+                        1,
+                        True,
                     )
+                )
 
             def _run_search(spec: tuple[str, int, int, bool]) -> tuple[bool, list[dict[str, Any]]]:
                 q, psize, mpages, is_aspect_q = spec
@@ -788,20 +893,38 @@ class GovernedToolContext:
                 except AgentContextError:
                     return is_aspect_q, []
 
-            with ThreadPoolExecutor(max_workers=len(wildcard_specs)) as pool:
+            with ThreadPoolExecutor(max_workers=len(wildcard_specs) + 1) as pool:
+                fut_bq = pool.submit(_list_bq_tables)
                 search_batches = list(pool.map(_run_search, wildcard_specs))
+                bq_tables = fut_bq.result()
         else:
-            search_batches = []
-            for q in (f"{term} dataset={self.dataset_id}", term):
-                try:
-                    hits = self.catalog_client.search_entries(q, page_size=50, max_pages=1)
-                except AgentContextError:
-                    hits = []
-                if hits:
-                    search_batches.append((False, hits))
-                    break
+            def _search_specific() -> list[tuple[bool, list[dict[str, Any]]]]:
+                queries = (
+                    f"{term} fully_qualified_name:{self.project_id}.{self.dataset_id}",
+                    f"{term} parent:{self.dataset_id}",
+                    term,
+                )
+                for q in queries:
+                    try:
+                        hits = self.catalog_client.search_entries(q, page_size=50, max_pages=1)
+                    except AgentContextError:
+                        hits = []
+                    filtered_hits = [
+                        h
+                        for h in hits
+                        if marker in str(h.get("linkedResource") or "")
+                        or marker in str((h.get("dataplexEntry") or {}).get("name") or "")
+                    ]
+                    if filtered_hits:
+                        return [(False, filtered_hits)]
+                return []
 
-        marker = f"/datasets/{self.dataset_id}/tables/"
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_bq = pool.submit(_list_bq_tables)
+                fut_kc = pool.submit(_search_specific)
+                bq_tables = fut_bq.result()
+                search_batches = fut_kc.result()
+
         for is_aspect_q, hits in search_batches:
             for hit in hits:
                 linked = str(hit.get("linkedResource") or "")
@@ -825,13 +948,6 @@ class GovernedToolContext:
                 if table_leaf not in seen_tables:
                     seen_tables.add(table_leaf)
                     kc_ordered.append(table_leaf)
-
-        tokens = [t.lower() for t in re.split(r"[^A-Za-z0-9_]+", term) if len(t) >= 2]
-        dataset_ref = f"{self.project_id}.{self.dataset_id}"
-        try:
-            bq_tables = list(self.metadata_bq_client.list_tables(dataset_ref))
-        except Exception:
-            bq_tables = []
 
         bq_fallback: list[str] = []
         unmatched_leaves: list[str] = []
@@ -864,18 +980,35 @@ class GovernedToolContext:
         if live_bq_names:
             kc_ordered = [lf for lf in kc_ordered if lf in live_bq_names]
         ordered_tables = [*kc_ordered, *bq_fallback]
-        missing_meta_leaves = [lf for lf in ordered_tables if lf not in bq_meta_map]
-        if missing_meta_leaves:
-            with ThreadPoolExecutor(max_workers=_CATALOG_INSPECT_MAX_WORKERS) as pool:
+
+        kc_provides_descriptions = len(ordered_tables) > 40 and any(
+            bool(hint.get("entry_desc")) for hint in kc_hints.values()
+        )
+        bq_fetch_candidates: list[str] = []
+        fast_omitted = 0
+        for lf in ordered_tables:
+            if lf in bq_meta_map:
+                continue
+            if kc_provides_descriptions and lf in kc_hints:
+                hint = kc_hints[lf]
+                if not hint.get("entry_desc") and not hint.get("has_curated_aspect"):
+                    fast_omitted += 1
+                    continue
+            bq_fetch_candidates.append(lf)
+
+        if bq_fetch_candidates:
+            with ThreadPoolExecutor(max_workers=min(_CATALOG_INSPECT_MAX_WORKERS, len(bq_fetch_candidates))) as pool:
                 fetched_objs = list(
-                    pool.map(lambda lf: self._fetch_bq_table_safe(f"{dataset_ref}.{lf}"), missing_meta_leaves)
+                    pool.map(lambda lf: self._fetch_bq_table_safe(f"{dataset_ref}.{lf}"), bq_fetch_candidates)
                 )
-            for lf, tbl_obj in zip(missing_meta_leaves, fetched_objs, strict=True):
+            for lf, tbl_obj in zip(bq_fetch_candidates, fetched_objs, strict=True):
                 bq_meta_map[lf] = tbl_obj
 
         inspect_all_dataplex = len(ordered_tables) <= 40
 
         def _should_inspect_dataplex(lf: str) -> bool:
+            if kc_provides_descriptions and lf not in bq_meta_map:
+                return False
             if inspect_all_dataplex:
                 return True
             hint = kc_hints.get(lf) or {}
@@ -891,12 +1024,11 @@ class GovernedToolContext:
             return False
 
         dataplex_targets = [lf for lf in ordered_tables if _should_inspect_dataplex(lf)]
-        fast_skipped = len(ordered_tables) - len(dataplex_targets)
-        uncertified_omitted = fast_skipped
+        uncertified_omitted = fast_omitted + (len(ordered_tables) - fast_omitted - len(dataplex_targets))
 
         results: list[dict[str, Any]] = []
         if dataplex_targets:
-            with ThreadPoolExecutor(max_workers=_CATALOG_INSPECT_MAX_WORKERS) as pool:
+            with ThreadPoolExecutor(max_workers=min(_CATALOG_INSPECT_MAX_WORKERS, len(dataplex_targets))) as pool:
                 inspected = list(
                     pool.map(
                         lambda lf: self._inspect_discovery_table(
@@ -918,7 +1050,8 @@ class GovernedToolContext:
         for item in results:
             item.pop("_sort_rank", None)
 
-        return {
+        property_graphs = self._extract_property_graphs(term, tokens, is_wildcard=is_wildcard)
+        response: dict[str, Any] = {
             "dataset_id": self.dataset_id,
             "search_term": term,
             "total_matched": len(results),
@@ -928,6 +1061,9 @@ class GovernedToolContext:
             "tables": results[:_MAX_DISCOVERY_TABLES],
             "metadata_sa": self.metadata_sa_email,
         }
+        if property_graphs:
+            response["property_graphs"] = property_graphs
+        return response
 
     def _inspect_table_detail(self, leaf: str, entry_name: str) -> dict[str, Any]:
         looked: dict[str, Any] = {}
@@ -1076,44 +1212,117 @@ class GovernedToolContext:
             "metadata_sa": self.metadata_sa_email,
         }
 
+    def _glossary_exclusion_tokens(self) -> set[str]:
+        glossary = self.context_layer.get("glossary")
+        if not isinstance(glossary, Mapping):
+            return set()
+        excluded: set[str] = set()
+        for term_entry in glossary.get("terms") or []:
+            if not isinstance(term_entry, Mapping):
+                continue
+            for field in (term_entry.get("term_id"), term_entry.get("display_name")):
+                excluded.update(self._tokenize_identifier_text(str(field or "")))
+        return excluded
+
     def get_verified_metric_contract(self, topic: str) -> dict[str, Any]:
         contracts = self.context_layer.get("verified_metric_contracts")
         if not isinstance(contracts, Mapping) or not contracts:
             return {
                 "topic": topic,
                 "matched_contracts": {},
-                "available_topics": [],
-                "note": "No verified_metric_contracts found in pack context_layer.yaml.",
+                "note": (
+                    "No verified_metric_contracts exist in this pack. Do NOT retry get_verified_metric_contract; "
+                    "proceed to search_certified_tables('*'), lookup_catalog_context, or execute_select_sql."
+                ),
             }
 
-        raw_tokens = [tok.lower() for tok in re.split(r"[^A-Za-z0-9_]+", topic or "") if len(tok) >= 2]
+        raw_tokens = self._tokenize_identifier_text(topic or "")
         query_tokens = [tok for tok in raw_tokens if tok not in _CONTRACT_STOPWORDS]
         matched: dict[str, Any] = {}
+
         if query_tokens:
             for key, body in contracts.items():
-                metric_name = str(body.get("metric_name") or "") if isinstance(body, Mapping) else ""
-                display_name = str(body.get("display_name") or "") if isinstance(body, Mapping) else ""
                 key_str = str(key)
-                target_fields = (key_str.lower(), metric_name.lower(), display_name.lower())
+                if isinstance(body, Mapping):
+                    primary_fields = (
+                        key_str,
+                        str(body.get("metric_name") or ""),
+                        str(body.get("display_name") or ""),
+                        str(body.get("graph_name") or "").rsplit(".", 1)[-1].strip("`"),
+                    )
+                else:
+                    primary_fields = (key_str,)
                 target_tokens = {
                     t
-                    for field in target_fields
-                    for t in re.split(r"[^A-Za-z0-9]+", field)
-                    if len(t) >= 2 and t not in _CONTRACT_STOPWORDS
+                    for field in primary_fields
+                    for t in self._tokenize_identifier_text(field)
+                    if t not in _CONTRACT_STOPWORDS
                 }
-                target_tokens.update(f for f in target_fields if f)
+                target_tokens.update(f.lower() for f in primary_fields if f)
                 if any(tok in target_tokens for tok in query_tokens):
                     matched[key_str] = body
+
+            # Secondary runtime-derived structural matching (e.g., node/edge labels & description):
+            # only match tokens unique to a single contract (df == 1) and not overlapping glossary/stopwords.
+            if not matched:
+                glossary_tokens = self._glossary_exclusion_tokens()
+                per_contract_secondary: dict[str, set[str]] = {}
+                doc_freq: dict[str, int] = {}
+                for key, body in contracts.items():
+                    key_str = str(key)
+                    if not isinstance(body, Mapping):
+                        continue
+                    all_fields: list[str] = [
+                        key_str,
+                        str(body.get("metric_name") or ""),
+                        str(body.get("display_name") or ""),
+                        str(body.get("description") or ""),
+                        str(body.get("edge_chain") or ""),
+                    ]
+                    for list_key in ("node_labels", "edge_labels", "governing_tables", "allowed_tables"):
+                        val = body.get(list_key)
+                        if isinstance(val, (list, tuple)):
+                            all_fields.extend(str(item) for item in val)
+
+                    secondary_fields: list[str] = [
+                        str(body.get("description") or ""),
+                        str(body.get("edge_chain") or ""),
+                    ]
+                    for list_key in ("node_labels", "edge_labels"):
+                        val = body.get(list_key)
+                        if isinstance(val, (list, tuple)):
+                            secondary_fields.extend(str(item) for item in val)
+
+                    contract_all_tokens = {
+                        t
+                        for field in all_fields
+                        for t in self._tokenize_identifier_text(field)
+                        if t not in _CONTRACT_STOPWORDS and t not in glossary_tokens
+                    }
+                    for tok in contract_all_tokens:
+                        doc_freq[tok] = doc_freq.get(tok, 0) + 1
+
+                    per_contract_secondary[key_str] = {
+                        t
+                        for field in secondary_fields
+                        for t in self._tokenize_identifier_text(field)
+                        if t not in _CONTRACT_STOPWORDS and t not in glossary_tokens
+                    }
+
+                for key_str, sec_tokens in per_contract_secondary.items():
+                    unique_sec = {t for t in sec_tokens if doc_freq.get(t, 0) == 1}
+                    if any(tok in unique_sec for tok in query_tokens):
+                        matched[key_str] = contracts[key_str]
 
         response: dict[str, Any] = {
             "topic": topic,
             "matched_contracts": matched,
-            "available_topics": sorted(str(k) for k in contracts.keys()),
         }
         if not matched:
             response["note"] = (
-                "No verified metric contract matched this topic; use lookup_catalog_context "
-                "on the relevant catalog tables for schema, definitions, and governance rules."
+                "No verified metric contract matched this topic. Do NOT retry get_verified_metric_contract; "
+                "proceed to search_certified_tables('*'), lookup_catalog_context on the relevant tables, "
+                "or execute your query directly with execute_select_sql."
             )
         return response
 
