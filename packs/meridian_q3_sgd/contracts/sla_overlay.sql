@@ -1,6 +1,6 @@
 -- Structured 480-token SLA amendment overlay extracted from contracts/ArcticHaul_Amendment_2.md
 -- via BigQuery Object Tables + AI.GENERATE / DocAI (GA in asia-southeast1).
--- Uses CREATE TABLE IF NOT EXISTS so execution before or after sla_overlay.jsonl ingestion is idempotent.
+-- Idempotent table creation ensures execution before or after sla_overlay.jsonl ingestion is safe.
 
 CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.sla_overlay` (
   overlay_id STRING NOT NULL OPTIONS(description="Unique structured contract amendment overlay identifier."),

@@ -1,5 +1,5 @@
 -- Uncertified staging clone + 190 automated shadow tables (Rung 4 Trust & Data Products trap).
--- Uses CREATE TABLE IF NOT EXISTS so re-running after .jsonl ingestion never truncates loaded rows.
+-- Idempotent table creation ensures re-running after .jsonl ingestion never truncates loaded rows.
 
 CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.${DATASET_ID}.staging_cold_chain_oct11` (
   country_code STRING NOT NULL,
