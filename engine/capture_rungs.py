@@ -250,7 +250,32 @@ def list_active_row_access_policies(
             )
             if isinstance(resp, Mapping):
                 items = resp.get("rowAccessPolicies", [])
-                return [_normalize_policy_record(dict(item)) for item in items if isinstance(item, Mapping)]
+                policies = [
+                    _normalize_policy_record(dict(item))
+                    for item in items
+                    if isinstance(item, Mapping)
+                ]
+                for rec in policies:
+                    if not rec["grantees"] and rec["policy_id"]:
+                        try:
+                            iam_resp = client._call_api(
+                                None,
+                                span_name="BigQuery.getRowAccessPolicyIamPolicy",
+                                method="POST",
+                                path=f"{path}/{rec['policy_id']}:getIamPolicy",
+                                data={},
+                            )
+                            if isinstance(iam_resp, Mapping):
+                                members: list[str] = []
+                                for binding in iam_resp.get("bindings", []) or []:
+                                    if isinstance(binding, Mapping):
+                                        for member in binding.get("members", []) or []:
+                                            if isinstance(member, str) and member not in members:
+                                                members.append(member)
+                                rec["grantees"] = members
+                        except Exception:
+                            pass
+                return policies
         except (AttributeError, NotImplementedError):
             pass
 

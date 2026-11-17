@@ -157,6 +157,37 @@ PY
   fi
 }
 
+grant_sandbox_sa_iam() {
+  local sa_email="$1"
+  local caller_member="user:${ACTIVE_GCLOUD_ACCOUNT}"
+  if ! gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${sa_email}" \
+    --role="roles/bigquery.jobUser" \
+    --condition=None \
+    --quiet >/dev/null; then
+    sleep 3
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+      --member="serviceAccount:${sa_email}" \
+      --role="roles/bigquery.jobUser" \
+      --condition=None \
+      --quiet >/dev/null
+  fi
+  if ! gcloud iam service-accounts add-iam-policy-binding "${sa_email}" \
+    --project="${PROJECT_ID}" \
+    --member="${caller_member}" \
+    --role="roles/iam.serviceAccountTokenCreator" \
+    --condition=None \
+    --quiet >/dev/null; then
+    sleep 3
+    gcloud iam service-accounts add-iam-policy-binding "${sa_email}" \
+      --project="${PROJECT_ID}" \
+      --member="${caller_member}" \
+      --role="roles/iam.serviceAccountTokenCreator" \
+      --condition=None \
+      --quiet >/dev/null
+  fi
+}
+
 resolve_rls_principals() {
   if [[ -n "${SQL_ROLE_SA_MAP_JSON:-}" ]]; then
     eval "$(
@@ -191,14 +222,25 @@ PY
   fi
 
   if [[ "${PROVISION_RLS_SAS}" == "1" ]]; then
-    if [[ -z "${RLS_CFO_PRINCIPAL:-}" ]]; then
-      ensure_sa_exists "rls-cfo-regional" "CFO Regional RLS Persona"
-      export RLS_CFO_PRINCIPAL="serviceAccount:rls-cfo-regional@${PROJECT_ID}.iam.gserviceaccount.com"
+    if [[ -z "${ACTIVE_GCLOUD_ACCOUNT}" ]]; then
+      echo "ERROR: --provision-rls-sas requires an active gcloud account to bind TokenCreator." >&2
+      exit 1
     fi
-    if [[ -z "${RLS_SG_PRINCIPAL:-}" ]]; then
-      ensure_sa_exists "sg-coldchain" "SG Cold-Chain RLS Persona"
-      export RLS_SG_PRINCIPAL="serviceAccount:sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com"
-    fi
+    local sg_sa_name="meridian-sg-coldchain"
+    local denied_sa_name="meridian-denied-probe"
+    local sg_sa_email="${sg_sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+    local denied_sa_email="${denied_sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+    ensure_sa_exists "${sg_sa_name}" "ScenarioPack SG Cold-Chain RLS SA"
+    ensure_sa_exists "${denied_sa_name}" "ScenarioPack Denied Probe SA"
+    grant_sandbox_sa_iam "${sg_sa_email}"
+    grant_sandbox_sa_iam "${denied_sa_email}"
+
+    export RLS_CFO_PRINCIPAL="${RLS_CFO_PRINCIPAL:-user:${ACTIVE_GCLOUD_ACCOUNT}}"
+    export RLS_SG_PRINCIPAL="${RLS_SG_PRINCIPAL:-serviceAccount:${sg_sa_email}}"
+    export MERIDIAN_SG_SA="${sg_sa_email}"
+    export MERIDIAN_DENIED_SA="${denied_sa_email}"
+    export PROVISION_RLS_SAS
     validate_rls_principals_py
     return 0
   fi
@@ -215,6 +257,7 @@ PY
     policy_json="$(gcloud projects get-iam-policy "${PROJECT_ID}" --format=json 2>/dev/null || true)"
     if [[ -n "${policy_json}" ]]; then
       export _IAM_POLICY_JSON="${policy_json}"
+      export PROJECT_ID
       local picked_sa
       picked_sa="$(
         uv run --project "${REPO_ROOT}" python - <<'PY'
@@ -226,6 +269,7 @@ idx = raw.find("{")
 if idx < 0:
     sys.exit(0)
 policy = json.loads(raw[idx:])
+project_id = os.environ.get("PROJECT_ID", "").strip()
 cfo = os.environ.get("RLS_CFO_PRINCIPAL", "").strip().lower()
 
 job_roles = {"roles/bigquery.jobUser", "roles/bigquery.user", "roles/bigquery.admin"}
@@ -246,14 +290,55 @@ for binding in policy.get("bindings", []):
             if is_valid_customer_sa(email) and f"serviceaccount:{email.lower()}" != cfo:
                 sa_roles.setdefault(email, set()).add(role)
 
-candidates = [
-    (bool(roles & overbroad_roles), email)
+job_capable = [
+    (bool(roles & overbroad_roles), not bool(roles & data_roles), email, bool(roles & data_roles))
     for email, roles in sa_roles.items()
-    if (roles & job_roles) and (roles & data_roles)
+    if (roles & job_roles)
 ]
-candidates.sort()
-if candidates:
-    print(candidates[0][1])
+if not job_capable:
+    sys.exit(0)
+
+
+def can_impersonate(sa_email: str) -> bool:
+    if not project_id:
+        return False
+    try:
+        import google.auth
+        from google.auth.transport.requests import AuthorizedSession
+
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        session = AuthorizedSession(creds)
+        url = (
+            f"https://iam.googleapis.com/v1/projects/{project_id}"
+            f"/serviceAccounts/{sa_email}:testIamPermissions"
+        )
+        resp = session.post(
+            url,
+            json={"permissions": ["iam.serviceAccounts.getAccessToken"]},
+            timeout=2.0,
+        )
+        if resp.status_code == 200:
+            perms = resp.json().get("permissions") or []
+            return "iam.serviceAccounts.getAccessToken" in perms
+    except Exception:
+        pass
+    return False
+
+
+data_only = [email for _, _, email, has_data in job_capable if has_data]
+if len(job_capable) == 1 and len(data_only) == 1:
+    print(data_only[0])
+else:
+    scored = []
+    for overbroad, missing_proj_data, email, has_data in job_capable:
+        impersonatable = can_impersonate(email)
+        # Accept SAs with project-level data role, OR job-capable SAs explicitly grantable via TokenCreator
+        # (which may hold dataset-scoped BigQuery dataViewer/dataEditor bindings).
+        if has_data or impersonatable:
+            scored.append((not impersonatable, missing_proj_data, overbroad, email))
+    scored.sort()
+    if scored:
+        print(scored[0][3])
 PY
       )"
       unset _IAM_POLICY_JSON
@@ -307,6 +392,42 @@ dataset_ref = bigquery.Dataset(f"{project_id}.{dataset_id}")
 dataset_ref.location = bq_location
 client.create_dataset(dataset_ref, exists_ok=True)
 print(f"Dataset ready: {dataset_id} ({bq_location})")
+
+if os.environ.get("PROVISION_RLS_SAS") == "1":
+    sg_sa = os.environ.get("MERIDIAN_SG_SA", "").strip()
+    denied_sa = os.environ.get("MERIDIAN_DENIED_SA", "").strip()
+    ds = client.get_dataset(f"{project_id}.{dataset_id}")
+    before_sig = [
+        (e.role, e.entity_type, (e.entity_id or "").lower())
+        for e in ds.access_entries
+    ]
+    denied_targets = {denied_sa.lower(), f"serviceaccount:{denied_sa.lower()}"} if denied_sa else set()
+    sg_targets = {sg_sa.lower(), f"serviceaccount:{sg_sa.lower()}"} if sg_sa else set()
+
+    updated_entries = [
+        entry
+        for entry in ds.access_entries
+        if (entry.entity_id or "").lower() not in denied_targets
+    ]
+    if sg_sa and not any(
+        entry.role in {"READER", "roles/bigquery.dataViewer"}
+        and (entry.entity_id or "").lower() in sg_targets
+        for entry in updated_entries
+    ):
+        updated_entries.append(
+            bigquery.AccessEntry(role="READER", entity_type="userByEmail", entity_id=sg_sa)
+        )
+    after_sig = [
+        (e.role, e.entity_type, (e.entity_id or "").lower())
+        for e in updated_entries
+    ]
+    if after_sig != before_sig:
+        ds.access_entries = updated_entries
+        client.update_dataset(ds, ["access_entries"])
+    print(
+        f"Dataset ACL configured: {sg_sa}=READER ({dataset_id} only), "
+        f"{denied_sa}=zero dataset access"
+    )
 
 
 def substitute_sql(raw: str) -> str:

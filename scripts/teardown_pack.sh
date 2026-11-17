@@ -50,6 +50,7 @@ DATASET_ID="${DATASET_ID:-}"
 BQ_LOCATION="${BQ_LOCATION:-asia-southeast1}"
 DRY_RUN=0
 CONFIRM_YES=0
+DELETE_RLS_SAS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,8 +62,12 @@ while [[ $# -gt 0 ]]; do
       CONFIRM_YES=1
       shift
       ;;
+    --delete-rls-sas)
+      DELETE_RLS_SAS=1
+      shift
+      ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--yes]"
+      echo "Usage: $0 [--dry-run] [--yes] [--delete-rls-sas]"
       exit 0
       ;;
     *)
@@ -83,6 +88,9 @@ fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "[DRY-RUN] Would delete BigQuery dataset ${PROJECT_ID}.${DATASET_ID} (location=${BQ_LOCATION}) and all its contents."
+  if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
+    echo "[DRY-RUN] Would remove project jobUser bindings and delete dedicated RLS SAs: meridian-sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com, meridian-denied-probe@${PROJECT_ID}.iam.gserviceaccount.com"
+  fi
   exit 0
 fi
 
@@ -104,3 +112,18 @@ client = bigquery.Client(project=project_id, location=bq_location)
 client.delete_dataset(f"{project_id}.{dataset_id}", delete_contents=True, not_found_ok=True)
 print(f"Deleted dataset (if existed): {dataset_id}")
 PY
+
+if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
+  for sa_name in meridian-sg-coldchain meridian-denied-probe; do
+    sa_email="${sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+    gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
+      --member="serviceAccount:${sa_email}" \
+      --role="roles/bigquery.jobUser" \
+      --all \
+      --quiet >/dev/null 2>&1 || true
+    if gcloud iam service-accounts describe "${sa_email}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+      gcloud iam service-accounts delete "${sa_email}" --project="${PROJECT_ID}" --quiet >/dev/null
+      echo "Deleted dedicated RLS sandbox SA: ${sa_email}"
+    fi
+  done
+fi
