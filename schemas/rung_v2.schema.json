@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/context-is-all-you-need/schemas/rung_v2.schema.json",
+  "title": "ContextScenarioPackBundleV2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "pack_id",
+    "title",
+    "subtitle",
+    "hero_tagline",
+    "closed_period_label",
+    "currency",
+    "region",
+    "rng_seed",
+    "generated_mode",
+    "personas",
+    "invariants",
+    "rungs",
+    "horizon_cards"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "pack_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 3
+    },
+    "subtitle": {
+      "type": "string",
+      "minLength": 3
+    },
+    "hero_tagline": {
+      "type": "string",
+      "minLength": 10
+    },
+    "closed_period_label": {
+      "type": "string",
+      "minLength": 2
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "region": {
+      "type": "string",
+      "minLength": 2
+    },
+    "rng_seed": {
+      "type": "integer"
+    },
+    "generated_mode": {
+      "type": "string",
+      "enum": [
+        "offline_fixture",
+        "dry_run_verified",
+        "live_gcp_verified"
+      ]
+    },
+    "personas": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "principal_display",
+          "scope_summary"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 2
+          },
+          "principal_display": {
+            "type": "string",
+            "minLength": 3
+          },
+          "scope_summary": {
+            "type": "string",
+            "minLength": 5
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "number",
+          "integer",
+          "string",
+          "boolean"
+        ]
+      }
+    },
+    "rungs": {
+      "type": "array",
+      "minItems": 6,
+      "items": {
+        "$ref": "#/$defs/RungSpec"
+      }
+    },
+    "horizon_cards": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "release_badge",
+          "region_availability",
+          "summary",
+          "primitives"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 3
+          },
+          "release_badge": {
+            "type": "string",
+            "enum": [
+              "GA",
+              "Preview"
+            ]
+          },
+          "region_availability": {
+            "type": "string",
+            "minLength": 2
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 10
+          },
+          "primitives": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "TrustTier": {
+      "type": "string",
+      "enum": [
+        "TIER_3_REVIEW_REQUIRED",
+        "TIER_2_GROUNDED",
+        "TIER_1_VERIFIED_OR_COMPILED"
+      ]
+    },
+    "ExecutionOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "answer_headline",
+        "answer_detail",
+        "numeric_value",
+        "unit",
+        "sql_or_gql",
+        "query_language",
+        "tokens_used",
+        "exploratory_queries",
+        "error_retries",
+        "eval_pass_count",
+        "eval_total_runs",
+        "trust_tier",
+        "rationale"
+      ],
+      "properties": {
+        "answer_headline": {
+          "type": "string",
+          "minLength": 2
+        },
+        "answer_detail": {
+          "type": "string",
+          "minLength": 5
+        },
+        "numeric_value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sql_or_gql": {
+          "type": "string",
+          "minLength": 10
+        },
+        "query_language": {
+          "type": "string",
+          "enum": [
+            "SQL",
+            "GQL",
+            "SQL+GQL"
+          ]
+        },
+        "context_payload": {
+          "type": "string"
+        },
+        "context_mechanism": {
+          "type": "string"
+        },
+        "tokens_used": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exploratory_queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eval_pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eval_total_runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 5
+        }
+      }
+    },
+    "IdentityVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "persona_id",
+        "answer_headline",
+        "answer_detail",
+        "numeric_value",
+        "rows_visible",
+        "rls_policy_applied",
+        "policy_note"
+      ],
+      "properties": {
+        "persona_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "answer_headline": {
+          "type": "string",
+          "minLength": 2
+        },
+        "answer_detail": {
+          "type": "string",
+          "minLength": 5
+        },
+        "numeric_value": {
+          "type": "number"
+        },
+        "rows_visible": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rls_policy_applied": {
+          "type": "string",
+          "minLength": 3
+        },
+        "policy_note": {
+          "type": "string",
+          "minLength": 5
+        }
+      }
+    },
+    "RungSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "rung_num",
+        "short_label",
+        "title",
+        "pyramid_layer",
+        "release_badges",
+        "question",
+        "poll",
+        "blind",
+        "governed",
+        "xray_summary"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^r[1-9][0-9]*_[a-z0-9_]+$"
+        },
+        "rung_num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "short_label": {
+          "type": "string",
+          "minLength": 3
+        },
+        "title": {
+          "type": "string",
+          "minLength": 5
+        },
+        "pyramid_layer": {
+          "type": "string",
+          "minLength": 5
+        },
+        "release_badges": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "capability",
+              "stage",
+              "region_scope"
+            ],
+            "properties": {
+              "capability": {
+                "type": "string",
+                "minLength": 2
+              },
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "GA",
+                  "Preview",
+                  "Reference Architecture"
+                ]
+              },
+              "region_scope": {
+                "type": "string",
+                "minLength": 2
+              }
+            }
+          }
+        },
+        "question": {
+          "type": "string",
+          "minLength": 10
+        },
+        "poll": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prompt",
+            "options",
+            "correct_key",
+            "reveal_takeaway"
+          ],
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "minLength": 5
+            },
+            "options": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "text"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "enum": [
+                      "A",
+                      "B",
+                      "C",
+                      "D"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 2
+                  }
+                }
+              }
+            },
+            "correct_key": {
+              "type": "string",
+              "enum": [
+                "A",
+                "B",
+                "C",
+                "D"
+              ]
+            },
+            "reveal_takeaway": {
+              "type": "string",
+              "minLength": 5
+            }
+          }
+        },
+        "blind": {
+          "$ref": "#/$defs/ExecutionOutcome"
+        },
+        "governed": {
+          "$ref": "#/$defs/ExecutionOutcome"
+        },
+        "identity_variants": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/IdentityVariant"
+          }
+        },
+        "xray_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "context_added",
+            "gcp_primitives",
+            "negative_control_assertion"
+          ],
+          "properties": {
+            "context_added": {
+              "type": "string",
+              "minLength": 5
+            },
+            "gcp_primitives": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "negative_control_assertion": {
+              "type": "string",
+              "minLength": 5
+            }
+          }
+        }
+      }
+    }
+  }
+}
