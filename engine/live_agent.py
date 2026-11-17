@@ -591,7 +591,7 @@ def _build_governed_declarations() -> list[Any]:
         ),
         types.FunctionDeclaration(
             name="lookup_catalog_context",
-            description="Fetch Knowledge Catalog lookupContext, column descriptions, table constraints, and Business Glossary EntryLink definitions for specific tables.",
+            description="Fetch Knowledge Catalog lookupContext, column specs and descriptions, table constraints, and Business Glossary term definitions (EntryLinks) for specific tables.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
@@ -606,13 +606,13 @@ def _build_governed_declarations() -> list[Any]:
         ),
         types.FunctionDeclaration(
             name="get_verified_metric_contract",
-            description="Retrieve verified semantic metric formulas, fan-trap rules, property graph patterns, or contract SLA extraction rules.",
+            description="Optionally retrieve a verified semantic metric formula, join rule, property graph pattern, or extraction contract if applicable. Call at most once; do not retry on a miss.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "topic": types.Schema(
                         type=types.Type.STRING,
-                        description="Topic keywords (e.g. 'margin', 'metric', 'graph', 'contract', 'sla').",
+                        description="Concise topic keywords from the prompt (optional; call at most once).",
                     ),
                 },
                 required=["topic"],
@@ -857,11 +857,12 @@ def run_live_agent_arm(
         f"You are a careful read-only BigQuery SQL/GQL analyst operating exclusively inside dataset "
         f"`{project_id}.{target_dataset}` (location `{bq_location}`).\n"
         f"Rules:\n"
-        f"1. Inspect the schema or context using ONLY your declared tools before executing SQL.\n"
-        f"2. Write a single valid read-only GoogleSQL SELECT statement (including GRAPH_TABLE when appropriate). "
-        f"Fully qualify tables inside `{project_id}.{target_dataset}.<table>` (never use multi-statement SQL or INFORMATION_SCHEMA).\n"
-        f"3. Base every numeric claim strictly on actual tool/SQL outputs.\n"
-        f"4. Finish with a concise answer ending with a ```json``` block containing keys: "
+        f"1. Batch your initial schema or context discovery tool calls in Turns 1-2; never retry a missed lookup with generic synonyms.\n"
+        f"2. Compute exact aggregated summary metrics (and any requested breakdown rows) in a single valid read-only GoogleSQL SELECT statement "
+        f"(including GRAPH_TABLE when appropriate). Fully qualify tables inside `{project_id}.{target_dataset}.<table>` "
+        f"(never use multi-statement SQL or INFORMATION_SCHEMA).\n"
+        f"3. Once execute_select_sql succeeds with the needed results, stop calling tools and synthesize your final answer immediately—do not run redundant follow-up queries.\n"
+        f"4. Base every numeric claim strictly on actual tool/SQL outputs, and finish with a concise answer ending with a ```json``` block containing keys: "
         f'`{{"answer_summary": string, "numeric_value": number_or_null, "unit": string_or_null}}`.'
     )
 
@@ -872,15 +873,23 @@ def run_live_agent_arm(
 
     contents: list[Any] = [types.Content(role="user", parts=[types.Part.from_text(text=prompt_user)])]
     deadline = t0 + max(1.0, float(timeout_s))
+    thinking_cfg_cls = getattr(types, "ThinkingConfig", None)
 
     def _turn_config(remaining_s: float) -> Any:
         timeout_ms = max(1000, int(math.ceil(max(0.5, remaining_s) * 1000.0)))
-        return types.GenerateContentConfig(
-            temperature=0.0,
-            system_instruction=system_instruction,
-            tools=[types.Tool(function_declarations=declarations)],
-            http_options=types.HttpOptions(timeout=timeout_ms),
-        )
+        cfg_kwargs: dict[str, Any] = {
+            "temperature": 0.0,
+            "system_instruction": system_instruction,
+            "tools": [types.Tool(function_declarations=declarations)],
+            "http_options": types.HttpOptions(timeout=timeout_ms),
+        }
+        if callable(thinking_cfg_cls):
+            cfg_kwargs["thinking_config"] = thinking_cfg_cls(thinking_budget=256)
+            try:
+                return types.GenerateContentConfig(**cfg_kwargs)
+            except TypeError:
+                cfg_kwargs.pop("thinking_config", None)
+        return types.GenerateContentConfig(**cfg_kwargs)
 
     active_model = model_id
     tokens_used = 0

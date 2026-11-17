@@ -1236,54 +1236,38 @@ class GovernedToolContext:
                 ),
             }
 
+        glossary_tokens = self._glossary_exclusion_tokens()
         raw_tokens = self._tokenize_identifier_text(topic or "")
-        query_tokens = [tok for tok in raw_tokens if tok not in _CONTRACT_STOPWORDS]
+        query_tokens = [
+            tok for tok in raw_tokens if tok not in _CONTRACT_STOPWORDS and tok not in glossary_tokens
+        ]
+        topic_norm = (topic or "").strip().lower()
         matched: dict[str, Any] = {}
 
-        if query_tokens:
+        if query_tokens or topic_norm:
+            def _filtered_tokens(fields: list[str] | tuple[str, ...]) -> set[str]:
+                return {
+                    t
+                    for field in fields
+                    for t in self._tokenize_identifier_text(field)
+                    if t not in _CONTRACT_STOPWORDS and t not in glossary_tokens
+                }
+
+            primary_by_key: dict[str, tuple[str, ...]] = {}
+            primary_tokens_by_key: dict[str, set[str]] = {}
+            secondary_tokens_by_key: dict[str, set[str]] = {}
+            full_doc_freq: dict[str, int] = {}
+
             for key, body in contracts.items():
                 key_str = str(key)
                 if isinstance(body, Mapping):
-                    primary_fields = (
+                    graph_leaf = str(body.get("graph_name") or "").rsplit(".", 1)[-1].strip("`")
+                    primary_fields: tuple[str, ...] = (
                         key_str,
                         str(body.get("metric_name") or ""),
                         str(body.get("display_name") or ""),
-                        str(body.get("graph_name") or "").rsplit(".", 1)[-1].strip("`"),
+                        graph_leaf,
                     )
-                else:
-                    primary_fields = (key_str,)
-                target_tokens = {
-                    t
-                    for field in primary_fields
-                    for t in self._tokenize_identifier_text(field)
-                    if t not in _CONTRACT_STOPWORDS
-                }
-                target_tokens.update(f.lower() for f in primary_fields if f)
-                if any(tok in target_tokens for tok in query_tokens):
-                    matched[key_str] = body
-
-            # Secondary runtime-derived structural matching (e.g., node/edge labels & description):
-            # only match tokens unique to a single contract (df == 1) and not overlapping glossary/stopwords.
-            if not matched:
-                glossary_tokens = self._glossary_exclusion_tokens()
-                per_contract_secondary: dict[str, set[str]] = {}
-                doc_freq: dict[str, int] = {}
-                for key, body in contracts.items():
-                    key_str = str(key)
-                    if not isinstance(body, Mapping):
-                        continue
-                    all_fields: list[str] = [
-                        key_str,
-                        str(body.get("metric_name") or ""),
-                        str(body.get("display_name") or ""),
-                        str(body.get("description") or ""),
-                        str(body.get("edge_chain") or ""),
-                    ]
-                    for list_key in ("node_labels", "edge_labels", "governing_tables", "allowed_tables"):
-                        val = body.get(list_key)
-                        if isinstance(val, (list, tuple)):
-                            all_fields.extend(str(item) for item in val)
-
                     secondary_fields: list[str] = [
                         str(body.get("description") or ""),
                         str(body.get("edge_chain") or ""),
@@ -1292,27 +1276,57 @@ class GovernedToolContext:
                         val = body.get(list_key)
                         if isinstance(val, (list, tuple)):
                             secondary_fields.extend(str(item) for item in val)
+                    all_fields: list[str] = [*primary_fields, *secondary_fields]
+                    for list_key in ("governing_tables", "allowed_tables"):
+                        val = body.get(list_key)
+                        if isinstance(val, (list, tuple)):
+                            all_fields.extend(str(item) for item in val)
+                else:
+                    primary_fields = (key_str,)
+                    secondary_fields = []
+                    all_fields = [key_str]
 
-                    contract_all_tokens = {
-                        t
-                        for field in all_fields
-                        for t in self._tokenize_identifier_text(field)
-                        if t not in _CONTRACT_STOPWORDS and t not in glossary_tokens
-                    }
-                    for tok in contract_all_tokens:
-                        doc_freq[tok] = doc_freq.get(tok, 0) + 1
+                primary_by_key[key_str] = primary_fields
+                primary_tokens_by_key[key_str] = _filtered_tokens(primary_fields)
+                secondary_tokens_by_key[key_str] = _filtered_tokens(secondary_fields)
+                for tok in _filtered_tokens(all_fields):
+                    full_doc_freq[tok] = full_doc_freq.get(tok, 0) + 1
 
-                    per_contract_secondary[key_str] = {
-                        t
-                        for field in secondary_fields
-                        for t in self._tokenize_identifier_text(field)
-                        if t not in _CONTRACT_STOPWORDS and t not in glossary_tokens
-                    }
+            # Primary matching: require either exact name/key/graph match OR >= 1 contract-unique
+            # token (full_doc_freq == 1 across all contracts), and retain only max-score matches.
+            primary_scored: list[tuple[tuple[int, int, int], str, Any]] = []
+            for key, body in contracts.items():
+                key_str = str(key)
+                exact_targets = {f.strip().lower() for f in primary_by_key[key_str] if f and f.strip()}
+                exact_hit = 1 if (topic_norm and topic_norm in exact_targets) else 0
+                p_tokens = primary_tokens_by_key[key_str]
+                token_hits = {tok for tok in query_tokens if tok in p_tokens}
+                unique_hits = sum(1 for tok in token_hits if full_doc_freq.get(tok, 0) == 1)
+                if exact_hit or unique_hits >= 1:
+                    primary_scored.append(((exact_hit, unique_hits, len(token_hits)), key_str, body))
 
-                for key_str, sec_tokens in per_contract_secondary.items():
-                    unique_sec = {t for t in sec_tokens if doc_freq.get(t, 0) == 1}
-                    if any(tok in unique_sec for tok in query_tokens):
-                        matched[key_str] = contracts[key_str]
+            if primary_scored:
+                best_primary_score = max(score for score, _, _ in primary_scored)
+                for score, key_str, body in primary_scored:
+                    if score == best_primary_score:
+                        matched[key_str] = body
+
+            # Secondary runtime-derived structural matching (e.g., node/edge labels & description):
+            # only match tokens unique to a single contract (df == 1) and keep max-score matches.
+            if not matched and query_tokens:
+                secondary_scored: list[tuple[tuple[int, int], str, Any]] = []
+                for key, body in contracts.items():
+                    key_str = str(key)
+                    s_tokens = secondary_tokens_by_key[key_str]
+                    token_hits = {tok for tok in query_tokens if tok in s_tokens}
+                    unique_hits = sum(1 for tok in token_hits if full_doc_freq.get(tok, 0) == 1)
+                    if unique_hits >= 1:
+                        secondary_scored.append(((unique_hits, len(token_hits)), key_str, body))
+                if secondary_scored:
+                    best_secondary_score = max(score for score, _, _ in secondary_scored)
+                    for score, key_str, body in secondary_scored:
+                        if score == best_secondary_score:
+                            matched[key_str] = body
 
         response: dict[str, Any] = {
             "topic": topic,
