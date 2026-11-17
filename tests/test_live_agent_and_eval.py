@@ -23,6 +23,7 @@ from engine.context_retriever import (
     validate_agent_sql_gate,
 )
 from engine.eval_harness import build_empirical_eval, run_eval_harness, select_median_token_representative
+from engine.leak_check import scan_text_for_leaks
 from engine.live_agent import (
     AgentRunResult,
     extract_observed_signals,
@@ -2367,5 +2368,155 @@ def test_governance_execution_block_uncertified_stale_deprecated_and_fail_closed
     assert any(s["tool_name"] == "execute_select_sql" and s["status"] == "blocked" for s in res.tool_trace)
     assert "GOVERNANCE_POLICY_BLOCKED" in res.observed_signals
     assert res.trust_tier == TrustTier.TIER_3_REVIEW_REQUIRED.value
+
+
+def test_truncation_slices_and_fallback_answer_redact_before_slicing_and_classify(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from google.cloud import bigquery
+    import yaml
+
+    fake_proj = "acme-sandbox-" + "987654"
+    monkeypatch.setenv("PROJECT_ID", fake_proj)
+    monkeypatch.setenv("DATASET_ID", "synth_gov")
+    monkeypatch.setenv("BLIND_DATASET_ID", "synth_blind")
+    monkeypatch.setenv("BQ_LOCATION", "asia-southeast1")
+    monkeypatch.setenv("AGENT_MODEL_ID", "gemini-3.8-flash")
+    monkeypatch.setenv("AGENT_MODEL_LOCATION", "global")
+
+    packs_dir = tmp_path / "packs"
+    pack_dir = packs_dir / "synth_pack"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "context_layer.yaml").write_text(
+        yaml.safe_dump({"glossary": {"terms": []}, "verified_metric_contracts": {}}),
+        encoding="utf-8",
+    )
+
+    gov_tables = {
+        "alpha_curated_cert": {
+            "table_type": "TABLE",
+            "schema": [bigquery.SchemaField("margin_pct", "FLOAT64")],
+        }
+    }
+
+    def _dry_run(sql: str, _cfg: Any, _loc: str) -> Any:
+        refs = [SimpleNamespace(project=fake_proj, dataset_id="synth_gov", table_id="alpha_curated_cert")]
+        return _FakeDryRunJob(referenced_tables=refs, total_bytes_processed=1024)
+
+    def _rows(sql: str, is_dry: bool) -> list[dict[str, Any]]:
+        if is_dry:
+            return []
+        return [{"margin_pct": 28.4, "note": ("N" * 212) + fake_proj + "_tail"}]
+
+    gov_bq = _FakeAgentBQClient(
+        tables_by_dataset={"synth_gov": gov_tables},
+        dry_run_handler=_dry_run,
+        rows_by_sql=_rows,
+    )
+
+    def _transport(_m: str, url: str, _p: dict | None, _h: dict) -> dict[str, Any]:
+        if ":searchEntries" in url:
+            return {"results": []}
+        if ":lookupEntryLinks" in url:
+            return {"entryLinks": []}
+        if ":lookupContext" in url:
+            return {"context": ("C" * 228) + fake_proj + " certified guide"}
+        if ":lookupEntry" in url:
+            return {
+                "aspects": {
+                    "999.asia-southeast1.data-product-certification": {
+                        "data": {"certification_status": "CERTIFIED"}
+                    }
+                }
+            }
+        return {}
+
+    cat_client = DataplexCatalogRestClient(
+        project_id=fake_proj,
+        bq_location="asia-southeast1",
+        http_transport=_transport,
+    )
+    g_ctx = GovernedToolContext(
+        project_id=fake_proj,
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email=f"gov@{fake_proj}.iam.gserviceaccount.com",
+        sql_sa_email=f"gov@{fake_proj}.iam.gserviceaccount.com",
+        catalog_client=cat_client,
+        context_layer={"verified_metric_contracts": {}},
+    )
+
+    prefix_sql = f"SELECT /* {'a' * 35} */ margin_pct FROM `{fake_proj}.synth_gov.alpha_curated_cert`"
+    pad_len = max(1, 160 - len(prefix_sql))
+    sql = f"{prefix_sql} /* {'b' * pad_len} {fake_proj} */"
+
+    class _TruncationBoundaryModels:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    usage_metadata=SimpleNamespace(total_token_count=250),
+                    candidates=[SimpleNamespace(content=None)],
+                    function_calls=[
+                        SimpleNamespace(
+                            name="lookup_catalog_context",
+                            args={"table_names": [f"{fake_proj}.synth_gov.alpha_curated_cert", "p" * 120, fake_proj]},
+                        )
+                    ],
+                    text="",
+                )
+            if self.calls == 2:
+                return SimpleNamespace(
+                    usage_metadata=SimpleNamespace(total_token_count=350),
+                    candidates=[SimpleNamespace(content=None)],
+                    function_calls=[
+                        SimpleNamespace(
+                            name="execute_select_sql",
+                            args={"sql": sql},
+                        )
+                    ],
+                    text="",
+                )
+            return SimpleNamespace(
+                usage_metadata=SimpleNamespace(total_token_count=100),
+                candidates=[SimpleNamespace(content=None)],
+                function_calls=[],
+                text="",
+            )
+
+    res = run_live_agent_arm(
+        pack_id="synth_pack",
+        rung={
+            "id": "r_trunc_test",
+            "question": "What is verified margin?",
+            "region": "asia-southeast1",
+            "grading": {"target_value": 28.4, "tolerance": 0.1},
+        },
+        arm="governed",
+        repo_root=tmp_path,
+        packs_dir=packs_dir,
+        genai_client=SimpleNamespace(models=_TruncationBoundaryModels()),
+        governed_tool_ctx=g_ctx,
+    )
+
+    serialized = json.dumps(res.to_dict(), ensure_ascii=True)
+    assert "987654" not in serialized
+    assert "acme-sandbox-" not in serialized
+    assert scan_text_for_leaks(serialized, path_label="truncation_boundary_test.json") == []
+    assert "example-project-id" in res.sql_or_gql
+    assert "example-proj" in res.answer_summary
+    assert res.tool_trace[0]["args_summary"].endswith("...")
+    assert res.tool_trace[1]["args_summary"].endswith("...")
+    assert res.tool_trace[1]["output_preview"].endswith("...")
+    assert not any("987654" in reason for reason in res.trust_reasons)
+    assert not any("acme-sandbox" in reason for reason in res.trust_reasons)
+
 
 

@@ -22,6 +22,7 @@ from engine.rls_impersonation import (
     build_impersonated_credentials,
     is_valid_customer_sa,
     parse_role_sa_map,
+    redact_sensitive_identifiers,
     resolve_agent_sa_map,
 )
 from engine.trust_classifier import strip_sql_literals_and_comments
@@ -418,14 +419,18 @@ class DataplexCatalogRestClient:
                     timeout=self.timeout_s,
                 )
                 if resp.status_code >= 400:
+                    safe_url = redact_sensitive_identifiers(url, live_project_id=self.project_id)
+                    safe_body = redact_sensitive_identifiers(resp.text, live_project_id=self.project_id)
                     raise AgentContextError(
-                        f"Knowledge Catalog HTTP {resp.status_code} for {method} {url}: {resp.text[:400]}"
+                        f"Knowledge Catalog HTTP {resp.status_code} for {method} {safe_url}: {safe_body[:400]}"
                     )
                 return resp.json() if resp.text.strip() else {}
             except AgentContextError:
                 raise
             except requests.RequestException as err:
-                raise AgentContextError(f"Knowledge Catalog transport error for {url}: {err}") from err
+                safe_err = redact_sensitive_identifiers(str(err), live_project_id=self.project_id)
+                safe_url = redact_sensitive_identifiers(url, live_project_id=self.project_id)
+                raise AgentContextError(f"Knowledge Catalog transport error for {safe_url}: {safe_err}") from err
 
         body_bytes = json.dumps(payload).encode("utf-8") if payload is not None else None
         req = Request(url, data=body_bytes, headers=headers, method=method)
@@ -435,11 +440,15 @@ class DataplexCatalogRestClient:
                 return json.loads(raw) if raw.strip() else {}
         except HTTPError as err:
             err_body = err.read().decode("utf-8", errors="replace") if err.fp else ""
+            safe_url = redact_sensitive_identifiers(url, live_project_id=self.project_id)
+            safe_body = redact_sensitive_identifiers(err_body, live_project_id=self.project_id)
             raise AgentContextError(
-                f"Knowledge Catalog HTTP {err.code} for {method} {url}: {err_body[:400]}"
+                f"Knowledge Catalog HTTP {err.code} for {method} {safe_url}: {safe_body[:400]}"
             ) from err
         except URLError as err:
-            raise AgentContextError(f"Knowledge Catalog transport error for {url}: {err}") from err
+            safe_err = redact_sensitive_identifiers(str(err), live_project_id=self.project_id)
+            safe_url = redact_sensitive_identifiers(url, live_project_id=self.project_id)
+            raise AgentContextError(f"Knowledge Catalog transport error for {safe_url}: {safe_err}") from err
 
     def search_entries(
         self,
