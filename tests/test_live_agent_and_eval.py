@@ -706,7 +706,7 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
                     "display_name": "Synth Glossary",
                     "terms": [
                         {
-                            "term_id": "premier",
+                            "term_id": "premier-customer",
                             "display_name": "Premier",
                             "description": "Code P",
                             "linked_columns": [
@@ -714,7 +714,6 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
                                     "table": "customers",
                                     "column": "tier_code",
                                     "link_type": "definition",
-                                    "entry_link_id": "cust-tier-link",
                                 }
                             ],
                         }
@@ -888,16 +887,17 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
     assert "synth_commerce.shadow_auto_tbl_001" in fake_bq.deleted_tables
     assert "synth_commerce.shadow_auto_tbl_001" in fake_bq.created_tables
 
-    # Verify B1/M4 REST payload shapes (EntryLink SOURCE=BQ col / TARGET=term, assignments, DQ rules)
-    entry_link_posts = [p for m, u, p in rest_calls if m == "POST" and "/entryLinks?" in u]
-    assert len(entry_link_posts) == 1
-    refs = entry_link_posts[0]["entryReferences"]  # type: ignore[index]
+    # Verify B1/M4 REST payload shapes (EntryLink sanitized ID + SOURCE=BQ col / TARGET=term)
+    entry_link_reqs = [(u, p) for m, u, p in rest_calls if m == "POST" and "/entryLinks?" in u]
+    assert len(entry_link_reqs) == 1
+    assert "entryLinkId=customers-tier-code-premier-customer" in entry_link_reqs[0][0]
+    refs = entry_link_reqs[0][1]["entryReferences"]  # type: ignore[index]
     by_type = {r["type"]: r for r in refs}
     assert by_type["SOURCE"]["path"] == "Schema.tier_code"
     assert f"projects/{synth_num}/locations/asia-southeast1/entryGroups/@bigquery/entries/" in by_type["SOURCE"]["name"]
     assert "/tables/customers" in by_type["SOURCE"]["name"]
     assert f"projects/{synth_num}/locations/asia-southeast1/entryGroups/@dataplex/entries/projects/{synth_num}/" in by_type["TARGET"]["name"]
-    assert "/terms/premier" in by_type["TARGET"]["name"]
+    assert "/terms/premier-customer" in by_type["TARGET"]["name"]
 
     aspect_patches = [(u, p) for m, u, p in rest_calls if m == "PATCH" and "/entries/" in u]
     aspect_urls = [u for u, _p in aspect_patches]
@@ -929,7 +929,7 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
     assert "synth_commerce.sla_overlay_extracted" in fake_bq.deleted_tables
     assert "synth_commerce.contract_docs_obj" in fake_bq.deleted_tables
     del_urls = [u for m, u, _p in rest_calls if m == "DELETE"]
-    assert "/entryLinks/" in del_urls[0]
+    assert "/entryLinks/customers-tier-code-premier-customer" in del_urls[0]
     assert "/terms/" in del_urls[1]
     assert "/glossaries/" in del_urls[2]
     assert "/dataScans/" in del_urls[3]
@@ -1546,6 +1546,35 @@ def test_provision_dataplex_403_poll_and_400_already_exists_idempotency(
         term_entry_name="term_e",
     )
     assert len(link_calls) == 1
+
+    # 2b. _iter_term_column_links sanitizes underscores & invalid ID chars, and non-orientation 400 skips swap
+    links = pcl._iter_term_column_links(
+        {
+            "term_id": "premier-customer",
+            "linked_columns": [{"table": "customers", "column": "tier_code", "link_type": "definition"}],
+        }
+    )
+    assert links[0]["entry_link_id"] == "customers-tier-code-premier-customer"
+    assert len(pcl._sanitize_dataplex_id("123_abc__def_" * 10)) <= 63
+    assert pcl._sanitize_dataplex_id("123_abc__def_").startswith("link-")
+
+    syntax_calls: list[dict[str, Any] | None] = []
+
+    def _invalid_id_transport(_m: str, _u: str, payload: dict[str, Any] | None) -> tuple[int, dict[str, Any]]:
+        syntax_calls.append(payload)
+        return 400, {"error": {"code": 400, "message": "Invalid EntryLink id 'bad_id'", "status": "INVALID_ARGUMENT"}}
+
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        pcl._create_or_update_entry_link(
+            pcl._RestClient(transport=_invalid_id_transport),
+            project_id="synth-proj",
+            bq_location="asia-southeast1",
+            entry_link_id="bad_id",
+            bq_entry_name="bq_e",
+            linked_column="tier_code",
+            term_entry_name="term_e",
+        )
+    assert len(syntax_calls) == 1
 
     # 3. Term POST 400 "already exists" triggers PATCH, while unrelated 400 fails loudly
     proj = "live-idem-" + "556677"
