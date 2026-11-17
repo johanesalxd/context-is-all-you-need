@@ -1,4 +1,9 @@
-"""Signed role assertion verification, customer SA validation, and identifier redaction."""
+"""Signed role assertion verification, customer SA validation, and identifier redaction.
+
+The HMAC role-assertion primitives (`mint_hmac_role_assertion` / `verify_role_assertion`)
+are provided as reusable library primitives for external gateways; the local Workbench
+runner relies on `SQL_ROLE_SA_MAP_JSON` / BigQuery policy grantees without HTTP HMAC headers.
+"""
 
 from __future__ import annotations
 

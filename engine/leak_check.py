@@ -22,6 +22,14 @@ __all__ = [
 
 _PLACEHOLDER_PROJECT = "example-project-id"
 _PLACEHOLDER_USER_EMAIL = "redacted-user@example.com"
+_SAFE_EMAIL_DOMAINS = frozenset(
+    {
+        "example.com",
+        "example.org",
+        "example.net",
+        "example-project-id.iam.gserviceaccount.com",
+    }
+)
 
 # Patterns are authored using regex character-classes / escapes so the scanner
 # never self-triggers when auditing its own source file.
@@ -44,14 +52,17 @@ _STRUCTURAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("internal_code_bundle_adj", re.compile(r"\b[B]undle\s+[A]djustment\b")),
     ("internal_code_da_fast", re.compile(r"\b[D]A\s+[F]AST\b")),
     ("internal_code_kcmd", re.compile(r"\b[k]cmd\b")),
-    ("google_email", re.compile(r"@[g]oogle\.com\b", re.IGNORECASE)),
-    ("altostrat_email", re.compile(r"@[a]ltostrat\.com\b", re.IGNORECASE)),
+    ("google_email", re.compile(r"@(?:[a-z0-9-]+\.)*[g]oogle\.com\b", re.IGNORECASE)),
+    ("altostrat_email", re.compile(r"@(?:[a-z0-9-]+\.)*[a]ltostrat\.com\b", re.IGNORECASE)),
     ("gcp_6digit_project_id", re.compile(r"\b[a-z][a-z0-9-]{3,23}-[0-9]{6}\b")),
 )
 
 _SA_EMAIL_PATTERN = re.compile(
     r"[A-Za-z0-9._+-]+@([a-z0-9-]+)\.iam\.gserviceaccount\.com\b",
     re.IGNORECASE,
+)
+_USER_EMAIL_PATTERN = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\b",
 )
 
 _SKIP_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".pdf", ".zip", ".pyc"})
@@ -118,6 +129,19 @@ def scan_text_for_leaks(
                         preview=f"*@{project_segment}.iam.gserviceaccount.com",
                     )
                 )
+
+        for email_match in _USER_EMAIL_PATTERN.finditer(line):
+            domain = email_match.group(1).lower()
+            if domain in _SAFE_EMAIL_DOMAINS or domain.endswith(".iam.gserviceaccount.com"):
+                continue
+            findings.append(
+                LeakFinding(
+                    path=path_label,
+                    line_num=line_num,
+                    rule="non_placeholder_email",
+                    preview=f"*@{domain}"[:48],
+                )
+            )
 
         for tok in forbidden_tokens:
             if tok and tok in line:

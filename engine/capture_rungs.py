@@ -20,10 +20,12 @@ from engine.pack_loader import (
     load_raw_pack,
     load_seed_module,
     render_bundle_placeholders,
+    resolve_bq_location,
     resolve_env_settings,
 )
 from engine.rls_impersonation import (
     build_impersonated_credentials,
+    is_valid_customer_sa,
     parse_role_sa_map,
     redact_sensitive_identifiers,
 )
@@ -41,6 +43,7 @@ __all__ = [
     "capture_rungs",
     "list_active_row_access_policies",
     "main",
+    "resolve_persona_bigquery_client",
     "verify_negative_governance_control",
 ]
 
@@ -132,9 +135,6 @@ def verify_negative_governance_control(
             code == 403
             or "forbidden" in exc_name
             or bool(reasons & _POLICY_DENIAL_REASONS)
-            or "access denied" in msg_lower
-            or "permission" in msg_lower
-            or "403" in msg_lower
         ):
             return NegativeControlResult(
                 passed=True,
@@ -427,19 +427,135 @@ def _rewrite_table_with_rls_predicate(
     return fq_pattern.sub(subquery, sql)
 
 
-def _verify_rls_variants_live(
+def _get_session_user(
+    client: Any,
+    *,
+    project_id: str,
+    dataset_id: str,
+    location: str,
+    cache: dict[int, str | None],
+) -> str | None:
+    key = id(client)
+    if key in cache:
+        return cache[key]
+    session_user: str | None = None
+    try:
+        rows = _execute_query_rows(
+            client,
+            "SELECT SESSION_USER() AS session_user",
+            project_id=project_id,
+            dataset_id=dataset_id,
+            location=location,
+            dry_run=False,
+        )
+        if rows:
+            candidate = str(rows[0].get("session_user", "")).strip().lower()
+            if "@" in candidate:
+                session_user = candidate
+    except Exception:
+        session_user = None
+    cache[key] = session_user
+    return session_user
+
+
+def resolve_persona_bigquery_client(
+    *,
+    base_client: Any,
+    persona_id: str,
+    variant: Mapping[str, Any],
+    policies: Sequence[Mapping[str, Any]],
+    project_id: str,
+    dataset_id: str,
+    location: str,
+    role_sa_map: Mapping[str, str] | None = None,
+    impersonated_client_factory: Callable[[str], Any] | None = None,
+    session_user_cache: dict[int, str | None] | None = None,
+) -> tuple[Any, str, Mapping[str, Any] | None] | None:
+    """Resolves a genuine BigQuery client and principal for a rung identity variant."""
+    matched_policy = _match_persona_policy(persona_id, variant, policies)
+    if impersonated_client_factory is not None:
+        return (
+            impersonated_client_factory(persona_id),
+            f"factory:{persona_id}",
+            matched_policy,
+        )
+
+    if role_sa_map and persona_id in role_sa_map:
+        from google.cloud import bigquery
+
+        sa_email = role_sa_map[persona_id]
+        creds, _ = build_impersonated_credentials(role=persona_id, role_sa_map=role_sa_map)
+        client = bigquery.Client(project=project_id, credentials=creds, location=location)
+        return client, f"serviceAccount:{sa_email.lower()}", matched_policy
+
+    if not matched_policy:
+        return None
+
+    cache = session_user_cache if session_user_cache is not None else {}
+    raw_grantees = matched_policy.get("grantees") or []
+    for raw_grantee in raw_grantees:
+        grantee = str(raw_grantee).strip()
+        if grantee.lower().startswith("iammember:"):
+            grantee = grantee.split(":", 1)[1].strip()
+        lowered = grantee.lower()
+        if lowered.startswith("serviceaccount:"):
+            sa_email = grantee.split(":", 1)[1].strip()
+            if not is_valid_customer_sa(sa_email):
+                continue
+            session_user = _get_session_user(
+                base_client,
+                project_id=project_id,
+                dataset_id=dataset_id,
+                location=location,
+                cache=cache,
+            )
+            if session_user and session_user == sa_email.lower():
+                return base_client, f"serviceAccount:{sa_email.lower()}", matched_policy
+            from google.cloud import bigquery
+
+            creds, _ = build_impersonated_credentials(
+                role=persona_id,
+                role_sa_map={persona_id: sa_email},
+            )
+            client = bigquery.Client(project=project_id, credentials=creds, location=location)
+            return client, f"serviceAccount:{sa_email.lower()}", matched_policy
+
+        if lowered.startswith("user:"):
+            user_email = grantee.split(":", 1)[1].strip().lower()
+            session_user = _get_session_user(
+                base_client,
+                project_id=project_id,
+                dataset_id=dataset_id,
+                location=location,
+                cache=cache,
+            )
+            if session_user and session_user == user_email:
+                return base_client, f"user:{session_user}", matched_policy
+
+    return None
+
+
+@dataclass
+class _RlsLiveContext:
+    target_table: str
+    policies: list[dict[str, Any]]
+    persona_clients: dict[str, Any]
+    persona_principals: dict[str, str]
+    matched_policies: dict[str, Mapping[str, Any] | None]
+    primary_persona_id: str
+
+
+def _prepare_rls_live_context(
     *,
     base_client: Any,
     rung: Mapping[str, Any],
     project_id: str,
     dataset_id: str,
     location: str,
-    impersonated_client_factory: Callable[[str], Any] | None = None,
-) -> None:
+    impersonated_client_factory: Callable[[str], Any] | None,
+    session_user_cache: dict[int, str | None],
+) -> _RlsLiveContext:
     variants = rung.get("identity_variants") or {}
-    if not variants:
-        return
-
     governed_sql = str(rung["governed"]["sql_or_gql"])
     table_ids = _extract_table_ids_from_sql(governed_sql, dataset_id)
     if not table_ids:
@@ -447,117 +563,229 @@ def _verify_rls_variants_live(
             f"Rung {rung['id']} has identity_variants but no dataset table reference in governed SQL"
         )
 
-    target_table = table_ids[0]
-    policies = list_active_row_access_policies(
-        base_client,
-        project_id=project_id,
-        dataset_id=dataset_id,
-        table_id=target_table,
-        location=location,
-    )
-    if not policies:
+    target_table = ""
+    policies: list[dict[str, Any]] = []
+    for candidate_tbl in table_ids:
+        found = list_active_row_access_policies(
+            base_client,
+            project_id=project_id,
+            dataset_id=dataset_id,
+            table_id=candidate_tbl,
+            location=location,
+        )
+        if found:
+            target_table = candidate_tbl
+            policies = found
+            break
+
+    if not policies or not target_table:
         raise NegativeControlError(
-            f"No active BigQuery row access policies found on {dataset_id}.{target_table}"
+            f"No active BigQuery row access policies found on tables referenced by rung {rung['id']}"
         )
 
     raw_sa_map = os.environ.get("SQL_ROLE_SA_MAP_JSON", "").strip()
     role_sa_map = parse_role_sa_map(raw_sa_map) if raw_sa_map else None
 
+    persona_clients: dict[str, Any] = {}
+    persona_principals: dict[str, str] = {}
+    matched_policies: dict[str, Mapping[str, Any] | None] = {}
+
+    for persona_id, variant in variants.items():
+        resolved = resolve_persona_bigquery_client(
+            base_client=base_client,
+            persona_id=persona_id,
+            variant=variant,
+            policies=policies,
+            project_id=project_id,
+            dataset_id=dataset_id,
+            location=location,
+            role_sa_map=role_sa_map,
+            impersonated_client_factory=impersonated_client_factory,
+            session_user_cache=session_user_cache,
+        )
+        if resolved is None:
+            raise NegativeControlError(
+                f"Live GCP mode requires real identity impersonation or matching BigQuery RLS grantee for "
+                f"persona {persona_id!r}; predicate simulation is disabled in --live-gcp."
+            )
+        p_client, p_principal, matched_policy = resolved
+        persona_clients[persona_id] = p_client
+        persona_principals[persona_id] = p_principal
+        matched_policies[persona_id] = matched_policy
+
+    if len(variants) >= 2 and len(set(persona_principals.values())) < 2:
+        raise NegativeControlError(
+            f"Rung {rung['id']} requires distinct principals across identity_variants, got {sorted(set(persona_principals.values()))}"
+        )
+
+    unrestricted_candidates = [
+        pid
+        for pid, pol in matched_policies.items()
+        if pol and str(pol.get("filter_predicate", "")).strip().upper() == "TRUE"
+    ]
+    if unrestricted_candidates:
+        primary_persona_id = max(
+            unrestricted_candidates,
+            key=lambda pid: int(variants[pid]["rows_visible"]),
+        )
+    else:
+        primary_persona_id = max(
+            variants.keys(),
+            key=lambda pid: int(variants[pid]["rows_visible"]),
+        )
+
+    return _RlsLiveContext(
+        target_table=target_table,
+        policies=policies,
+        persona_clients=persona_clients,
+        persona_principals=persona_principals,
+        matched_policies=matched_policies,
+        primary_persona_id=primary_persona_id,
+    )
+
+
+def _verify_rls_variants_live(
+    *,
+    rls_ctx: _RlsLiveContext,
+    rung: Mapping[str, Any],
+    project_id: str,
+    dataset_id: str,
+    location: str,
+    negative_control_probe: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
+) -> None:
+    variants = rung.get("identity_variants") or {}
+    if not variants:
+        return
+
+    governed_sql = str(rung["governed"]["sql_or_gql"])
+    target_table = rls_ctx.target_table
+    policies = rls_ctx.policies
+
     observed_counts: dict[str, int] = {}
     for persona_id, variant in variants.items():
         expected_val = variant["numeric_value"]
         expected_rows = int(variant["rows_visible"])
+        persona_client = rls_ctx.persona_clients[persona_id]
 
-        persona_client: Any = None
-        if impersonated_client_factory is not None:
-            persona_client = impersonated_client_factory(persona_id)
-        elif role_sa_map and persona_id in role_sa_map:
-            from google.cloud import bigquery
-
-            creds, _ = build_impersonated_credentials(role=persona_id, role_sa_map=role_sa_map)
-            persona_client = bigquery.Client(project=project_id, credentials=creds, location=location)
-
-        if persona_client is not None:
-            rows = _execute_query_rows(
-                persona_client,
-                governed_sql,
-                project_id=project_id,
-                dataset_id=dataset_id,
-                location=location,
-            )
-            ok, actual, detail = reconcile_outcome_metric(expected_val, rows)
-            if not ok:
-                raise RuntimeError(
-                    f"RLS impersonation metric mismatch for persona {persona_id!r}: {detail}"
-                )
-            cnt_sql = f"SELECT COUNT(*) AS rows_visible FROM `{project_id}.{dataset_id}.{target_table}`"
-            cnt_rows = _execute_query_rows(
-                persona_client,
-                cnt_sql,
-                project_id=project_id,
-                dataset_id=dataset_id,
-                location=location,
-            )
-            row_cnt = int(cnt_rows[0]["rows_visible"]) if cnt_rows and "rows_visible" in cnt_rows[0] else expected_rows
-            if row_cnt != expected_rows:
-                raise RuntimeError(
-                    f"RLS rows_visible mismatch for {persona_id!r}: expected {expected_rows}, got {row_cnt}"
-                )
-            observed_counts[persona_id] = row_cnt
-            continue
-
-        matched_policy = _match_persona_policy(persona_id, variant, policies)
-        if matched_policy is None or not matched_policy.get("filter_predicate"):
-            raise NegativeControlError(
-                f"Could not match active BigQuery row access policy for persona {persona_id!r}"
-            )
-        predicate = str(matched_policy["filter_predicate"])
-        count_sql = (
-            f"SELECT COUNT(*) AS rows_visible "
-            f"FROM `{project_id}.{dataset_id}.{target_table}` WHERE ({predicate})"
-        )
-        cnt_rows = _execute_query_rows(
-            base_client,
-            count_sql,
-            project_id=project_id,
-            dataset_id=dataset_id,
-            location=location,
-        )
-        actual_cnt = int(cnt_rows[0]["rows_visible"]) if cnt_rows else 0
-        if actual_cnt != expected_rows:
-            raise RuntimeError(
-                f"RLS predicate row count mismatch for {persona_id!r} ({predicate}): "
-                f"expected {expected_rows}, got {actual_cnt}"
-            )
-
-        scoped_sql = _rewrite_table_with_rls_predicate(
+        rows = _execute_query_rows(
+            persona_client,
             governed_sql,
             project_id=project_id,
             dataset_id=dataset_id,
-            table_id=target_table,
-            filter_predicate=predicate,
+            location=location,
         )
-        scoped_rows = _execute_query_rows(
-            base_client,
-            scoped_sql,
+        ok, _, detail = reconcile_outcome_metric(expected_val, rows)
+        if not ok:
+            raise RuntimeError(
+                f"RLS impersonation metric mismatch for persona {persona_id!r}: {detail}"
+            )
+        cnt_sql = f"SELECT COUNT(*) AS rows_visible FROM `{project_id}.{dataset_id}.{target_table}`"
+        cnt_rows = _execute_query_rows(
+            persona_client,
+            cnt_sql,
             project_id=project_id,
             dataset_id=dataset_id,
             location=location,
         )
-        ok, _, detail = reconcile_outcome_metric(expected_val, scoped_rows)
-        if not ok:
+        row_cnt = int(cnt_rows[0]["rows_visible"]) if cnt_rows and "rows_visible" in cnt_rows[0] else -1
+        if row_cnt != expected_rows:
             raise RuntimeError(
-                f"RLS predicate metric mismatch for {persona_id!r} ({predicate}): {detail}"
+                f"RLS rows_visible mismatch for {persona_id!r}: expected {expected_rows}, got {row_cnt}"
             )
-        observed_counts[persona_id] = actual_cnt
+        observed_counts[persona_id] = row_cnt
 
     if len(observed_counts) >= 2:
-        max_rows = max(observed_counts.values())
-        min_rows = min(observed_counts.values())
+        primary_pid = rls_ctx.primary_persona_id
+        restricted_candidates = [pid for pid in observed_counts if pid != primary_pid]
+        restricted_pid = min(restricted_candidates, key=lambda pid: observed_counts[pid])
+        if observed_counts[restricted_pid] >= observed_counts[primary_pid]:
+            raise NegativeControlError(
+                f"Restricted persona {restricted_pid!r} observed {observed_counts[restricted_pid]} rows >= "
+                f"primary persona {primary_pid!r} ({observed_counts[primary_pid]})"
+            )
+
+        restricted_policy = rls_ctx.matched_policies.get(restricted_pid)
+        restricted_pred = str(restricted_policy.get("filter_predicate", "")).strip() if restricted_policy else ""
+        primary_client = rls_ctx.persona_clients[primary_pid]
+        restricted_client = rls_ctx.persona_clients[restricted_pid]
+
+        if restricted_pred and restricted_pred.upper() != "TRUE":
+            excluded_sql = (
+                f"SELECT * FROM `{project_id}.{dataset_id}.{target_table}` "
+                f"WHERE NOT ({restricted_pred})"
+            )
+            baseline_excluded = _execute_query_rows(
+                primary_client,
+                excluded_sql,
+                project_id=project_id,
+                dataset_id=dataset_id,
+                location=location,
+            )
+            if not baseline_excluded:
+                raise NegativeControlError(
+                    f"Primary persona {primary_pid!r} saw 0 rows for excluded predicate NOT ({restricted_pred})"
+                )
+            verify_negative_governance_control(
+                probe_fn=lambda: _execute_query_rows(
+                    restricted_client,
+                    excluded_sql,
+                    project_id=project_id,
+                    dataset_id=dataset_id,
+                    location=location,
+                ),
+                baseline_row_count=len(baseline_excluded),
+                expected_max_rows=0,
+                active_rls_policies=policies,
+            )
+        else:
+            full_sql = f"SELECT * FROM `{project_id}.{dataset_id}.{target_table}`"
+            baseline_rows = _execute_query_rows(
+                primary_client,
+                full_sql,
+                project_id=project_id,
+                dataset_id=dataset_id,
+                location=location,
+            )
+            verify_negative_governance_control(
+                probe_fn=lambda: _execute_query_rows(
+                    restricted_client,
+                    full_sql,
+                    project_id=project_id,
+                    dataset_id=dataset_id,
+                    location=location,
+                ),
+                baseline_row_count=len(baseline_rows),
+                expected_max_rows=observed_counts[restricted_pid],
+                active_rls_policies=policies,
+            )
+
+    neg_sa = os.environ.get("SQL_NEGATIVE_CONTROL_SA", "").strip()
+    if negative_control_probe is not None or neg_sa:
+        if negative_control_probe is not None:
+            neg_probe_fn = negative_control_probe
+        else:
+            if not is_valid_customer_sa(neg_sa):
+                raise NegativeControlError(f"Invalid SQL_NEGATIVE_CONTROL_SA: {neg_sa!r}")
+            from google.cloud import bigquery
+
+            creds, _ = build_impersonated_credentials(
+                role="negative_control",
+                role_sa_map={"negative_control": neg_sa},
+            )
+            neg_client = bigquery.Client(project=project_id, credentials=creds, location=location)
+            neg_sql = f"SELECT COUNT(*) AS rows_visible FROM `{project_id}.{dataset_id}.{target_table}`"
+            neg_probe_fn = lambda: _execute_query_rows(
+                neg_client,
+                neg_sql,
+                project_id=project_id,
+                dataset_id=dataset_id,
+                location=location,
+            )
+
         verify_negative_governance_control(
-            rows=[{"row_index": i} for i in range(min_rows)],
-            baseline_row_count=max_rows,
-            expected_max_rows=min_rows,
+            probe_fn=neg_probe_fn,
+            baseline_row_count=max(observed_counts.values()) if observed_counts else 1,
+            expected_max_rows=0,
             active_rls_policies=policies,
         )
 
@@ -572,6 +800,7 @@ def capture_rungs(
     env_file: Path | None = None,
     bq_client: Any = None,
     impersonated_client_factory: Callable[[str], Any] | None = None,
+    negative_control_probe: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Executes offline, dry-run, or live-GCP verification and writes the sanitized JS bundle."""
     if mode not in ("offline_fixture", "dry_run", "live_gcp"):
@@ -582,7 +811,7 @@ def capture_rungs(
     live_project_id = env_settings["PROJECT_ID"]
     dataset_id = env_settings["DATASET_ID"]
     raw_bundle = load_raw_pack(pack_id, packs_dir=packs_dir)
-    bq_location = str(os.environ.get("BQ_LOCATION") or raw_bundle.get("region") or env_settings["BQ_LOCATION"])
+    bq_location = resolve_bq_location(raw_bundle, env_settings=env_settings)
 
     if mode == "offline_fixture":
         export_bundle_dict = render_bundle_placeholders(
@@ -646,13 +875,29 @@ def capture_rungs(
                     export_outcome["trust_tier"] = assessment.tier.value
             export_bundle_dict["generated_mode"] = "dry_run_verified"
         else:
+            session_user_cache: dict[int, str | None] = {}
             for idx, rung in enumerate(exec_bundle["rungs"]):
                 question = str(rung.get("question", ""))
+                rls_ctx: _RlsLiveContext | None = None
+                governed_client = client
+                if rung.get("identity_variants"):
+                    rls_ctx = _prepare_rls_live_context(
+                        base_client=client,
+                        rung=rung,
+                        project_id=live_project_id,
+                        dataset_id=dataset_id,
+                        location=bq_location,
+                        impersonated_client_factory=impersonated_client_factory,
+                        session_user_cache=session_user_cache,
+                    )
+                    governed_client = rls_ctx.persona_clients[rls_ctx.primary_persona_id]
+
                 for outcome_key in ("blind", "governed"):
                     exec_outcome = rung[outcome_key]
                     export_outcome = export_bundle_dict["rungs"][idx][outcome_key]
+                    outcome_client = governed_client if outcome_key == "governed" else client
                     rows = _execute_query_rows(
-                        client,
+                        outcome_client,
                         str(exec_outcome["sql_or_gql"]),
                         project_id=live_project_id,
                         dataset_id=dataset_id,
@@ -677,14 +922,14 @@ def capture_rungs(
                         )
                     export_outcome["trust_tier"] = assessment.tier.value
 
-                if rung.get("identity_variants"):
+                if rls_ctx is not None:
                     _verify_rls_variants_live(
-                        base_client=client,
+                        rls_ctx=rls_ctx,
                         rung=rung,
                         project_id=live_project_id,
                         dataset_id=dataset_id,
                         location=bq_location,
-                        impersonated_client_factory=impersonated_client_factory,
+                        negative_control_probe=negative_control_probe,
                     )
             export_bundle_dict["generated_mode"] = "live_gcp_verified"
 

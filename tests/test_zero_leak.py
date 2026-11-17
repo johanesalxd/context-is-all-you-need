@@ -46,15 +46,19 @@ def test_leak_scanner_catches_all_forbidden_patterns(
         "internal_code_da_fast": "Using " + "DA " + "FAST track",
         "internal_code_kcmd": "Run " + "k" + "cmd now",
         "google_email": "user@" + "google." + "com",
+        "google_email_subdomain": "user@" + "sub.google." + "com",
         "altostrat_email": "admin@" + "altostrat." + "com",
-        "non_placeholder_service_account": "runner@other-proj-99.iam." + "gserviceaccount.com",
+        "altostrat_email_subdomain": "admin@" + "team.altostrat." + "com",
+        "non_placeholder_email": "exec@" + "customer-realcorp" + ".io",
+        "non_placeholder_service_account": "runner@" + "other-proj-99" + ".iam." + "gserviceaccount.com",
         "gcp_6digit_project_id": "my-real-proj-" + "123456",
     }
 
     for expected_rule, content in samples.items():
         findings = scan_text_for_leaks(content, path_label="fixture.txt")
         rules = {f.rule for f in findings}
-        assert any(expected_rule.startswith(r) or r == expected_rule for r in rules), (
+        base_rule = expected_rule.removesuffix("_subdomain").removesuffix("_cl")
+        assert any(r == base_rule or r == expected_rule for r in rules), (
             f"Expected leak rule {expected_rule} for sample {content!r}, got {rules}"
         )
 
@@ -69,6 +73,9 @@ def test_leak_scanner_catches_all_forbidden_patterns(
     safe_text = (
         "PROJECT_ID=example-project-id\n"
         "SA=cfo-regional@example-project-id.iam.gserviceaccount.com\n"
+        "contact=demo@example.com\n"
+        "org_contact=demo@example.org\n"
+        "net_contact=demo@example.net\n"
         "url=https://example.org/docs/go-live\n"
         "decision=Go/No-Go gate\n"
     )

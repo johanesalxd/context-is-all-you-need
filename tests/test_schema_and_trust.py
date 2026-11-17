@@ -25,8 +25,11 @@ from engine.capture_rungs import (
 from engine.pack_loader import (
     DEFAULT_REPO_ROOT,
     discover_packs,
+    extract_create_table_statement,
     load_pack,
     load_seed_module,
+    resolve_bq_location,
+    resolve_env_settings,
 )
 from engine.rls_impersonation import (
     ImpersonationError,
@@ -246,6 +249,8 @@ class _FakeBigQueryClient:
         policies: list[dict[str, Any]] | None = None,
         raise_on_query: Exception | None = None,
         persona: str | None = None,
+        session_user: str | None = None,
+        deny_tables: set[str] | None = None,
     ) -> None:
         self.queries: list[tuple[str, bool, str | None]] = []
         self._policies = policies or [
@@ -262,6 +267,8 @@ class _FakeBigQueryClient:
         ]
         self._raise_on_query = raise_on_query
         self._persona = persona
+        self._session_user = session_user
+        self._deny_tables = deny_tables or set()
 
     def _call_api(self, *_args: Any, path: str = "", **_kwargs: Any) -> dict[str, Any]:
         if path.endswith("/rowAccessPolicies"):
@@ -275,6 +282,23 @@ class _FakeBigQueryClient:
         self.queries.append((sql, dry_run, location))
         if dry_run:
             return _FakeQueryJob([])
+
+        for tbl in self._deny_tables:
+            if tbl in sql:
+                err = RuntimeError("Policy denied access to restricted resource")
+                err.code = 403  # type: ignore[attr-defined]
+                err.errors = [{"reason": "accessDenied"}]  # type: ignore[attr-defined]
+                raise err
+
+        if "SESSION_USER()" in sql:
+            return _FakeQueryJob([{"session_user": self._session_user}] if self._session_user else [])
+
+        if "WHERE NOT (" in sql:
+            if self._persona == "analyst_sg":
+                return _FakeQueryJob([])
+            return _FakeQueryJob(
+                [{"country_code": "MY"}, {"country_code": "TH"}, {"country_code": "ID"}]
+            )
 
         if sql.startswith("SELECT COUNT(*) AS rows_visible"):
             return _FakeQueryJob(
@@ -309,7 +333,10 @@ class _FakeBigQueryClient:
         return _FakeQueryJob([{"metric_value": 0.0}])
 
 
-def test_pack_loader_discovers_sorts_and_validates(tmp_path: Path) -> None:
+def test_pack_loader_discovers_sorts_and_validates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     packs_dir = tmp_path / "packs"
     _write_synthetic_pack(packs_dir)
     assert discover_packs(packs_dir) == ["synthetic_pack"]
@@ -321,6 +348,31 @@ def test_pack_loader_discovers_sorts_and_validates(tmp_path: Path) -> None:
     seed_mod = load_seed_module("synthetic_pack", packs_dir=packs_dir)
     assert seed_mod is not None
     assert seed_mod.evaluate_invariants()["sg_metric"] == 100.0
+
+    # Comment-before-CREATE and ';' inside OPTIONS string literal must not trip staging DDL extraction
+    ddl_sql = (
+        "-- Notes: run CREATE TABLE IF NOT EXISTS `p.d.staging_cold_chain_oct11` first.\n"
+        "/* Another comment mentioning CREATE TABLE IF NOT EXISTS `p.d.staging_cold_chain_oct11`; */\n"
+        "CREATE TABLE IF NOT EXISTS `p.d.other_tbl` (id STRING);\n"
+        "CREATE TABLE IF NOT EXISTS `p.d.staging_cold_chain_oct11` (\n"
+        '  country_code STRING OPTIONS(description="keep; -- not a comment"),\n'
+        "  margin FLOAT64\n"
+        ");\n"
+    )
+    extracted = extract_create_table_statement(ddl_sql, "staging_cold_chain_oct11")
+    assert extracted is not None
+    assert extracted.startswith("CREATE TABLE IF NOT EXISTS `p.d.staging_cold_chain_oct11`")
+    assert 'description="keep; -- not a comment"' in extracted
+    assert "other_tbl" not in extracted
+
+    # BQ_LOCATION precedence: env/.env > pack.yaml region > default
+    monkeypatch.delenv("BQ_LOCATION", raising=False)
+    env_file = tmp_path / "empty.env"
+    env_file.write_text("", encoding="utf-8")
+    settings = resolve_env_settings(tmp_path, env_file=env_file)
+    assert resolve_bq_location({"region": "us-central1"}, env_settings=settings) == "us-central1"
+    monkeypatch.setenv("BQ_LOCATION", "europe-west1")
+    assert resolve_bq_location({"region": "us-central1"}, env_settings=settings) == "europe-west1"
 
 
 def test_pack_loader_rejects_additional_properties(tmp_path: Path) -> None:
@@ -419,10 +471,10 @@ def test_rls_impersonation_hmac_sa_validation_and_redaction(monkeypatch: pytest.
 
     # Customer SA validation vs Google-managed SAs
     sa_suffix = "gserviceaccount" + ".com"
-    assert is_valid_customer_sa("analyst-sg@example-project-id.iam." + sa_suffix)
-    assert not is_valid_customer_sa("service-12345@gcp-sa-bigquery.iam." + sa_suffix)
-    assert not is_valid_customer_sa("12345@cloudservices." + sa_suffix)
-    assert not is_valid_customer_sa("12345-compute@developer." + sa_suffix)
+    assert is_valid_customer_sa("analyst-sg@example-project-id.iam.gserviceaccount.com")
+    assert not is_valid_customer_sa("service-12345@" + "gcp-sa-bigquery" + ".iam." + sa_suffix)
+    assert not is_valid_customer_sa("12345@" + "cloudservices." + sa_suffix)
+    assert not is_valid_customer_sa("12345-compute@" + "developer." + sa_suffix)
 
     parsed = parse_role_sa_map(
         '{"analyst_sg":"analyst-sg@example-project-id.iam.gserviceaccount.com"}'
@@ -430,7 +482,7 @@ def test_rls_impersonation_hmac_sa_validation_and_redaction(monkeypatch: pytest.
     assert parsed["analyst_sg"].endswith(".iam.gserviceaccount.com")
 
     with pytest.raises(ImpersonationError):
-        parse_role_sa_map('{"bad":"svc@gcp-sa-bigquery.iam.' + sa_suffix + '"}')
+        parse_role_sa_map('{"bad":"svc@' + "gcp-sa-bigquery" + '.iam.' + sa_suffix + '"}')
 
     from types import SimpleNamespace
 
@@ -474,6 +526,12 @@ def test_negative_governance_control_distinguishes_403_from_400() -> None:
     with pytest.raises(NegativeControlError, match="400"):
         verify_negative_governance_control(exception=BadRequestError("400 badRequest"))
 
+    # Tightened check: plain RuntimeError mentioning '403' / 'permission' without 403/Forbidden/reason must fail
+    with pytest.raises(NegativeControlError, match="Unexpected error"):
+        verify_negative_governance_control(
+            exception=RuntimeError("Query string mentions permission or 403 literal")
+        )
+
     class NotFoundError(Exception):
         code = 404
         errors = [{"reason": "notFound", "message": "Missing table"}]
@@ -507,6 +565,8 @@ def test_capture_rungs_all_cli_modes_and_redaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("SQL_ROLE_SA_MAP_JSON", raising=False)
+    monkeypatch.delenv("SQL_NEGATIVE_CONTROL_SA", raising=False)
+    monkeypatch.delenv("BQ_LOCATION", raising=False)
     packs_dir = tmp_path / "packs"
     _write_synthetic_pack(packs_dir)
     out_js = tmp_path / "out" / "rungs_bundle.js"
@@ -544,7 +604,14 @@ def test_capture_rungs_all_cli_modes_and_redaction(
     assert live_proj not in out_js.read_text(encoding="utf-8")
     assert "example-project-id" in out_js.read_text(encoding="utf-8")
 
-    # 3. --live-gcp (with impersonation factory for Beat 4b)
+    # 3. --live-gcp with explicit impersonation factory + 403 negative probe passes cleanly
+    class _Denied403(Exception):
+        code = 403
+        errors = [{"reason": "accessDenied"}]
+
+    def _raise_403() -> list[dict[str, Any]]:
+        raise _Denied403("Access Denied")
+
     fake_live = _FakeBigQueryClient()
     bundle_live = capture_rungs(
         pack_id="synthetic_pack",
@@ -554,25 +621,73 @@ def test_capture_rungs_all_cli_modes_and_redaction(
         env_file=no_env,
         bq_client=fake_live,
         impersonated_client_factory=lambda persona: _FakeBigQueryClient(persona=persona),
+        negative_control_probe=_raise_403,
     )
     assert bundle_live["generated_mode"] == "live_gcp_verified"
     assert live_proj not in out_js.read_text(encoding="utf-8")
 
-    # 4. --live-gcp without impersonation factory exercises filterPredicate fallback
-    bundle_live_pred = capture_rungs(
+    # 4. --live-gcp WITHOUT impersonation and WITHOUT matching SESSION_USER() fails closed
+    sentinel_out = tmp_path / "out" / "should_not_exist_live.js"
+    with pytest.raises(NegativeControlError, match="predicate simulation is disabled"):
+        capture_rungs(
+            pack_id="synthetic_pack",
+            mode="live_gcp",
+            output_path=sentinel_out,
+            packs_dir=packs_dir,
+            env_file=no_env,
+            bq_client=_FakeBigQueryClient(),
+        )
+    assert not sentinel_out.exists()
+
+    # 5. --live-gcp with SQL_ROLE_SA_MAP_JSON executes governed SQL via primary persona SA
+    # even when the base runner client is denied access to the RLS table.
+    from types import SimpleNamespace
+
+    sa_global = "analyst-global@example-project-id.iam.gserviceaccount.com"
+    sa_sg = "analyst-sg@example-project-id.iam.gserviceaccount.com"
+    monkeypatch.setenv(
+        "SQL_ROLE_SA_MAP_JSON",
+        json.dumps({"analyst_global": sa_global, "analyst_sg": sa_sg}),
+    )
+
+    def _fake_build_creds(*, role: str, role_sa_map: dict[str, str], **_kw: Any) -> tuple[Any, str]:
+        return SimpleNamespace(_fake_role=role), role_sa_map[role]
+
+    def _fake_bq_ctor(*, project: str, credentials: Any = None, location: str = "") -> _FakeBigQueryClient:
+        role = getattr(credentials, "_fake_role", None)
+        return _FakeBigQueryClient(persona=role)
+
+    monkeypatch.setattr("engine.capture_rungs.build_impersonated_credentials", _fake_build_creds)
+    monkeypatch.setattr("google.cloud.bigquery.Client", _fake_bq_ctor)
+
+    base_restricted_client = _FakeBigQueryClient(deny_tables={"gold_margin"})
+    bundle_sa_map = capture_rungs(
         pack_id="synthetic_pack",
         mode="live_gcp",
         output_path=out_js,
         packs_dir=packs_dir,
         env_file=no_env,
-        bq_client=_FakeBigQueryClient(),
+        bq_client=base_restricted_client,
     )
-    assert bundle_live_pred["generated_mode"] == "live_gcp_verified"
+    assert bundle_sa_map["generated_mode"] == "live_gcp_verified"
 
-    # 5. CLI main() flag coverage (--pack --offline-fixture --output)
+    # 6. Zero-flag --live-gcp (SQL_ROLE_SA_MAP_JSON unset): SESSION_USER matches user: grantee +
+    # policy serviceAccount grantee is impersonated via build_impersonated_credentials
+    monkeypatch.delenv("SQL_ROLE_SA_MAP_JSON", raising=False)
+    zero_flag_client = _FakeBigQueryClient(session_user="global@example.com")
+    bundle_zero_flag = capture_rungs(
+        pack_id="synthetic_pack",
+        mode="live_gcp",
+        output_path=out_js,
+        packs_dir=packs_dir,
+        env_file=no_env,
+        bq_client=zero_flag_client,
+    )
+    assert bundle_zero_flag["generated_mode"] == "live_gcp_verified"
+
+    # 7. CLI main() flag coverage (--pack --offline-fixture --output)
     monkeypatch.setattr("engine.capture_rungs.DEFAULT_REPO_ROOT", tmp_path)
     monkeypatch.setattr("engine.pack_loader.DEFAULT_REPO_ROOT", tmp_path)
-    # Copy schema under tmp_path so relative resolution works seamlessly
     (tmp_path / "schemas").mkdir(exist_ok=True)
     (tmp_path / "schemas" / "rung_v2.schema.json").write_text(
         (DEFAULT_REPO_ROOT / "schemas" / "rung_v2.schema.json").read_text(encoding="utf-8"),
@@ -598,6 +713,7 @@ def test_fastapi_server_allowlist_and_live_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("SQL_ROLE_SA_MAP_JSON", raising=False)
+    monkeypatch.delenv("BQ_LOCATION", raising=False)
     packs_dir = tmp_path / "packs"
     _write_synthetic_pack(packs_dir)
     live_proj = "live-api-" + "445566"
@@ -619,7 +735,7 @@ def test_fastapi_server_allowlist_and_live_execution(
     assert health_resp.json()["packs"] == ["synthetic_pack"]
     assert live_proj not in health_resp.text
 
-    # Valid governed run with persona RLS filter
+    # Valid governed run without impersonation labels predicate_simulation
     run_resp = client.post(
         "/api/run-rung",
         json={
@@ -635,7 +751,30 @@ def test_fastapi_server_allowlist_and_live_execution(
     assert payload["numeric_value"] == 100.0
     assert payload["row_count"] == 1
     assert payload["trust_tier"] == "TIER_1_VERIFIED_OR_COMPILED"
+    assert payload["rls_enforcement"] == "predicate_simulation"
     assert live_proj not in json.dumps(payload)
+
+    # With impersonation factory, labels bigquery_rls_impersonated
+    imp_app = create_app(
+        packs_dir=packs_dir,
+        web_dir=tmp_path / "nonexistent_web",
+        env_file=no_env,
+        bq_client=fake_bq,
+        impersonated_client_factory=lambda persona: _FakeBigQueryClient(persona=persona),
+    )
+    imp_resp = TestClient(imp_app).post(
+        "/api/run-rung",
+        json={
+            "pack_id": "synthetic_pack",
+            "rung_id": "r4_trust_access",
+            "mode": "governed",
+            "persona_id": "analyst_sg",
+            "live": True,
+        },
+    )
+    assert imp_resp.status_code == 200
+    assert imp_resp.json()["rls_enforcement"] == "bigquery_rls_impersonated"
+    assert imp_resp.json()["row_count"] == 1
 
     # Offline run
     off_resp = client.post(
@@ -649,6 +788,7 @@ def test_fastapi_server_allowlist_and_live_execution(
     )
     assert off_resp.status_code == 200
     assert off_resp.json()["execution_mode"] == "offline_fixture"
+    assert off_resp.json()["rls_enforcement"] == "offline_fixture"
     assert off_resp.json()["trust_tier"] == "TIER_3_REVIEW_REQUIRED"
 
     # Reject extra raw SQL field (extra="forbid")
@@ -714,7 +854,7 @@ def test_fastapi_server_allowlist_and_live_execution(
     assert "example-project-id" in err_resp.text
 
 
-def test_shell_scripts_syntax_permissions_and_teardown_guards() -> None:
+def test_shell_scripts_syntax_permissions_and_teardown_guards(tmp_path: Path) -> None:
     scripts_dir = DEFAULT_REPO_ROOT / "scripts"
     for script_name in ("provision_pack.sh", "teardown_pack.sh"):
         script_path = scripts_dir / script_name
@@ -759,6 +899,120 @@ def test_shell_scripts_syntax_permissions_and_teardown_guards() -> None:
         check=False,
     )
     assert refuse_res.returncode != 0
+
+    # Verify provision_pack.sh principal guards (no fallback to active user or developer SA)
+    provision_path = scripts_dir / "provision_pack.sh"
+    packs_dir = tmp_path / "packs"
+    pack_dir = packs_dir / "sentinel_pack"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "seed_sentinel.py").write_text(
+        "import os, sys\n"
+        "print('PROVISION_PRINCIPALS=' + os.environ.get('RLS_CFO_PRINCIPAL', '') + '|' + os.environ.get('RLS_SG_PRINCIPAL', ''))\n"
+        "sys.exit(88)\n",
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    gcloud_stub = fake_bin / "gcloud"
+    sa_suffix = "gserviceaccount" + ".com"
+    dev_sa = "12345-compute@" + "developer." + sa_suffix
+    valid_sa = "bq-reader@" + "sandbox-demo-42" + ".iam." + sa_suffix
+    iam_policy = {
+        "bindings": [
+            {"role": "roles/editor", "members": [f"serviceAccount:{dev_sa}"]},
+            {"role": "roles/bigquery.jobUser", "members": [f"serviceAccount:{valid_sa}"]},
+            {"role": "roles/bigquery.dataEditor", "members": [f"serviceAccount:{valid_sa}"]},
+        ]
+    }
+    gcloud_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$*" == *"auth list"* ]]; then\n'
+        '  echo "Created enterprise-certificate-proxy configuration file [tmp]."\n'
+        '  echo "runner@example.com"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$*" == *"get-iam-policy"* ]]; then\n'
+        '  if [[ "${FAKE_EMPTY_POLICY:-0}" == "1" ]]; then\n'
+        '    echo \'{"bindings": [{"role": "roles/editor", "members": ["serviceAccount:' + dev_sa + '"]}]}\'\n'
+        "  else\n"
+        f"    cat <<'JSON'\n{json.dumps(iam_policy)}\nJSON\n"
+        "  fi\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$*" == *"iam service-accounts describe"* ]]; then\n'
+        "  exit 1\n"
+        "fi\n"
+        'if [[ "$*" == *"iam service-accounts create"* ]]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    gcloud_stub.chmod(0o755)
+
+    base_env = {
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+        "HOME": os.environ.get("HOME", ""),
+        "PROJECT_ID": "sandbox-demo-42",
+        "DATASET_ID": "synthetic_ds",
+        "PACKS_DIR": str(packs_dir),
+    }
+
+    # 1) Empty / developer-SA-only policy without --provision-rls-sas must fail closed
+    empty_env = dict(base_env, FAKE_EMPTY_POLICY="1")
+    fail_no_sa = subprocess.run(
+        ["bash", str(provision_path), "--pack", "sentinel_pack"],
+        env=empty_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert fail_no_sa.returncode not in (0, 88)
+    assert "Could not resolve a distinct least-privileged customer SA" in fail_no_sa.stderr
+
+    # 2) Equal explicit RLS principals must fail closed
+    dup_env = dict(
+        base_env,
+        RLS_CFO_PRINCIPAL="user:runner@example.com",
+        RLS_SG_PRINCIPAL="user:runner@example.com",
+    )
+    fail_dup = subprocess.run(
+        ["bash", str(provision_path), "--pack", "sentinel_pack"],
+        env=dup_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert fail_dup.returncode not in (0, 88)
+    assert "distinct" in fail_dup.stderr.lower()
+
+    # 3) Zero-flag IAM policy picks least-privileged customer SA with jobUser + dataEditor
+    ok_zero_flag = subprocess.run(
+        ["bash", str(provision_path), "--pack", "sentinel_pack"],
+        env=base_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ok_zero_flag.returncode == 88, ok_zero_flag.stderr
+    assert f"PROVISION_PRINCIPALS=user:runner@example.com|serviceAccount:{valid_sa}" in ok_zero_flag.stdout
+
+    # 4) --provision-rls-sas creates both sandbox persona SAs when opted in
+    ok_opt_in = subprocess.run(
+        ["bash", str(provision_path), "--pack", "sentinel_pack", "--provision-rls-sas"],
+        env=empty_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ok_opt_in.returncode == 88, ok_opt_in.stderr
+    expected_cfo_sa = "rls-cfo-regional@" + "sandbox-demo-42" + ".iam." + sa_suffix
+    expected_sg_sa = "sg-coldchain@" + "sandbox-demo-42" + ".iam." + sa_suffix
+    assert (
+        f"PROVISION_PRINCIPALS=serviceAccount:{expected_cfo_sa}"
+        f"|serviceAccount:{expected_sg_sa}"
+    ) in ok_opt_in.stdout
 
     # Ensure CLI module executes cleanly
     help_res = subprocess.run(

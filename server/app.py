@@ -1,4 +1,10 @@
-"""Lightweight allowlisted FastAPI runner and static web server."""
+"""Lightweight allowlisted FastAPI runner and static web server.
+
+Designed for local Workbench exploration: executes strictly allowlisted
+`(pack_id, rung_id, mode, persona_id)` queries without client-supplied SQL or
+HTTP HMAC assertion headers (external multi-tenant gateways can wire
+`engine.rls_impersonation.verify_role_assertion` in front of requests).
+"""
 
 from __future__ import annotations
 
@@ -21,16 +27,17 @@ from engine.capture_rungs import (
     _match_persona_policy,
     _rewrite_table_with_rls_predicate,
     list_active_row_access_policies,
+    resolve_persona_bigquery_client,
 )
 from engine.pack_loader import (
     DEFAULT_REPO_ROOT,
     discover_packs,
     load_raw_pack,
     render_bundle_placeholders,
+    resolve_bq_location,
     resolve_env_settings,
 )
 from engine.rls_impersonation import (
-    build_impersonated_credentials,
     parse_role_sa_map,
     redact_bundle_data,
     redact_sensitive_identifiers,
@@ -114,11 +121,7 @@ def create_app(
         live_project_id = settings["PROJECT_ID"]
         dataset_id = settings["DATASET_ID"]
         raw_bundle = load_raw_pack(req.pack_id, packs_dir=resolved_packs_dir)
-        bq_location = str(
-            os.environ.get("BQ_LOCATION")
-            or raw_bundle.get("region")
-            or settings["BQ_LOCATION"]
-        )
+        bq_location = resolve_bq_location(raw_bundle, env_settings=settings)
 
         matching_rungs = [r for r in raw_bundle["rungs"] if r.get("id") == req.rung_id]
         if not matching_rungs:
@@ -185,6 +188,7 @@ def create_app(
                     "mode": req.mode,
                     "persona_id": req.persona_id,
                     "execution_mode": "offline_fixture",
+                    "rls_enforcement": "offline_fixture",
                     "latency_ms": elapsed_ms,
                     "answer_headline": headline,
                     "answer_detail": detail,
@@ -225,42 +229,61 @@ def create_app(
                 client = bigquery.Client(project=live_project_id, location=bq_location)
 
             active_client = client
+            rls_enforcement = "not_applicable"
             if display_variant is not None and req.persona_id is not None:
                 raw_sa_map = os.environ.get("SQL_ROLE_SA_MAP_JSON", "").strip()
                 role_sa_map = parse_role_sa_map(raw_sa_map) if raw_sa_map else None
-                if impersonated_client_factory is not None:
-                    active_client = impersonated_client_factory(req.persona_id)
-                elif role_sa_map and req.persona_id in role_sa_map:
-                    from google.cloud import bigquery
-
-                    creds, _ = build_impersonated_credentials(
-                        role=req.persona_id,
-                        role_sa_map=role_sa_map,
-                    )
-                    active_client = bigquery.Client(
-                        project=live_project_id,
-                        credentials=creds,
+                table_ids = _extract_table_ids_from_sql(sql_to_run, dataset_id)
+                target_table = ""
+                policies: list[dict[str, Any]] = []
+                for candidate_tbl in table_ids:
+                    found = list_active_row_access_policies(
+                        client,
+                        project_id=live_project_id,
+                        dataset_id=dataset_id,
+                        table_id=candidate_tbl,
                         location=bq_location,
                     )
-                else:
-                    table_ids = _extract_table_ids_from_sql(sql_to_run, dataset_id)
-                    if table_ids:
-                        policies = list_active_row_access_policies(
-                            client,
+                    if found:
+                        target_table = candidate_tbl
+                        policies = found
+                        break
+                if not target_table and table_ids:
+                    target_table = table_ids[0]
+
+                resolved = None
+                if impersonated_client_factory is not None or role_sa_map or bq_client is None:
+                    try:
+                        resolved = resolve_persona_bigquery_client(
+                            base_client=client,
+                            persona_id=req.persona_id,
+                            variant=display_variant,
+                            policies=policies,
                             project_id=live_project_id,
                             dataset_id=dataset_id,
-                            table_id=table_ids[0],
                             location=bq_location,
+                            role_sa_map=role_sa_map,
+                            impersonated_client_factory=impersonated_client_factory,
                         )
-                        matched = _match_persona_policy(req.persona_id, display_variant, policies)
-                        if matched and matched.get("filter_predicate"):
-                            sql_to_run = _rewrite_table_with_rls_predicate(
-                                sql_to_run,
-                                project_id=live_project_id,
-                                dataset_id=dataset_id,
-                                table_id=table_ids[0],
-                                filter_predicate=str(matched["filter_predicate"]),
-                            )
+                    except Exception:
+                        if impersonated_client_factory is not None or role_sa_map:
+                            raise
+                        resolved = None
+
+                if resolved is not None:
+                    active_client, _, _ = resolved
+                    rls_enforcement = "bigquery_rls_impersonated"
+                elif target_table and policies:
+                    matched = _match_persona_policy(req.persona_id, display_variant, policies)
+                    if matched and matched.get("filter_predicate"):
+                        sql_to_run = _rewrite_table_with_rls_predicate(
+                            sql_to_run,
+                            project_id=live_project_id,
+                            dataset_id=dataset_id,
+                            table_id=target_table,
+                            filter_predicate=str(matched["filter_predicate"]),
+                        )
+                        rls_enforcement = "predicate_simulation"
 
             rows = _execute_query_rows(
                 active_client,
@@ -296,6 +319,7 @@ def create_app(
                     "mode": req.mode,
                     "persona_id": req.persona_id,
                     "execution_mode": "live_gcp",
+                    "rls_enforcement": rls_enforcement,
                     "latency_ms": elapsed_ms,
                     "answer_headline": (
                         display_variant["answer_headline"]

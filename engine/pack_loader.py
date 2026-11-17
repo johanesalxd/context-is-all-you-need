@@ -18,12 +18,14 @@ import yaml
 __all__ = [
     "DEFAULT_REPO_ROOT",
     "discover_packs",
+    "extract_create_table_statement",
     "load_dotenv_if_present",
     "load_pack",
     "load_raw_pack",
     "load_schema",
     "load_seed_module",
     "render_bundle_placeholders",
+    "resolve_bq_location",
     "resolve_env_settings",
     "validate_bundle",
 ]
@@ -94,6 +96,63 @@ def resolve_env_settings(
         "BQ_LOCATION": bq_location,
         "PACK_ID": pack_id,
     }
+
+
+def resolve_bq_location(
+    raw_bundle: Mapping[str, Any],
+    *,
+    env_settings: Mapping[str, str],
+) -> str:
+    """Resolves BigQuery execution location with precedence: env/.env > pack region > default."""
+    explicit_env_loc = os.environ.get("BQ_LOCATION", "").strip()
+    if explicit_env_loc:
+        return explicit_env_loc
+    pack_region = str(raw_bundle.get("region") or "").strip()
+    if pack_region:
+        return pack_region
+    return str(env_settings.get("BQ_LOCATION") or "asia-southeast1").strip()
+
+
+def _strip_sql_comments(sql_text: str) -> list[str]:
+    """Splits GoogleSQL into comment-free statements using literal-aware tokenization."""
+    from engine.trust_classifier import TokenType, tokenize_googlesql
+
+    statements: list[str] = []
+    parts: list[str] = []
+    for tok in tokenize_googlesql(sql_text):
+        if tok.type == TokenType.COMMENT:
+            parts.append(" ")
+            continue
+        parts.append(tok.text)
+        if tok.type == TokenType.PUNCT and tok.text == ";":
+            stmt = "".join(parts).strip()
+            if stmt:
+                statements.append(stmt)
+            parts = []
+    tail = "".join(parts).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def extract_create_table_statement(sql_text: str, table_name: str) -> str | None:
+    """Extracts the CREATE TABLE statement targeting table_name after stripping SQL comments."""
+    target = table_name.strip().lower()
+    if not target:
+        return None
+    header_re = re.compile(
+        r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(;]+)",
+        flags=re.IGNORECASE,
+    )
+    for stmt in _strip_sql_comments(sql_text):
+        match = header_re.match(stmt)
+        if not match:
+            continue
+        ident = match.group(1).strip().strip("`\"")
+        leaf = ident.split(".")[-1].strip("`\"").lower()
+        if leaf == target:
+            return stmt
+    return None
 
 
 def discover_packs(packs_dir: Path | None = None) -> list[str]:
@@ -252,7 +311,7 @@ def load_pack(
     env_defaults = resolve_env_settings()
     resolved_project = project_id or _PLACEHOLDER_PROJECT
     resolved_dataset = dataset_id or env_defaults["DATASET_ID"]
-    resolved_location = bq_location or str(raw_bundle.get("region") or env_defaults["BQ_LOCATION"])
+    resolved_location = bq_location or resolve_bq_location(raw_bundle, env_settings=env_defaults)
 
     bundle = render_bundle_placeholders(
         raw_bundle,

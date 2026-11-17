@@ -50,6 +50,8 @@ PROJECT_ID="${PROJECT_ID:-}"
 BQ_LOCATION="${BQ_LOCATION:-asia-southeast1}"
 DATASET_ID="${DATASET_ID:-}"
 PACK_ID="${PACK_ID:-}"
+PACKS_DIR="${PACKS_DIR:-${REPO_ROOT}/packs}"
+PROVISION_RLS_SAS="${PROVISION_RLS_SAS:-0}"
 
 if [[ $# -ge 1 && -n "${1:-}" && "${1:-}" != --* ]]; then
   PACK_ID="$1"
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
     --pack)
       PACK_ID="${2:?--pack requires an argument}"
       shift 2
+      ;;
+    --provision-rls-sas)
+      PROVISION_RLS_SAS=1
+      shift
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -82,7 +88,7 @@ if [[ -z "${PACK_ID}" ]]; then
   exit 1
 fi
 
-PACK_DIR="${REPO_ROOT}/packs/${PACK_ID}"
+PACK_DIR="${PACKS_DIR}/${PACK_ID}"
 if [[ ! -d "${PACK_DIR}" ]]; then
   echo "ERROR: ScenarioPack directory not found: ${PACK_DIR}" >&2
   exit 1
@@ -108,59 +114,162 @@ ACTIVE_GCLOUD_ACCOUNT="$(
     | tr -d '[:space:]' || true
 )"
 
+validate_rls_principals_py() {
+  uv run --project "${REPO_ROOT}" python - <<'PY'
+import os
+import sys
+from engine.rls_impersonation import is_valid_customer_sa
+
+cfo = os.environ.get("RLS_CFO_PRINCIPAL", "").strip()
+sg = os.environ.get("RLS_SG_PRINCIPAL", "").strip()
+if not cfo or not sg:
+    print("ERROR: RLS_CFO_PRINCIPAL and RLS_SG_PRINCIPAL must both be non-empty.", file=sys.stderr)
+    sys.exit(1)
+if cfo.lower() == sg.lower():
+    print("ERROR: RLS_CFO_PRINCIPAL and RLS_SG_PRINCIPAL must be distinct principals.", file=sys.stderr)
+    sys.exit(1)
+for label, principal in (("RLS_CFO_PRINCIPAL", cfo), ("RLS_SG_PRINCIPAL", sg)):
+    if principal.startswith("serviceAccount:"):
+        email = principal.split(":", 1)[1].strip()
+        if not is_valid_customer_sa(email):
+            print(f"ERROR: {label} is not a valid customer-managed service account: {email}", file=sys.stderr)
+            sys.exit(1)
+PY
+}
+
+ensure_sa_exists() {
+  local sa_name="$1"
+  local display_name="$2"
+  local sa_email="${sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+  uv run --project "${REPO_ROOT}" python - "${sa_email}" <<'PY'
+import sys
+from engine.rls_impersonation import is_valid_customer_sa
+
+email = sys.argv[1]
+if not is_valid_customer_sa(email):
+    print(f"ERROR: Invalid customer-managed SA email: {email}", file=sys.stderr)
+    sys.exit(1)
+PY
+  if ! gcloud iam service-accounts describe "${sa_email}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud iam service-accounts create "${sa_name}" \
+      --project="${PROJECT_ID}" \
+      --display-name="${display_name}" >/dev/null
+  fi
+}
+
 resolve_rls_principals() {
   if [[ -n "${SQL_ROLE_SA_MAP_JSON:-}" ]]; then
     eval "$(
       uv run --project "${REPO_ROOT}" python - <<'PY'
-import os, shlex
+import os, shlex, sys
 from engine.rls_impersonation import parse_role_sa_map
+
 data = parse_role_sa_map(os.environ["SQL_ROLE_SA_MAP_JSON"])
-vals = list(data.values())
-cfo = next((v for k, v in data.items() if "cfo" in k.lower() or "all" in k.lower()), vals[0])
-sg = next((v for k, v in data.items() if v != cfo), vals[-1])
+unique_vals = list(dict.fromkeys(data.values()))
+if len(unique_vals) < 2:
+    print(
+        "ERROR: SQL_ROLE_SA_MAP_JSON must map at least 2 distinct customer service accounts for differential RLS.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+cfo = next(
+    (v for k, v in data.items() if "cfo" in k.lower() or "all" in k.lower() or "regional" in k.lower()),
+    unique_vals[0],
+)
+sg = next((v for v in unique_vals if v != cfo), unique_vals[-1])
 print(f"export RLS_CFO_PRINCIPAL={shlex.quote('serviceAccount:' + cfo)}")
 print(f"export RLS_SG_PRINCIPAL={shlex.quote('serviceAccount:' + sg)}")
 PY
     )"
+    validate_rls_principals_py
     return 0
   fi
 
   if [[ -n "${RLS_CFO_PRINCIPAL:-}" && -n "${RLS_SG_PRINCIPAL:-}" ]]; then
+    validate_rls_principals_py
     return 0
   fi
 
-  if [[ -z "${ACTIVE_GCLOUD_ACCOUNT}" ]]; then
-    echo "ERROR: Could not determine active gcloud account and SQL_ROLE_SA_MAP_JSON is unset." >&2
+  if [[ "${PROVISION_RLS_SAS}" == "1" ]]; then
+    if [[ -z "${RLS_CFO_PRINCIPAL:-}" ]]; then
+      ensure_sa_exists "rls-cfo-regional" "CFO Regional RLS Persona"
+      export RLS_CFO_PRINCIPAL="serviceAccount:rls-cfo-regional@${PROJECT_ID}.iam.gserviceaccount.com"
+    fi
+    if [[ -z "${RLS_SG_PRINCIPAL:-}" ]]; then
+      ensure_sa_exists "sg-coldchain" "SG Cold-Chain RLS Persona"
+      export RLS_SG_PRINCIPAL="serviceAccount:sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com"
+    fi
+    validate_rls_principals_py
+    return 0
+  fi
+
+  if [[ -z "${ACTIVE_GCLOUD_ACCOUNT}" && -z "${RLS_CFO_PRINCIPAL:-}" ]]; then
+    echo "ERROR: Could not determine active gcloud account and SQL_ROLE_SA_MAP_JSON / RLS_CFO_PRINCIPAL is unset." >&2
     exit 1
   fi
 
   export RLS_CFO_PRINCIPAL="${RLS_CFO_PRINCIPAL:-user:${ACTIVE_GCLOUD_ACCOUNT}}"
 
   if [[ -z "${RLS_SG_PRINCIPAL:-}" ]]; then
-    local candidate_sa="sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com"
-    if gcloud iam service-accounts describe "${candidate_sa}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-      export RLS_SG_PRINCIPAL="serviceAccount:${candidate_sa}"
-    elif gcloud iam service-accounts create "sg-coldchain" \
-      --project="${PROJECT_ID}" \
-      --display-name="SG Cold-Chain RLS Persona" >/dev/null 2>&1; then
-      export RLS_SG_PRINCIPAL="serviceAccount:${candidate_sa}"
-    else
-      local existing_sa
-      existing_sa="$(
-        gcloud iam service-accounts list --project="${PROJECT_ID}" --format='value(email)' 2>/dev/null \
-          | grep -v '^Created ' \
-          | grep '@' \
-          | head -n 1 \
-          | tr -d '[:space:]' || true
+    local policy_json
+    policy_json="$(gcloud projects get-iam-policy "${PROJECT_ID}" --format=json 2>/dev/null || true)"
+    if [[ -n "${policy_json}" ]]; then
+      export _IAM_POLICY_JSON="${policy_json}"
+      local picked_sa
+      picked_sa="$(
+        uv run --project "${REPO_ROOT}" python - <<'PY'
+import json, os, sys
+from engine.rls_impersonation import is_valid_customer_sa
+
+raw = os.environ.get("_IAM_POLICY_JSON", "")
+idx = raw.find("{")
+if idx < 0:
+    sys.exit(0)
+policy = json.loads(raw[idx:])
+cfo = os.environ.get("RLS_CFO_PRINCIPAL", "").strip().lower()
+
+job_roles = {"roles/bigquery.jobUser", "roles/bigquery.user", "roles/bigquery.admin"}
+data_roles = {
+    "roles/bigquery.dataViewer",
+    "roles/bigquery.dataEditor",
+    "roles/bigquery.dataOwner",
+    "roles/bigquery.admin",
+}
+overbroad_roles = {"roles/owner", "roles/editor", "roles/bigquery.admin"}
+
+sa_roles: dict[str, set[str]] = {}
+for binding in policy.get("bindings", []):
+    role = str(binding.get("role", ""))
+    for member in binding.get("members", []):
+        if isinstance(member, str) and member.startswith("serviceAccount:"):
+            email = member.split(":", 1)[1].strip()
+            if is_valid_customer_sa(email) and f"serviceaccount:{email.lower()}" != cfo:
+                sa_roles.setdefault(email, set()).add(role)
+
+candidates = [
+    (bool(roles & overbroad_roles), email)
+    for email, roles in sa_roles.items()
+    if (roles & job_roles) and (roles & data_roles)
+]
+candidates.sort()
+if candidates:
+    print(candidates[0][1])
+PY
       )"
-      if [[ -n "${existing_sa}" ]]; then
-        export RLS_SG_PRINCIPAL="serviceAccount:${existing_sa}"
-      else
-        echo "WARN: Could not create or list a secondary service account; falling back to active user." >&2
-        export RLS_SG_PRINCIPAL="user:${ACTIVE_GCLOUD_ACCOUNT}"
+      unset _IAM_POLICY_JSON
+      if [[ -n "${picked_sa}" ]]; then
+        export RLS_SG_PRINCIPAL="serviceAccount:${picked_sa}"
       fi
     fi
   fi
+
+  if [[ -z "${RLS_SG_PRINCIPAL:-}" ]]; then
+    echo "ERROR: Could not resolve a distinct least-privileged customer SA for RLS_SG_PRINCIPAL." >&2
+    echo "Provide SQL_ROLE_SA_MAP_JSON, explicit distinct RLS_CFO_PRINCIPAL/RLS_SG_PRINCIPAL, or pass --provision-rls-sas." >&2
+    exit 1
+  fi
+
+  validate_rls_principals_py
 }
 
 resolve_rls_principals
@@ -178,7 +287,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathlib import Path
 import re
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
+
+from engine.capture_rungs import list_active_row_access_policies
+from engine.pack_loader import _strip_sql_comments, extract_create_table_statement
 
 project_id = os.environ["PROJECT_ID"]
 dataset_id = os.environ["DATASET_ID"]
@@ -206,6 +319,14 @@ def substitute_sql(raw: str) -> str:
     )
 
 
+def run_ddl_sql(sql_text: str) -> None:
+    job_cfg = bigquery.QueryJobConfig(
+        use_query_cache=False,
+        default_dataset=f"{project_id}.{dataset_id}",
+    )
+    client.query(sql_text, job_config=job_cfg, location=bq_location).result()
+
+
 def run_sql_file(sql_path: Path, *, staging_only: bool = False) -> None:
     if not sql_path.is_file():
         return
@@ -213,21 +334,71 @@ def run_sql_file(sql_path: Path, *, staging_only: bool = False) -> None:
     if not sql_text:
         return
     if staging_only:
-        match = re.search(
-            r"CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[^;]*?staging_cold_chain_oct11[^;]*;",
-            sql_text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if not match:
+        extracted = extract_create_table_statement(sql_text, "staging_cold_chain_oct11")
+        if not extracted:
             return
-        sql_text = match.group(0)
-    job_cfg = bigquery.QueryJobConfig(
-        use_query_cache=False,
-        default_dataset=f"{project_id}.{dataset_id}",
-    )
-    client.query(sql_text, job_config=job_cfg, location=bq_location).result()
+        sql_text = extracted
+    run_ddl_sql(sql_text)
     print(f"Executed SQL: {sql_path.relative_to(pack_dir)}")
 
+
+def extract_declared_targets(sql_path: Path, pattern: str) -> list[str]:
+    if not sql_path.is_file():
+        return []
+    sql_text = substitute_sql(sql_path.read_text(encoding="utf-8"))
+    regex = re.compile(pattern, flags=re.IGNORECASE)
+    found: list[str] = []
+    for stmt in _strip_sql_comments(sql_text):
+        match = regex.match(stmt)
+        if match:
+            found.append(match.group(1).strip().strip('`"'))
+    return found
+
+
+def reset_existing_objects_for_idempotency() -> None:
+    existing_types = {t.table_id: t.table_type for t in client.list_tables(f"{project_id}.{dataset_id}")}
+    if not existing_types:
+        return
+
+    graph_sql_path = pack_dir / "sql" / "04_property_graph.sql"
+    for graph_ident in extract_declared_targets(
+        graph_sql_path,
+        r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROPERTY\s+GRAPH\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(;]+)",
+    ):
+        leaf = graph_ident.split(".")[-1]
+        run_ddl_sql(f"DROP PROPERTY GRAPH IF EXISTS `{project_id}.{dataset_id}.{leaf}`;")
+
+    for tbl_name, tbl_type in sorted(existing_types.items()):
+        if tbl_type != "TABLE" or tbl_name.startswith("shadow_auto_tbl_"):
+            continue
+        if list_active_row_access_policies(
+            client,
+            project_id=project_id,
+            dataset_id=dataset_id,
+            table_id=tbl_name,
+            location=bq_location,
+        ):
+            run_ddl_sql(f"DROP ALL ROW ACCESS POLICIES ON `{project_id}.{dataset_id}.{tbl_name}`;")
+
+    contract_files = sorted((pack_dir / "contracts").glob("*.sql")) if (pack_dir / "contracts").is_dir() else []
+    ddl_files = [pack_dir / "sql" / "01_tables.sql", *contract_files]
+    declared_tables: list[str] = []
+    for path in ddl_files:
+        for ident in extract_declared_targets(
+            path,
+            r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(;]+)",
+        ):
+            leaf = ident.split(".")[-1]
+            if leaf not in declared_tables:
+                declared_tables.append(leaf)
+
+    # Drop in reverse declaration order so FK child tables are dropped before parents.
+    for tbl_name in reversed(declared_tables):
+        if existing_types.get(tbl_name) == "TABLE":
+            run_ddl_sql(f"DROP TABLE IF EXISTS `{project_id}.{dataset_id}.{tbl_name}`;")
+
+
+reset_existing_objects_for_idempotency()
 
 # 1. Create core tables (and contract overlay DDL + staging table DDL if separate) BEFORE loading JSONL.
 run_sql_file(pack_dir / "sql" / "01_tables.sql")
@@ -235,7 +406,7 @@ for contract_sql in sorted((pack_dir / "contracts").glob("*.sql")) if (pack_dir 
     run_sql_file(contract_sql)
 run_sql_file(pack_dir / "sql" / "02_shadow_clones.sql", staging_only=True)
 
-# 2. Load generated JSONL fixtures concurrently into BigQuery tables.
+# 2. Load generated JSONL fixtures concurrently into BigQuery tables while preserving DDL constraints/descriptions.
 jsonl_files = sorted(tmp_dir.glob("*.jsonl"))
 if not jsonl_files:
     raise RuntimeError(f"No .jsonl files produced by seed script in {tmp_dir}")
@@ -244,17 +415,28 @@ if not jsonl_files:
 def load_one_jsonl(jsonl_path: Path) -> str:
     table_name = jsonl_path.stem
     table_id = f"{project_id}.{dataset_id}.{table_name}"
-    table_exists = True
+    existing_tbl = None
     try:
-        client.get_table(table_id)
-    except Exception:
-        table_exists = False
+        existing_tbl = client.get_table(table_id)
+    except NotFound:
+        existing_tbl = None
 
-    job_cfg = bigquery.LoadJobConfig(
-        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-        autodetect=not table_exists,
-    )
+    if existing_tbl is not None:
+        if existing_tbl.num_rows and existing_tbl.num_rows > 0:
+            run_ddl_sql(f"TRUNCATE TABLE `{table_id}`")
+        job_cfg = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema=existing_tbl.schema,
+            autodetect=False,
+        )
+    else:
+        job_cfg = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            autodetect=True,
+        )
+
     with jsonl_path.open("rb") as fh:
         job = client.load_table_from_file(fh, table_id, job_config=job_cfg, location=bq_location)
     job.result()
@@ -268,9 +450,8 @@ print("Loaded JSONL tables:", ", ".join(sorted(loaded_summary)))
 
 # 3. Provision 190 empty shadow tables concurrently via BigQuery API (<10s).
 shadow_schema = [
+    bigquery.SchemaField("record_id", "STRING"),
     bigquery.SchemaField("country_code", "STRING"),
-    bigquery.SchemaField("quarter", "STRING"),
-    bigquery.SchemaField("gross_margin_pct", "FLOAT64"),
     bigquery.SchemaField("snapshot_tag", "STRING"),
 ]
 try:
