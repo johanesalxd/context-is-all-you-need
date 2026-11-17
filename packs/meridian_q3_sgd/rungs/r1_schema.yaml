@@ -1,0 +1,97 @@
+id: "r1_schema"
+rung_num: 1
+short_label: "R1 · Schema"
+title: "Schema Enrichment & Data Insights"
+pyramid_layer: "Layers 1–2 · Physical Schema, Column Descriptions & Data Insights"
+release_badges:
+  - capability: "BigQuery Schema + Data Insights"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Knowledge Catalog lookupContext"
+    stage: "Preview"
+    region_scope: "Global / Preview"
+
+question: "What was Singapore's Closed Q3 Net Realized Revenue?"
+
+poll:
+  prompt: "Myth-Buster #1: If we point a frontier model directly at our clean BigQuery `orders` schema, how accurately does it answer Q3 Net Realized Revenue?"
+  options:
+    - key: "A"
+      text: "5/5 — Frontier reasoning models automatically infer ex-GST and completed-order rules from column names."
+    - key: "B"
+      text: "0/5 — Without column descriptions and Data Insights predicates, it sums gross_total_sgd including 9% GST and cancelled orders (+28% inflation)."
+    - key: "C"
+      text: "3/5 — It fails only because SQL syntax is wrong in BigQuery Standard SQL."
+    - key: "D"
+      text: "It refuses to run SQL unless LookML is deployed first."
+  correct_key: "B"
+  reveal_takeaway: "Syntax is easy; financial semantics are invisible in raw column names. Enriched column descriptions plus Data Insights eliminate GST and cancelled-order overcounting (+SGD 371,750 false inflation), lifting eval accuracy from 0/5 to 4/5."
+
+blind:
+  answer_headline: "SGD 1,684,200.00"
+  answer_detail: "Overstated by SGD 371,750.00 (+28.3%) because the blind agent summed gross_total_sgd (including 9% Singapore GST) across all SG rows including CANCELLED and RETURNED orders."
+  numeric_value: 1684200.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Raw BigQuery DDL only (no column descriptions, no Data Insights predicates)"
+  context_payload: |
+    Table: ${PROJECT_ID}.${DATASET_ID}.orders
+    Columns exposed without descriptions:
+      order_id STRING, country_code STRING, order_date DATE,
+      order_status STRING, gross_item_sgd FLOAT64, gross_total_sgd FLOAT64,
+      gst_sgd FLOAT64, net_realized_revenue_sgd FLOAT64
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(gross_total_sgd), 2) AS gross_total_sgd,
+      COUNT(*) AS order_count
+    FROM `${PROJECT_ID}.${DATASET_ID}.orders`
+    WHERE country_code = 'SG'
+      AND order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+  tokens_used: 3120
+  exploratory_queries: 5
+  error_retries: 2
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Ungrounded scan over gross_total_sgd without order_status = 'COMPLETED' or ex-GST semantics."
+
+governed:
+  answer_headline: "SGD 1,312,450.00"
+  answer_detail: "Exact Singapore Closed Q3 Net Realized Revenue across 3,400 COMPLETED orders (ex-GST, net of returns), reconciled to 0.00 SGD drift against order_lines.net_line_revenue_sgd."
+  numeric_value: 1312450.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "BigQuery Column OPTIONS(description) + Data Insights Predicates + Knowledge Catalog lookupContext (Preview)"
+  context_payload: |
+    {
+      "lookup_context_stage": "Preview",
+      "table": "${PROJECT_ID}.${DATASET_ID}.orders",
+      "column_descriptions": {
+        "gross_total_sgd": "Gross invoice total INCLUDING 9% SG GST and unadjusted for cancellations/returns. Do NOT report as net realized revenue.",
+        "net_realized_revenue_sgd": "Governed Net Realized Revenue in SGD: ex-GST, net of returns, 0.00 for CANCELLED/RETURNED orders."
+      },
+      "data_insights_predicate": "country_code = 'SG' AND order_status = 'COMPLETED' AND order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'"
+    }
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(o.net_realized_revenue_sgd), 2) AS net_realized_revenue_sgd,
+      COUNT(*) AS completed_order_count
+    FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
+    WHERE o.country_code = 'SG'
+      AND o.order_status = 'COMPLETED'
+      AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+  tokens_used: 980
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 4
+  eval_total_runs: 5
+  trust_tier: "TIER_2_GROUNDED"
+  rationale: "Grounded via column descriptions and Data Insights filter predicates (4/5 pass; remaining 1/5 edge risk motivates R2 Glossary governance)."
+
+xray_summary:
+  context_added: "Enriched BigQuery column OPTIONS(description), PK/FK NOT ENFORCED metadata, Data Insights Q3 predicates, and Knowledge Catalog lookupContext (Preview)."
+  gcp_primitives:
+    - "BigQuery Schema & Column Descriptions (GA)"
+    - "BigQuery Data Insights (GA)"
+    - "Knowledge Catalog lookupContext (Preview)"
+  negative_control_assertion: "Unannotated orders scan triggers blind inflation (+28.3% GST/cancellation error) and classifies as TIER_3_REVIEW_REQUIRED."

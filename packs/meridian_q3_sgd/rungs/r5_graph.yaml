@@ -1,0 +1,113 @@
+id: "r5_graph"
+rung_num: 5
+short_label: "R5 · Graph"
+title: "4-Hop BigQuery Property Graph Lineage (ISO GQL)"
+pyramid_layer: "Layer 4 · BigQuery Property Graph (CREATE PROPERTY GRAPH + ISO GQL, GA)"
+release_badges:
+  - capability: "BigQuery Property Graph (ISO GQL + MEASURE())"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+
+question: "Which SG Premier orders & revenue are exposed to delayed Tier-2 Batch #LN-409?"
+
+poll:
+  prompt: "Myth-Buster #5: Batch `#LN-409` sits 4 hops upstream across warehouse lots (`LOT-LN409-01`, `LOT-SG-8841`, `LOT-SG-8842`). What happens when an LLM guesses lineage via string patterns?"
+  options:
+    - key: "A"
+      text: "String matching `lot_id LIKE '%409%'` finds every affected order automatically."
+    - key: "B"
+      text: "It catches only 8 Premier_Loyalty orders (SGD 4,120.00) and misses 30 Enterprise orders tied via opaque lot IDs—missing SGD 15,260.00 of the SGD 19,380.00 total."
+    - key: "C"
+      text: "ISO GQL requires moving BigQuery tables into a separate graph database."
+    - key: "D"
+      text: "SG Premier orders in R5 belong to a different population than R2."
+  correct_key: "B"
+  reveal_takeaway: "Zero-ETL BigQuery Property Graph traverses ColdChainBatch -> SkuLotAllocation -> OrderLine -> CustomerOrder -> Customer in native ISO GQL, uncovering all 38 SG PRM_HV orders and SGD 19,380.00 exposed revenue (SGD 510.00 AOV)—100% consistent with R2's 640 PRM_HV cohort."
+
+blind:
+  answer_headline: "SGD 4,120.00 (8 orders)"
+  answer_detail: "Missed 78.7% of exposure (SGD 15,260.00 across 30 orders): brittle heuristic filtered lot_id LIKE '%409%' and segment_label LIKE '%Premier%', dropping LOT-SG-8841/8842 and Enterprise PRM_HV accounts."
+  numeric_value: 4120.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Brittle lot-string heuristic (`lot_id LIKE '%409%'`) skipping sku_lot_allocations bridge"
+  context_payload: |
+    No Property Graph edge lineage provided.
+    Agent guessed lot_id LIKE '%409%' and segment_label LIKE '%Premier%', missing opaque lot mappings in sku_lot_allocations.
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(o.net_realized_revenue_sgd), 2) AS exposed_revenue_sgd,
+      COUNT(DISTINCT o.order_id) AS exposed_order_count
+    FROM `${PROJECT_ID}.${DATASET_ID}.orders` AS o
+    JOIN `${PROJECT_ID}.${DATASET_ID}.customers` AS c
+      ON o.customer_id = c.customer_id
+    JOIN `${PROJECT_ID}.${DATASET_ID}.order_lines` AS ol
+      ON o.order_id = ol.order_id
+    WHERE o.country_code = 'SG'
+      AND o.order_status = 'COMPLETED'
+      AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+      AND c.segment_label LIKE '%Premier%'
+      AND ol.lot_id LIKE '%409%'
+  tokens_used: 3340
+  exploratory_queries: 5
+  error_retries: 2
+  eval_pass_count: 1
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Drops Tier-2 sku_lot_allocations multi-lot bridge and misapplies legacy segment_label filter."
+
+governed:
+  answer_headline: "SGD 19,380.00 (38 SG Premier orders · SGD 510.00 AOV)"
+  answer_detail: "4-hop ISO GQL GRAPH_TABLE traversal from ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and Customer['PRM_HV'] identifies all 38 SG Premier orders totaling SGD 19,380.00."
+  numeric_value: 19380.0
+  unit: "SGD"
+  query_language: "SQL+GQL"
+  context_mechanism: "BigQuery Property Graph 4-Hop ISO GQL (`GRAPH_TABLE` over `meridian_supply_graph`)"
+  context_payload: |
+    {
+      "property_graph": "${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph",
+      "traversal_path": "(ColdChainBatch {batch_id: '#LN-409'})<-[:SUPPLIED_IN_BATCH]-(SkuLotAllocation)<-[:ALLOCATED_FROM_LOT]-(OrderLine)-[:BELONGS_TO_ORDER]->(CustomerOrder)-[:PLACED_BY]->(Customer)",
+      "glossary_filter": "c.tier_code = 'PRM_HV'",
+      "cross_rung_tie_out": "38 orders are a strict subset of R2's 640 SG PRM_HV completed orders"
+    }
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(net_realized_revenue_sgd), 2) AS exposed_revenue_sgd,
+      COUNT(*) AS exposed_order_count,
+      ROUND(AVG(net_realized_revenue_sgd), 2) AS exposed_aov_sgd
+    FROM (
+      SELECT DISTINCT
+        order_id,
+        net_realized_revenue_sgd
+      FROM GRAPH_TABLE(
+        `${PROJECT_ID}.${DATASET_ID}.meridian_supply_graph`
+        MATCH
+          (b:ColdChainBatch {batch_id: '#LN-409', supplier_tier: 'TIER_2'})
+          <-[:SUPPLIED_IN_BATCH]-(lot:SkuLotAllocation)
+          <-[:ALLOCATED_FROM_LOT]-(ol:OrderLine)
+          -[:BELONGS_TO_ORDER]->(o:CustomerOrder)
+          -[:PLACED_BY]->(c:Customer)
+        FILTER o.country_code = 'SG'
+          AND o.order_status = 'COMPLETED'
+          AND o.order_date BETWEEN DATE '2026-07-01' AND DATE '2026-09-30'
+          AND c.tier_code = 'PRM_HV'
+        RETURN
+          o.order_id AS order_id,
+          o.net_realized_revenue_sgd AS net_realized_revenue_sgd
+      )
+    )
+  tokens_used: 680
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Deterministic 4-hop ISO GQL traversal over BigQuery Property Graph aligned with PRM_HV glossary (5/5 pass)."
+
+xray_summary:
+  context_added: "4-hop BigQuery Property Graph traversal connecting ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and PRM_HV Customer."
+  gcp_primitives:
+    - "BigQuery Property Graph (GA in asia-southeast1)"
+    - "ISO GQL GRAPH_TABLE Pattern Matching (GA)"
+    - "Knowledge Catalog Business Glossary (GA)"
+  negative_control_assertion: "Direct string-pattern join misses opaque warehouse lots LOT-SG-8841 and LOT-SG-8842 (80% revenue gap)."
