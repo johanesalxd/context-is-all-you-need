@@ -346,6 +346,20 @@ button, input, select {
   font-variant-numeric: tabular-nums;
 }
 
+.badge-region {
+  background: var(--accent-primary-bg);
+  color: var(--accent-primary-fg);
+  border-color: var(--accent-primary);
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.badge-empirical {
+  background: var(--horizon-bg);
+  color: var(--horizon-fg);
+  border-color: var(--horizon-border);
+}
+
 /* ==========================================================================
    STAGE MODE — Quiet Stage V2 (10% / 80% / 10% Ballroom Proportions)
    ========================================================================== */
@@ -656,10 +670,20 @@ button, input, select {
 
 .outcome-metrics-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.metric-chip.is-empirical {
+  background: var(--horizon-bg);
+  border-color: var(--horizon-border);
+}
+
+.metric-chip.is-empirical .metric-chip-label,
+.metric-chip.is-empirical .metric-chip-value {
+  color: var(--horizon-fg);
 }
 
 .metric-chip {
@@ -1302,6 +1326,286 @@ button, input, select {
   color: var(--gov-fg);
 }
 
+.prog-card-emp {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ==========================================================================
+   Slide-Up Stage X-Ray Drawer ([X])
+   ========================================================================== */
+
+@keyframes slideUpDrawer {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.xray-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 13, 22, 0.62);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  z-index: 45;
+}
+
+.xray-drawer {
+  width: 100%;
+  max-height: 76vh;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-top: 2px solid var(--accent-primary);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-elevated);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUpDrawer 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.xray-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 24px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.xray-drawer-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.xray-drawer-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  color: var(--text-primary);
+}
+
+.xray-drawer-body {
+  padding: 18px 24px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.xray-drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empirical-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.empirical-arm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-alt);
+  min-width: 0;
+}
+
+.empirical-arm-card.is-blind {
+  border-color: var(--blind-border);
+  background: var(--blind-bg);
+}
+
+.empirical-arm-card.is-governed {
+  border-color: var(--gov-border);
+  background: var(--gov-bg);
+}
+
+.empirical-meta-row,
+.signal-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.empirical-empty-note {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-surface-alt);
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+/* ==========================================================================
+   Workbench Live Agent Panel & Demo Key Auth Bar
+   ========================================================================== */
+
+.live-agent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.live-agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.live-agent-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.live-agent-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.demo-key-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--accent-primary);
+  background: var(--bg-surface-alt);
+}
+
+.demo-key-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.demo-key-label {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.demo-key-help {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.demo-key-error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--blind-border);
+  background: var(--blind-bg);
+  color: var(--blind-fg-strong);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.demo-key-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.demo-key-input {
+  flex: 1 1 240px;
+  min-width: 180px;
+  min-height: 36px;
+  padding: 6px 11px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.agent-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.agent-cards-grid.is-single {
+  grid-template-columns: 1fr;
+}
+
+.agent-result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  min-width: 0;
+}
+
+.agent-result-card.is-blind {
+  border-color: var(--blind-border);
+  background: var(--blind-bg);
+}
+
+.agent-result-card.is-governed {
+  border-color: var(--gov-border);
+  background: var(--gov-bg);
+}
+
+.agent-answer-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.trust-reasons-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.empirical-table-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
 /* ==========================================================================
    CDO Myth-Busting Poll Modal
    ========================================================================== */
@@ -1437,7 +1741,9 @@ button, input, select {
   .comparison-grid.is-focus-blind,
   .comparison-grid.is-focus-governed,
   .code-diff-grid,
-  .workbench-outcomes-mini {
+  .workbench-outcomes-mini,
+  .empirical-cards-grid,
+  .agent-cards-grid {
     grid-template-columns: 1fr;
   }
 }

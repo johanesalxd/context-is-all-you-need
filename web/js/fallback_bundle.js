@@ -12,6 +12,16 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
     "region": "asia-southeast1",
     "rng_seed": 100001,
     "generated_mode": "offline_fixture",
+    "eval_methodology": {
+      "runs_per_arm": 5,
+      "model_id": "gemini-3.8-flash",
+      "model_location": "global",
+      "data_and_catalog_location": "asia-southeast1",
+      "temperature": 0.0,
+      "max_turns": 4,
+      "timeout_s": 25,
+      "note": "Offline generic fallback sample demonstrating Step-0 baselines and Empirical N=5 telemetry structure."
+    },
     "personas": [
       {
         "id": "analyst_global",
@@ -59,7 +69,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         ],
         "question": "What was Closed Q4 Domestic Net Realized Revenue?",
         "poll": {
-          "prompt": "Why do blind SQL agents frequently inflate revenue figures on clean warehouse tables?",
+          "prompt": "Why do blind SQL agents frequently inflate revenue figures on cryptic ERP warehouse tables?",
           "options": [
             {
               "key": "A",
@@ -67,7 +77,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
             },
             {
               "key": "B",
-              "text": "Gross invoice columns include tax and cancelled rows without schema predicates."
+              "text": "Cryptic gross ERP columns include tax and cancelled rows without schema descriptions or predicates."
             },
             {
               "key": "C",
@@ -79,14 +89,14 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
             }
           ],
           "correct_key": "B",
-          "reveal_takeaway": "Table names alone do not encode revenue recognition rules; enriched column descriptions and Data Insights predicates constrain status and tax filters."
+          "reveal_takeaway": "ERP column names alone do not encode revenue recognition rules; enriched column descriptions and Knowledge Catalog lookupContext constrain status and tax filters."
         },
         "blind": {
           "answer_headline": "USD 124,500.00",
-          "answer_detail": "Sums gross_invoice_usd across all domestic records, sweeping in indirect tax and cancelled transactions.",
+          "answer_detail": "Sums ambiguous amt_gross_billed_usd across all domestic records, sweeping in indirect tax and cancelled/returned transactions.",
           "numeric_value": 124500.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  ROUND(SUM(gross_invoice_usd), 2) AS revenue_usd\nFROM `example-project-id.sample_analytics.fact_orders`\nWHERE market_code = 'DOM';",
+          "sql_or_gql": "SELECT\n  ROUND(SUM(amt_gross_billed_usd), 2) AS revenue_usd\nFROM `example-project-id.sample_blind.fact_orders`\nWHERE market_code = 'DOM';",
           "query_language": "SQL",
           "tokens_used": 1480,
           "exploratory_queries": 4,
@@ -94,33 +104,65 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 0,
           "eval_total_runs": 5,
           "trust_tier": "TIER_3_REVIEW_REQUIRED",
-          "rationale": "Guessed gross_invoice_usd without excluding cancelled rows or indirect tax."
+          "rationale": "Guessed amt_gross_billed_usd on stripped raw schema without excluding cancelled rows or indirect tax.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 0,
+            "median_tokens": 1520,
+            "median_exploratory_queries": 4,
+            "median_error_retries": 1,
+            "median_latency_ms": 4180.0,
+            "sample_sql_or_gql": "SELECT ROUND(SUM(amt_gross_billed_usd), 2) AS total_rev\nFROM `example-project-id.sample_blind.fact_orders`\nWHERE market_code = 'DOM';",
+            "observed_signals": [
+              "blind_raw_schema_only",
+              "selected_amt_gross_billed",
+              "missing_status_completed_filter"
+            ]
+          }
         },
         "governed": {
           "answer_headline": "USD 98,200.00",
-          "answer_detail": "Filters status = 'COMPLETED' and sums net_realized_usd ex-tax as defined in Knowledge Catalog metadata.",
+          "answer_detail": "Filters status = 'COMPLETED' and sums amt_net_settled_usd ex-tax as defined in Knowledge Catalog metadata.",
           "numeric_value": 98200.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  ROUND(SUM(net_realized_usd), 2) AS net_realized_revenue_usd\nFROM `example-project-id.sample_analytics.fact_orders`\nWHERE market_code = 'DOM'\n  AND status = 'COMPLETED';",
+          "sql_or_gql": "SELECT\n  ROUND(SUM(amt_net_settled_usd), 2) AS net_realized_revenue_usd\nFROM `example-project-id.sample_analytics.fact_orders`\nWHERE market_code = 'DOM'\n  AND status = 'COMPLETED';",
           "query_language": "SQL",
           "context_mechanism": "Column descriptions + Knowledge Catalog lookupContext predicate binding",
-          "context_payload": "{\n  \"table\": \"fact_orders\",\n  \"metric_column\": \"net_realized_usd\",\n  \"required_predicates\": [\"status = 'COMPLETED'\", \"market_code = 'DOM'\"]\n}",
+          "context_payload": "{\n  \"table\": \"fact_orders\",\n  \"metric_column\": \"amt_net_settled_usd\",\n  \"excluded_columns\": [\"amt_gross_billed_usd\", \"amt_item_subtotal_usd\"],\n  \"required_predicates\": [\"status = 'COMPLETED'\", \"market_code = 'DOM'\"]\n}",
           "tokens_used": 410,
           "exploratory_queries": 1,
           "error_retries": 0,
           "eval_pass_count": 4,
           "eval_total_runs": 5,
           "trust_tier": "TIER_2_GROUNDED",
-          "rationale": "Grounded in governed column metadata and canonical completion status predicate."
+          "rationale": "Grounded in governed column metadata and canonical completion status predicate.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 5,
+            "median_tokens": 640,
+            "median_exploratory_queries": 1,
+            "median_error_retries": 0,
+            "median_latency_ms": 2410.0,
+            "sample_sql_or_gql": "SELECT ROUND(SUM(amt_net_settled_usd), 2) AS net_realized_revenue_usd\nFROM `example-project-id.sample_analytics.fact_orders`\nWHERE market_code = 'DOM' AND status = 'COMPLETED';",
+            "observed_signals": [
+              "lookup_catalog_context",
+              "selected_amt_net_settled",
+              "filtered_status_completed"
+            ]
+          }
         },
         "xray_summary": {
-          "context_added": "Column-level revenue recognition description plus Knowledge Catalog lookupContext status predicate.",
+          "context_added": "Column-level revenue recognition description on amt_net_settled_usd vs amt_gross_billed_usd plus Knowledge Catalog lookupContext status predicate.",
           "gcp_primitives": [
             "BigQuery Schema Metadata",
             "BigQuery Data Insights",
             "Knowledge Catalog lookupContext (Preview)"
           ],
-          "negative_control_assertion": "Verified schema metadata enforces net_realized_usd over gross_invoice_usd and blocks unverified column guessing."
+          "negative_control_assertion": "Verified schema metadata enforces amt_net_settled_usd over amt_gross_billed_usd and blocks unverified column guessing."
         }
       },
       {
@@ -138,7 +180,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         ],
         "question": "Which channel led Closed Q4 Priority Tier Average Order Value?",
         "poll": {
-          "prompt": "When two columns look semantically similar (e.g., marketing_tag vs account_tier_code), what fixes agent drift?",
+          "prompt": "When two columns look semantically similar (e.g., marketing_tag vs tier_code), what fixes agent drift?",
           "options": [
             {
               "key": "A",
@@ -146,7 +188,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
             },
             {
               "key": "B",
-              "text": "A governed Business Glossary mapping business terms to exact SQL predicates."
+              "text": "A governed Business Glossary mapping business terms via EntryLinks to exact SQL predicates."
             },
             {
               "key": "C",
@@ -158,14 +200,14 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
             }
           ],
           "correct_key": "B",
-          "reveal_takeaway": "Fuzzy label matching traps blind agents on promo tags; a Knowledge Catalog Business Glossary binds 'Priority Tier' deterministically to account_tier_code."
+          "reveal_takeaway": "Fuzzy label matching traps blind agents on promo tags; a Knowledge Catalog Business Glossary EntryLink binds 'Priority Tier' deterministically to tier_code."
         },
         "blind": {
           "answer_headline": "Self-Serve Portal (USD 195.00)",
           "answer_detail": "Matches marketing_tag LIKE '%Priority%', pulling in low-spend promotional trial campaigns.",
           "numeric_value": 195.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  channel,\n  ROUND(AVG(o.net_realized_usd), 2) AS aov_usd\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.dim_accounts` a USING (account_id)\nWHERE a.marketing_tag LIKE '%Priority%'\nGROUP BY channel\nORDER BY aov_usd DESC\nLIMIT 1;",
+          "sql_or_gql": "SELECT\n  channel,\n  ROUND(AVG(o.amt_net_settled_usd), 2) AS aov_usd\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.dim_accounts` a USING (account_id)\nWHERE a.marketing_tag LIKE '%Priority%'\nGROUP BY channel\nORDER BY aov_usd DESC\nLIMIT 1;",
           "query_language": "SQL",
           "tokens_used": 1620,
           "exploratory_queries": 5,
@@ -173,29 +215,61 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 0,
           "eval_total_runs": 5,
           "trust_tier": "TIER_3_REVIEW_REQUIRED",
-          "rationale": "String-matched marketing_tag distractor column instead of governed tier_code."
+          "rationale": "String-matched marketing_tag distractor column instead of governed tier_code.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 0,
+            "median_tokens": 1710,
+            "median_exploratory_queries": 4,
+            "median_error_retries": 1,
+            "median_latency_ms": 4390.0,
+            "sample_sql_or_gql": "SELECT o.channel, ROUND(AVG(o.amt_net_settled_usd), 2) AS aov_usd\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.dim_accounts` a USING (account_id)\nWHERE a.marketing_tag LIKE '%Priority%'\nGROUP BY o.channel ORDER BY aov_usd DESC LIMIT 1;",
+            "observed_signals": [
+              "blind_raw_schema_only",
+              "fuzzy_marketing_tag_like"
+            ]
+          }
         },
         "governed": {
           "answer_headline": "Enterprise Direct (USD 420.00)",
-          "answer_detail": "Resolves Business Glossary term 'Priority Tier' to tier_code = 'TIER_A_EXEC', surfacing Enterprise Direct leadership.",
+          "answer_detail": "Resolves Business Glossary term 'Priority Tier' via EntryLink to tier_code = 'TIER_A_EXEC', surfacing Enterprise Direct leadership.",
           "numeric_value": 420.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  o.channel,\n  ROUND(AVG(o.net_realized_usd), 2) AS aov_usd\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.dim_accounts` a USING (account_id)\nWHERE a.tier_code = 'TIER_A_EXEC'\n  AND o.status = 'COMPLETED'\nGROUP BY o.channel\nORDER BY aov_usd DESC\nLIMIT 1;",
+          "sql_or_gql": "SELECT\n  o.channel,\n  ROUND(AVG(o.amt_net_settled_usd), 2) AS aov_usd\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.dim_accounts` a USING (account_id)\nWHERE a.tier_code = 'TIER_A_EXEC'\n  AND o.status = 'COMPLETED'\nGROUP BY o.channel\nORDER BY aov_usd DESC\nLIMIT 1;",
           "query_language": "SQL",
-          "context_mechanism": "Knowledge Catalog Business Glossary term-to-predicate binding",
-          "context_payload": "{\n  \"glossary_term\": \"Priority Tier\",\n  \"canonical_predicate\": \"dim_accounts.tier_code = 'TIER_A_EXEC'\",\n  \"excluded_distractor\": \"dim_accounts.marketing_tag\"\n}",
+          "context_mechanism": "Knowledge Catalog Business Glossary term + definition EntryLink binding",
+          "context_payload": "{\n  \"glossary_term\": \"Priority Tier\",\n  \"entry_link_target\": \"dim_accounts.Schema.tier_code\",\n  \"canonical_predicate\": \"dim_accounts.tier_code = 'TIER_A_EXEC'\",\n  \"excluded_distractor\": \"dim_accounts.marketing_tag\"\n}",
           "tokens_used": 440,
           "exploratory_queries": 1,
           "error_retries": 0,
           "eval_pass_count": 5,
           "eval_total_runs": 5,
           "trust_tier": "TIER_2_GROUNDED",
-          "rationale": "Glossary explicitly binds 'Priority Tier' to tier_code = 'TIER_A_EXEC' across 5/5 evals."
+          "rationale": "Glossary EntryLink explicitly binds 'Priority Tier' to tier_code = 'TIER_A_EXEC' across 5/5 evals.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 5,
+            "median_tokens": 680,
+            "median_exploratory_queries": 1,
+            "median_error_retries": 0,
+            "median_latency_ms": 2530.0,
+            "sample_sql_or_gql": "SELECT o.channel, ROUND(AVG(o.amt_net_settled_usd), 2) AS aov_usd\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.dim_accounts` a USING (account_id)\nWHERE a.tier_code = 'TIER_A_EXEC' AND o.status = 'COMPLETED'\nGROUP BY o.channel ORDER BY aov_usd DESC LIMIT 1;",
+            "observed_signals": [
+              "lookup_catalog_context",
+              "glossary_entry_link_tier_code",
+              "filtered_status_completed"
+            ]
+          }
         },
         "xray_summary": {
-          "context_added": "Business Glossary definition linking 'Priority Tier' to tier_code = 'TIER_A_EXEC'.",
+          "context_added": "Business Glossary definition and EntryLink binding 'Priority Tier' to dim_accounts.tier_code = 'TIER_A_EXEC'.",
           "gcp_primitives": [
             "Knowledge Catalog Business Glossary (GA)",
+            "Knowledge Catalog EntryLink (GA)",
             "BigQuery Column Lineage"
           ],
           "negative_control_assertion": "Verified distractor tag 'Priority_Promo_Trial' is excluded by governed glossary filter."
@@ -253,7 +327,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "answer_detail": "Un-aggregated 3-way JOIN multiplies order header cost and revenue across 2–4 shipment hops per order.",
           "numeric_value": 11.4,
           "unit": "PCT",
-          "sql_or_gql": "SELECT\n  ROUND(100.0 * SUM(o.net_realized_usd - l.line_cogs_usd - h.hop_cost_usd) / SUM(o.net_realized_usd), 1) AS margin_pct\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.fact_order_lines` l USING (order_id)\nJOIN `example-project-id.sample_analytics.fact_transit_hops` h USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS';",
+          "sql_or_gql": "SELECT\n  ROUND(100.0 * SUM(o.amt_net_settled_usd - l.line_cogs_usd - h.hop_cost_usd) / SUM(o.amt_net_settled_usd), 1) AS margin_pct\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.fact_order_lines` l USING (order_id)\nJOIN `example-project-id.sample_blind.fact_transit_hops` h USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS';",
           "query_language": "SQL",
           "tokens_used": 1890,
           "exploratory_queries": 6,
@@ -261,24 +335,55 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 0,
           "eval_total_runs": 5,
           "trust_tier": "TIER_3_REVIEW_REQUIRED",
-          "rationale": "1:N transit hop join duplicated header revenue and line COGS."
+          "rationale": "1:N transit hop join duplicated header revenue and line COGS.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 0,
+            "median_tokens": 1960,
+            "median_exploratory_queries": 5,
+            "median_error_retries": 2,
+            "median_latency_ms": 4890.0,
+            "sample_sql_or_gql": "SELECT ROUND(100.0 * SUM(o.amt_net_settled_usd - l.line_cogs_usd - h.hop_cost_usd) / SUM(o.amt_net_settled_usd), 1) AS margin_pct\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.fact_order_lines` l USING (order_id)\nJOIN `example-project-id.sample_blind.fact_transit_hops` h USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS';",
+            "observed_signals": [
+              "blind_raw_schema_only",
+              "unaggregated_1n_fan_trap"
+            ]
+          }
         },
         "governed": {
           "answer_headline": "29.6% Contribution Margin",
           "answer_detail": "Grain-locked CTE / Property Graph MEASURE() pre-aggregates transit hops to order grain before margin calculation.",
           "numeric_value": 29.6,
           "unit": "PCT",
-          "sql_or_gql": "WITH hop_costs AS (\n  SELECT order_id, SUM(hop_cost_usd) AS total_hop_cost_usd\n  FROM `example-project-id.sample_analytics.fact_transit_hops`\n  GROUP BY order_id\n)\nSELECT\n  ROUND(100.0 * SUM(o.net_realized_usd - o.total_cogs_usd - hc.total_hop_cost_usd) / SUM(o.net_realized_usd), 1) AS margin_pct\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN hop_costs hc USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS'\n  AND o.status = 'COMPLETED';",
+          "sql_or_gql": "WITH hop_costs AS (\n  SELECT order_id, SUM(hop_cost_usd) AS total_hop_cost_usd\n  FROM `example-project-id.sample_analytics.fact_transit_hops`\n  GROUP BY order_id\n)\nSELECT\n  ROUND(100.0 * SUM(o.amt_net_settled_usd - o.total_cogs_usd - hc.total_hop_cost_usd) / SUM(o.amt_net_settled_usd), 1) AS margin_pct\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN hop_costs hc USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS'\n  AND o.status = 'COMPLETED';",
           "query_language": "SQL+GQL",
           "context_mechanism": "Grain-locked BigQuery Graph MEASURE() + Verified Query semantic contract",
-          "context_payload": "{\n  \"metric\": \"express_contribution_margin_pct\",\n  \"grain\": \"order_id\",\n  \"measure_formula\": \"(net_realized_usd - total_cogs_usd - SUM(hop_cost_usd)) / net_realized_usd\"\n}",
+          "context_payload": "{\n  \"metric\": \"express_contribution_margin_pct\",\n  \"grain\": \"order_id\",\n  \"measure_formula\": \"(amt_net_settled_usd - total_cogs_usd - SUM(hop_cost_usd)) / amt_net_settled_usd\"\n}",
           "tokens_used": 490,
           "exploratory_queries": 1,
           "error_retries": 0,
           "eval_pass_count": 5,
           "eval_total_runs": 5,
           "trust_tier": "TIER_1_VERIFIED_OR_COMPILED",
-          "rationale": "Compiled Verified Query and MEASURE() eliminate 1:N join duplication."
+          "rationale": "Compiled Verified Query and MEASURE() eliminate 1:N join duplication.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 5,
+            "median_tokens": 710,
+            "median_exploratory_queries": 1,
+            "median_error_retries": 0,
+            "median_latency_ms": 2690.0,
+            "sample_sql_or_gql": "WITH hop_costs AS (SELECT order_id, SUM(hop_cost_usd) AS total_hop_cost_usd FROM `example-project-id.sample_analytics.fact_transit_hops` GROUP BY order_id)\nSELECT ROUND(100.0 * SUM(o.amt_net_settled_usd - o.total_cogs_usd - hc.total_hop_cost_usd) / SUM(o.amt_net_settled_usd), 1) AS margin_pct\nFROM `example-project-id.sample_analytics.fact_orders` o JOIN hop_costs hc USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS' AND o.status = 'COMPLETED';",
+            "observed_signals": [
+              "get_verified_metric_contract",
+              "grain_locked_preaggregation",
+              "MEASURE"
+            ]
+          }
         },
         "xray_summary": {
           "context_added": "Grain-locked semantic contract preventing 1:N transit-hop join inflation.",
@@ -310,7 +415,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         ],
         "question": "Did Temperature-Controlled Margin drop in Q4—and what does each role see?",
         "poll": {
-          "prompt": "When 100+ staging shadow tables share similar names, how should an enterprise agent choose a source?",
+          "prompt": "When neutral candidate marts (mart_temp_margin_q4_r1 vs r2) and 190 shadow tables share identical columns, how does an agent pick the source?",
           "options": [
             {
               "key": "A",
@@ -318,26 +423,26 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
             },
             {
               "key": "B",
-              "text": "Route exclusively to certified Knowledge Catalog Data Products enforced by IAM & RLS."
+              "text": "Route exclusively via Knowledge Catalog certification Aspects & Auto DQ, enforced by BigQuery RLS."
             },
             {
               "key": "C",
-              "text": "Union all tables together and average the outputs."
+              "text": "Union all candidate tables together and average the outputs."
             },
             {
               "key": "D",
-              "text": "Prompt the model to inspect table names and pick the cleanest spelling."
+              "text": "Prompt the model to inspect table names and pick the highest suffix."
             }
           ],
           "correct_key": "B",
-          "reveal_takeaway": "Certified Data Products eliminate stale staging clones, while BigQuery Row-Level Security enforces least-privilege visibility per caller identity."
+          "reveal_takeaway": "When mart tables share neutral names and identical schemas, Knowledge Catalog AspectTypes ('CERTIFIED' vs 'UNCERTIFIED_STALE') and Auto DQ eliminate stale close snapshots while RLS enforces per-role scope."
         },
         "blind": {
           "answer_headline": "False Drop: 21.8% (-320 bps)",
-          "answer_detail": "Scans uncertified staging_temp_margin_draft amid dozens of shadow tables, missing late-quarter supplier settlements.",
+          "answer_detail": "Scans uncertified mart_temp_margin_q4_r1 (close_batch_code = 'B26Q4_R1') amid 190 shadow tables, missing late-quarter supplier settlements.",
           "numeric_value": 21.8,
           "unit": "PCT",
-          "sql_or_gql": "SELECT\n  ROUND(100.0 * SUM(gross_margin_usd) / SUM(net_revenue_usd), 1) AS margin_pct\nFROM `example-project-id.sample_analytics.staging_temp_margin_draft`;",
+          "sql_or_gql": "SELECT\n  ROUND(100.0 * SUM(gross_margin_usd) / SUM(net_revenue_usd), 1) AS margin_pct\nFROM `example-project-id.sample_blind.mart_temp_margin_q4_r1`;",
           "query_language": "SQL",
           "tokens_used": 2140,
           "exploratory_queries": 7,
@@ -345,24 +450,56 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 1,
           "eval_total_runs": 5,
           "trust_tier": "TIER_3_REVIEW_REQUIRED",
-          "rationale": "Selected stale uncertified draft table from uncurated schema catalog."
+          "rationale": "Selected uncertified preliminary close mart_temp_margin_q4_r1 from unannotated blind catalog.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 1,
+            "median_tokens": 2290,
+            "median_exploratory_queries": 6,
+            "median_error_retries": 2,
+            "median_latency_ms": 5120.0,
+            "sample_sql_or_gql": "SELECT ROUND(100.0 * SUM(gross_margin_usd) / SUM(net_revenue_usd), 1) AS margin_pct\nFROM `example-project-id.sample_blind.mart_temp_margin_q4_r1`;",
+            "observed_signals": [
+              "blind_raw_schema_only",
+              "selected_uncertified_r1_mart"
+            ]
+          }
         },
         "governed": {
           "answer_headline": "25.0% Margin (-30 bps YoY)",
-          "answer_detail": "Routes exclusively to certified temp_margin_gold Data Product (no false drop) and enforces caller Row-Level Security policy.",
+          "answer_detail": "Routes exclusively to Knowledge Catalog CERTIFIED Data Product mart_temp_margin_q4_r2 (no false drop) and enforces caller Row-Level Security policy.",
           "numeric_value": 25.0,
           "unit": "PCT",
-          "sql_or_gql": "SELECT\n  SUM(gross_margin_usd) AS visible_gross_margin_usd,\n  COUNT(*) AS rows_visible\nFROM `example-project-id.sample_analytics.temp_margin_gold`\nWHERE quarter = 'Q4';",
+          "sql_or_gql": "SELECT\n  SUM(gross_margin_usd) AS visible_gross_margin_usd,\n  COUNT(*) AS rows_visible\nFROM `example-project-id.sample_analytics.mart_temp_margin_q4_r2`\nWHERE quarter = 'Q4';",
           "query_language": "SQL",
-          "context_mechanism": "Knowledge Catalog Data Product certification + BigQuery Row Access Policy",
-          "context_payload": "{\n  \"certified_asset\": \"temp_margin_gold\",\n  \"auto_dq_status\": \"PASSED\",\n  \"rls_policies\": [\"rls_global_full_access\", \"rls_apac_region_only\"]\n}",
+          "context_mechanism": "Knowledge Catalog data-product-certification Aspect + Auto DQ + BigQuery Row Access Policy",
+          "context_payload": "{\n  \"certified_asset\": \"mart_temp_margin_q4_r2\",\n  \"aspect_type\": \"data-product-certification\",\n  \"certification_status\": \"CERTIFIED\",\n  \"stale_excluded\": \"mart_temp_margin_q4_r1 (UNCERTIFIED_STALE)\",\n  \"auto_dq_status\": \"PASSED\",\n  \"rls_policies\": [\"rls_global_full_access\", \"rls_apac_region_only\"]\n}",
           "tokens_used": 430,
           "exploratory_queries": 1,
           "error_retries": 0,
           "eval_pass_count": 5,
           "eval_total_runs": 5,
           "trust_tier": "TIER_1_VERIFIED_OR_COMPILED",
-          "rationale": "Certified gold Data Product with active BigQuery Row-Level Security per identity."
+          "rationale": "Certified mart_temp_margin_q4_r2 Data Product with active BigQuery Row-Level Security per identity.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 5,
+            "median_tokens": 620,
+            "median_exploratory_queries": 1,
+            "median_error_retries": 0,
+            "median_latency_ms": 2380.0,
+            "sample_sql_or_gql": "SELECT ROUND(100.0 * SUM(gross_margin_usd) / SUM(net_revenue_usd), 1) AS margin_pct, SUM(gross_margin_usd) AS visible_gross_margin_usd\nFROM `example-project-id.sample_analytics.mart_temp_margin_q4_r2` WHERE quarter = 'Q4';",
+            "observed_signals": [
+              "search_certified_tables",
+              "CERTIFIED",
+              "auto_dq_passed",
+              "rls_enforced"
+            ]
+          }
         },
         "identity_variants": {
           "analyst_global": {
@@ -385,13 +522,13 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           }
         },
         "xray_summary": {
-          "context_added": "Certified Data Product routing plus role-bound BigQuery Row Access Policies.",
+          "context_added": "Knowledge Catalog data-product-certification Aspect routing (mart_temp_margin_q4_r2 over r1) plus role-bound BigQuery Row Access Policies.",
           "gcp_primitives": [
-            "Knowledge Catalog Data Products (GA)",
+            "Knowledge Catalog Data Products & AspectType (GA)",
             "Auto Data Quality (GA)",
             "BigQuery Row-Level Security (GA)"
           ],
-          "negative_control_assertion": "Verified unauthorized direct queries to staging/unscoped partitions return explicit 403 accessDenied or strict 0/subset RLS row filtering."
+          "negative_control_assertion": "Verified unauthorized direct queries to uncertified r1/unscoped partitions return explicit 403 accessDenied or strict 0/subset RLS row filtering."
         }
       },
       {
@@ -441,7 +578,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "answer_detail": "Drops the intermediate lot-allocation bridge table and misses multi-SKU orders tied to Lot #LOT-804.",
           "numeric_value": 2950.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  ROUND(SUM(o.net_realized_usd), 2) AS exposed_usd\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.dim_batches` b\n  ON o.order_id = b.primary_order_id\nWHERE b.batch_code = '#LOT-804';",
+          "sql_or_gql": "SELECT\n  ROUND(SUM(o.amt_net_settled_usd), 2) AS exposed_usd\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.dim_batches` b\n  ON o.order_id = b.primary_order_id\nWHERE b.batch_code = '#LOT-804';",
           "query_language": "SQL",
           "tokens_used": 2380,
           "exploratory_queries": 8,
@@ -449,14 +586,29 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 1,
           "eval_total_runs": 5,
           "trust_tier": "TIER_3_REVIEW_REQUIRED",
-          "rationale": "Missed intermediate allocation bridge and Priority Tier glossary predicate."
+          "rationale": "Missed intermediate allocation bridge and Priority Tier glossary predicate.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 1,
+            "median_tokens": 2440,
+            "median_exploratory_queries": 7,
+            "median_error_retries": 3,
+            "median_latency_ms": 5460.0,
+            "sample_sql_or_gql": "SELECT ROUND(SUM(o.amt_net_settled_usd), 2) AS exposed_usd\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.dim_batches` b ON o.order_id = b.primary_order_id\nWHERE b.batch_code = '#LOT-804';",
+            "observed_signals": [
+              "blind_raw_schema_only",
+              "dropped_allocation_bridge"
+            ]
+          }
         },
         "governed": {
           "answer_headline": "USD 12,400.00 across 24 Priority Orders",
           "answer_detail": "Executes 4-hop GRAPH_TABLE ISO GQL traversal from SupplyLot '#LOT-804' through Allocations, Lines, and Orders to TIER_A_EXEC Accounts.",
           "numeric_value": 12400.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  COUNT(DISTINCT order_id) AS exposed_orders,\n  ROUND(SUM(net_realized_usd), 2) AS exposed_revenue_usd\nFROM GRAPH_TABLE(\n  `example-project-id.sample_analytics.sample_supply_graph`\n  MATCH (b:SupplyBatch {batch_code: '#LOT-804'})-[:ALLOCATED_TO]->(a:LotAllocation)-[:FULFILLED_BY]->(l:OrderLine)-[:PART_OF]->(o:Order)-[:PLACED_BY]->(c:Account {tier_code: 'TIER_A_EXEC'})\n  RETURN o.order_id, o.net_realized_usd\n);",
+          "sql_or_gql": "SELECT\n  COUNT(DISTINCT order_id) AS exposed_orders,\n  ROUND(SUM(amt_net_settled_usd), 2) AS exposed_revenue_usd\nFROM GRAPH_TABLE(\n  `example-project-id.sample_analytics.sample_supply_graph`\n  MATCH (b:SupplyBatch {batch_code: '#LOT-804'})-[:ALLOCATED_TO]->(a:LotAllocation)-[:FULFILLED_BY]->(l:OrderLine)-[:PART_OF]->(o:Order)-[:PLACED_BY]->(c:Account {tier_code: 'TIER_A_EXEC'})\n  RETURN o.order_id, o.amt_net_settled_usd\n);",
           "query_language": "GQL",
           "context_mechanism": "BigQuery Property Graph schema topology + ISO GQL GRAPH_TABLE",
           "context_payload": "{\n  \"graph\": \"sample_supply_graph\",\n  \"traversal\": \"SupplyBatch -> LotAllocation -> OrderLine -> Order -> Account[TIER_A_EXEC]\",\n  \"target_batch\": \"#LOT-804\"\n}",
@@ -466,7 +618,23 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 5,
           "eval_total_runs": 5,
           "trust_tier": "TIER_1_VERIFIED_OR_COMPILED",
-          "rationale": "Property Graph edges enforce complete 4-hop lineage consistent with R2 Priority Tier definition."
+          "rationale": "Property Graph edges enforce complete 4-hop lineage consistent with R2 Priority Tier definition.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 5,
+            "median_tokens": 740,
+            "median_exploratory_queries": 1,
+            "median_error_retries": 0,
+            "median_latency_ms": 2840.0,
+            "sample_sql_or_gql": "SELECT COUNT(DISTINCT order_id) AS exposed_orders, ROUND(SUM(amt_net_settled_usd), 2) AS exposed_revenue_usd\nFROM GRAPH_TABLE(`example-project-id.sample_analytics.sample_supply_graph`\n  MATCH (b:SupplyBatch {batch_code: '#LOT-804'})-[:ALLOCATED_TO]->(a:LotAllocation)-[:FULFILLED_BY]->(l:OrderLine)-[:PART_OF]->(o:Order)-[:PLACED_BY]->(c:Account {tier_code: 'TIER_A_EXEC'})\n  RETURN o.order_id, o.amt_net_settled_usd);",
+            "observed_signals": [
+              "get_verified_metric_contract",
+              "GRAPH_TABLE",
+              "glossary_entry_link_tier_code"
+            ]
+          }
         },
         "xray_summary": {
           "context_added": "Property Graph node/edge topology with explicit multi-hop lineage constraints.",
@@ -524,7 +692,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "answer_detail": "Queries legacy base_sla_ledger (> 5.0C for 90m -> 5% credit) and misses executed Amendment #2 terms.",
           "numeric_value": 1250.0,
           "unit": "USD",
-          "sql_or_gql": "SELECT\n  ROUND(SUM(shipment_fee_usd * 0.05), 2) AS recoverable_credit_usd\nFROM `example-project-id.sample_analytics.base_sla_ledger`\nWHERE peak_temp_c > 5.0\n  AND duration_min >= 90;",
+          "sql_or_gql": "SELECT\n  ROUND(SUM(shipment_fee_usd * 0.05), 2) AS recoverable_credit_usd\nFROM `example-project-id.sample_blind.base_sla_ledger`\nWHERE peak_temp_c > 5.0\n  AND duration_min >= 90;",
           "query_language": "SQL",
           "tokens_used": 1750,
           "exploratory_queries": 5,
@@ -532,7 +700,22 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 0,
           "eval_total_runs": 5,
           "trust_tier": "TIER_3_REVIEW_REQUIRED",
-          "rationale": "Ignored executed vendor SLA amendment residing in document storage."
+          "rationale": "Ignored executed vendor SLA amendment residing in document storage.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 0,
+            "median_tokens": 1820,
+            "median_exploratory_queries": 4,
+            "median_error_retries": 1,
+            "median_latency_ms": 4220.0,
+            "sample_sql_or_gql": "SELECT ROUND(SUM(shipment_fee_usd * 0.05), 2) AS recoverable_credit_usd\nFROM `example-project-id.sample_blind.base_sla_ledger`\nWHERE peak_temp_c > 5.0 AND duration_min >= 90;",
+            "observed_signals": [
+              "blind_raw_schema_only",
+              "missed_sla_overlay_contract"
+            ]
+          }
         },
         "governed": {
           "answer_headline": "USD 9,600.00 across 12 Qualifying Shipments",
@@ -549,7 +732,23 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
           "eval_pass_count": 5,
           "eval_total_runs": 5,
           "trust_tier": "TIER_1_VERIFIED_OR_COMPILED",
-          "rationale": "Structured SLA overlay reconciles unstructured legal amendments with telemetry."
+          "rationale": "Structured SLA overlay reconciles unstructured legal amendments with telemetry.",
+          "empirical_eval": {
+            "model_id": "gemini-3.8-flash",
+            "model_location": "global",
+            "runs": 5,
+            "pass_count": 5,
+            "median_tokens": 760,
+            "median_exploratory_queries": 1,
+            "median_error_retries": 0,
+            "median_latency_ms": 2760.0,
+            "sample_sql_or_gql": "SELECT COUNT(*) AS qualifying_shipments, ROUND(LEAST(SUM(l.shipment_fee_usd * o.credit_rate), ANY_VALUE(o.quarterly_cap_usd)), 2) AS recoverable_credit_usd\nFROM `example-project-id.sample_analytics.base_sla_ledger` l\nJOIN `example-project-id.sample_analytics.contract_sla_overlay` o ON l.cargo_class = o.cargo_class\nWHERE l.peak_temp_c > o.temp_threshold_c AND l.duration_min >= o.min_duration_min;",
+            "observed_signals": [
+              "get_verified_metric_contract",
+              "joined_sla_overlay",
+              "object_table_ai_generate"
+            ]
+          }
         },
         "xray_summary": {
           "context_added": "Compact structured SLA policy overlay extracted from unstructured signed amendments.",
