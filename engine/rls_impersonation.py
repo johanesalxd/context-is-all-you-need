@@ -43,6 +43,7 @@ _SA_EMAIL_REDACTION_REGEX = re.compile(
 _USER_EMAIL_REDACTION_REGEX = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
+_PROJECT_NUMBER_PATH_REGEX = re.compile(r"(projects/)[0-9]{6,}\b")
 
 _REDACTED_SA = "redacted-sa@example-project-id.iam.gserviceaccount.com"
 _REDACTED_USER = "redacted-user@example.com"
@@ -395,6 +396,7 @@ def redact_sensitive_identifiers(
 
     result = _SA_EMAIL_REDACTION_REGEX.sub(_scrub_sa_match, text)
     result = _USER_EMAIL_REDACTION_REGEX.sub(_scrub_user_match, result)
+    result = _PROJECT_NUMBER_PATH_REGEX.sub(rf"\g<1>{_PLACEHOLDER_PROJECT}", result)
 
     tokens_to_scrub: set[str] = set()
     if live_project_id:
@@ -405,6 +407,10 @@ def redact_sensitive_identifiers(
         env_pid = os.environ.get("PROJECT_ID", "").strip()
         if env_pid and env_pid != _PLACEHOLDER_PROJECT and len(env_pid) >= 6:
             tokens_to_scrub.add(env_pid)
+
+    env_pnum = os.environ.get("PROJECT_NUMBER", "").strip()
+    if env_pnum and env_pnum.isdigit() and len(env_pnum) >= 6:
+        tokens_to_scrub.add(env_pnum)
 
     if extra_tokens:
         for tok in extra_tokens:

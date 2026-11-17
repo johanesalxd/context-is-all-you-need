@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, time as dt_time
 from decimal import Decimal
+import inspect
 import json
 import os
 import re
@@ -388,6 +389,40 @@ class DataplexCatalogRestClient:
         return self._request_json("GET", url)
 
 
+def _await_bq_job_result(job: Any, timeout_s: float | None = None) -> list[Any]:
+    """Waits for a BigQuery job respecting timeout_s and cancelling timed-out jobs."""
+    if timeout_s is None:
+        return list(job.result())
+    eff_timeout = max(0.5, float(timeout_s))
+    result_fn = getattr(job, "result")
+    supports_timeout = False
+    try:
+        sig = inspect.signature(result_fn)
+        supports_timeout = (
+            "timeout" in sig.parameters
+            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        )
+    except (TypeError, ValueError):
+        supports_timeout = False
+
+    if not supports_timeout:
+        return list(result_fn())
+    try:
+        return list(result_fn(timeout=eff_timeout))
+    except Exception as err:
+        msg = str(err).lower()
+        is_timeout = isinstance(err, TimeoutError) or "timeout" in type(err).__name__.lower() or "timed out" in msg
+        if is_timeout:
+            cancel_fn = getattr(job, "cancel", None)
+            if callable(cancel_fn):
+                try:
+                    cancel_fn()
+                except Exception:
+                    pass
+            raise TimeoutError(f"BigQuery job exceeded {eff_timeout:.1f}s timeout: {err}") from err
+        raise
+
+
 class BlindToolContext:
     """Strictly raw, unannotated tool suite restricted to the Blind dataset."""
 
@@ -420,6 +455,7 @@ class BlindToolContext:
             "dataset_id": self.blind_dataset_id,
             "total_tables": len(all_names),
             "matched_tables": len(filtered),
+            "truncated": len(filtered) > capped,
             "tables": filtered[:capped],
             "note": "Raw table inventory only; zero descriptions, semantic contracts, or catalog certification metadata exist here.",
         }
@@ -444,7 +480,7 @@ class BlindToolContext:
             "num_rows": getattr(table_obj, "num_rows", None),
         }
 
-    def execute_select_sql(self, sql: str) -> dict[str, Any]:
+    def execute_select_sql(self, sql: str, *, timeout_s: float | None = None) -> dict[str, Any]:
         gate = validate_agent_sql_gate(
             self.bq_client,
             sql,
@@ -461,7 +497,7 @@ class BlindToolContext:
             maximum_bytes_billed=self.max_bytes,
         )
         job = self.bq_client.query(sql, job_config=run_cfg, location=self.bq_location)
-        rows_raw = list(job.result())
+        rows_raw = _await_bq_job_result(job, timeout_s=timeout_s)
         rows_preview, row_count = _rows_to_json_safe(rows_raw, max_rows=50)
         return {
             "rows": rows_preview,
@@ -536,6 +572,7 @@ class GovernedToolContext:
     def search_certified_tables(self, search_term: str) -> dict[str, Any]:
         term = (search_term or "").strip()
         results: list[dict[str, Any]] = []
+        kc_ordered: list[str] = []
         seen_tables: set[str] = set()
 
         search_queries = [f"{term} dataset={self.dataset_id}" if term and term != "*" else f"dataset={self.dataset_id}"]
@@ -566,6 +603,7 @@ class GovernedToolContext:
             table_leaf = entry_name.rsplit("/tables/", 1)[-1].split("/", 1)[0]
             if table_leaf and table_leaf not in seen_tables:
                 seen_tables.add(table_leaf)
+                kc_ordered.append(table_leaf)
 
         # Also inspect live BigQuery inventory in dataset_id when search_term matches names/descriptions
         # or to guarantee zero search-index propagation lag right after provisioning.
@@ -576,22 +614,30 @@ class GovernedToolContext:
         except Exception:
             bq_tables = []
 
+        bq_fallback: list[str] = []
         for tbl_item in bq_tables:
             tbl_leaf = str(tbl_item.table_id)
             if tbl_leaf in seen_tables:
                 continue
             if not tokens or term in {"*", "all"} or any(tok in tbl_leaf.lower() for tok in tokens):
                 seen_tables.add(tbl_leaf)
+                bq_fallback.append(tbl_leaf)
             elif len(seen_tables) < 3:
                 try:
                     tbl_meta = self.metadata_bq_client.get_table(f"{dataset_ref}.{tbl_leaf}")
                     desc = str(getattr(tbl_meta, "description", "") or "").lower()
                     if any(tok in desc for tok in tokens):
                         seen_tables.add(tbl_leaf)
+                        bq_fallback.append(tbl_leaf)
                 except Exception:
                     pass
 
-        for tbl_leaf in sorted(seen_tables)[:15]:
+        shadow_prefix = str(self.context_layer.get("shadow_table_prefix") or "shadow_auto_tbl_").lower()
+        bq_fallback.sort(key=lambda name: (1 if name.lower().startswith(shadow_prefix) else 0, name))
+        ordered_tables = [*kc_ordered, *bq_fallback]
+        max_tables = 15
+
+        for tbl_leaf in ordered_tables[:max_tables]:
             entry_name = self._entry_name(tbl_leaf)
             aspect_summary: dict[str, Any] = {}
             kc_error: str | None = None
@@ -641,6 +687,8 @@ class GovernedToolContext:
         return {
             "dataset_id": self.dataset_id,
             "search_term": term,
+            "total_matched": len(ordered_tables),
+            "truncated": len(ordered_tables) > max_tables,
             "tables": results,
             "metadata_sa": self.metadata_sa_email,
         }
@@ -784,7 +832,7 @@ class GovernedToolContext:
             "available_topics": sorted(str(k) for k in contracts.keys()),
         }
 
-    def execute_select_sql(self, sql: str) -> dict[str, Any]:
+    def execute_select_sql(self, sql: str, *, timeout_s: float | None = None) -> dict[str, Any]:
         gate = validate_agent_sql_gate(
             self.sql_bq_client,
             sql,
@@ -801,7 +849,7 @@ class GovernedToolContext:
             maximum_bytes_billed=self.max_bytes,
         )
         job = self.sql_bq_client.query(sql, job_config=run_cfg, location=self.bq_location)
-        rows_raw = list(job.result())
+        rows_raw = _await_bq_job_result(job, timeout_s=timeout_s)
         rows_preview, row_count = _rows_to_json_safe(rows_raw, max_rows=50)
         return {
             "rows": rows_preview,

@@ -59,7 +59,9 @@ def _default_persona_for_rung(rung: Mapping[str, Any]) -> str | None:
     if isinstance(rung.get("default_persona"), str) and rung["default_persona"].strip():
         return rung["default_persona"].strip()
     variants = rung.get("identity_variants")
-    if isinstance(variants, Sequence) and variants and isinstance(variants[0], Mapping):
+    if isinstance(variants, Mapping) and variants:
+        return str(next(iter(variants.keys())))
+    if isinstance(variants, Sequence) and not isinstance(variants, (str, bytes)) and variants and isinstance(variants[0], Mapping):
         pid = str(variants[0].get("persona_id") or "").strip()
         if pid:
             return pid
@@ -157,7 +159,8 @@ def run_eval_harness(
                     "mode": "live_gcp" if live_gcp else "offline_mock",
                     **res.to_dict(),
                 }
-                redacted_record = redact_bundle_data(raw_record, live_project_id=live_pid)
+                extra_toks = [t for t in (live_pid, os.environ.get("PROJECT_NUMBER", "")) if t and t != "example-project-id"]
+                redacted_record = redact_bundle_data(raw_record, extra_tokens=extra_toks, live_project_id=live_pid)
                 jsonl_records.append(redacted_record)
 
             emp_eval = build_empirical_eval(arm_runs)
@@ -168,6 +171,7 @@ def run_eval_harness(
     if live_gcp:
         bundle["generated_mode"] = "live_agent_verified"
 
+    forbidden_toks = [t for t in (live_pid, os.environ.get("PROJECT_NUMBER", "")) if t and t != "example-project-id"]
     if jsonl_out is not None:
         out_jsonl = jsonl_out if jsonl_out.is_absolute() else (root / jsonl_out)
         out_jsonl.parent.mkdir(parents=True, exist_ok=True)
@@ -177,10 +181,10 @@ def run_eval_harness(
             findings = scan_text_for_leaks(
                 line,
                 path_label=str(out_jsonl),
-                forbidden_tokens=[live_pid] if live_pid != "example-project-id" else (),
+                forbidden_tokens=forbidden_toks,
             )
             if findings:
-                summary = ", ".join(f"{f.rule}:{f.match}" for f in findings)
+                summary = ", ".join(f"{f.rule}:{f.preview}" for f in findings)
                 raise LeakDetectedError(
                     f"Aborted JSONL export at record #{idx} due to leak pattern(s): {summary}"
                 )

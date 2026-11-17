@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -45,6 +46,12 @@ __all__ = [
 _FALLBACK_MODEL_ID = "gemini-3.5-flash"
 _NUMBER_TOKEN_RE = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+_PROJECT_NUM_IN_PATH_RE = re.compile(r"projects/([0-9]{6,})\b")
+_TIER_SEVERITY = {
+    TrustTier.TIER_1_VERIFIED_OR_COMPILED.value: 1,
+    TrustTier.TIER_2_GROUNDED.value: 2,
+    TrustTier.TIER_3_REVIEW_REQUIRED.value: 3,
+}
 
 
 @dataclass
@@ -58,7 +65,7 @@ class AgentRunResult:
     grading_reason: str
     sql_or_gql: str
     query_language: str
-    trust_tier: int
+    trust_tier: str
     trust_reasons: list[str] = field(default_factory=list)
     observed_signals: list[str] = field(default_factory=list)
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
@@ -214,8 +221,10 @@ def extract_observed_signals(
             signals.add("SHADOW_TABLE_PROBED")
 
     stripped_sql = strip_sql_literals_and_comments(sql_or_gql or "")
-    if re.search(r"(?<![A-Za-z0-9_`])MEASURE\s*\(", stripped_sql, re.IGNORECASE):
+    if re.search(r"(?<![A-Za-z0-9_`])(?:MEASURE|GRAPH_EXPAND)\s*\(", stripped_sql, re.IGNORECASE):
         signals.add("MEASURE")
+    if re.search(r"(?<![A-Za-z0-9_`])GRAPH_EXPAND\s*\(", stripped_sql, re.IGNORECASE):
+        signals.add("GRAPH_EXPAND")
     if re.search(r"(?<![A-Za-z0-9_`])GRAPH_TABLE\s*\(", stripped_sql, re.IGNORECASE):
         signals.add("GRAPH_TABLE")
 
@@ -237,6 +246,27 @@ def extract_observed_signals(
     return sorted(signals)
 
 
+def _resolve_persona_id(rung: Mapping[str, Any], persona_id: str | None) -> str:
+    cleaned = (persona_id or "").strip()
+    if cleaned and cleaned != "default":
+        return cleaned
+    if isinstance(rung.get("default_persona"), str) and rung["default_persona"].strip():
+        return rung["default_persona"].strip()
+    variants = rung.get("identity_variants")
+    if isinstance(variants, Mapping) and variants:
+        return str(next(iter(variants.keys())))
+    if isinstance(variants, Sequence) and not isinstance(variants, (str, bytes)) and variants:
+        first = variants[0]
+        if isinstance(first, Mapping) and first.get("persona_id"):
+            return str(first["persona_id"]).strip()
+    grading = rung.get("grading")
+    if isinstance(grading, Mapping):
+        pts = grading.get("persona_targets")
+        if isinstance(pts, Mapping) and pts:
+            return str(next(iter(pts.keys())))
+    return "default"
+
+
 def _resolve_grading_spec(rung: Mapping[str, Any], persona_id: str | None) -> dict[str, Any]:
     raw_grading = rung.get("grading")
     if not isinstance(raw_grading, Mapping):
@@ -244,18 +274,49 @@ def _resolve_grading_spec(rung: Mapping[str, Any], persona_id: str | None) -> di
     spec = dict(raw_grading)
     persona_targets = spec.get("persona_targets")
     if isinstance(persona_targets, Mapping) and persona_targets:
-        chosen = None
+        chosen_key: str | None = None
+        chosen: Mapping[str, Any] | None = None
         if persona_id and persona_id in persona_targets and isinstance(persona_targets[persona_id], Mapping):
+            chosen_key = persona_id
             chosen = persona_targets[persona_id]
         elif len(persona_targets) == 1:
-            first_val = next(iter(persona_targets.values()))
+            first_key = str(next(iter(persona_targets.keys())))
+            first_val = persona_targets[first_key]
             if isinstance(first_val, Mapping):
+                chosen_key = first_key
                 chosen = first_val
-        if chosen:
+        if chosen is not None:
             merged = dict(spec)
+            if "target_value" in chosen:
+                merged.update(chosen)
+                return merged
+            if "value" in chosen:
+                if merged.get("target_value") is None:
+                    merged["target_value"] = chosen["value"]
+                    if "tolerance" in chosen:
+                        merged["tolerance"] = chosen["tolerance"]
+                else:
+                    merged["_persona_target"] = {
+                        "persona_id": chosen_key or "persona",
+                        "value": chosen["value"],
+                        "tolerance": chosen.get("tolerance", merged.get("tolerance", 0.01)),
+                    }
+                return merged
             merged.update(chosen)
             return merged
     return spec
+
+
+def _extract_row_numerics(rows_preview: Sequence[Mapping[str, Any]]) -> list[float]:
+    nums: list[float] = []
+    for row in rows_preview:
+        if not isinstance(row, Mapping):
+            continue
+        for val in row.values():
+            parsed = _coerce_float(val)
+            if parsed is not None:
+                nums.append(parsed)
+    return nums
 
 
 def grade_agent_outcome(
@@ -269,7 +330,8 @@ def grade_agent_outcome(
     persona_id: str | None = None,
 ) -> tuple[bool, str]:
     """Deterministically grades an agent outcome against rung['grading'] invariants."""
-    spec = _resolve_grading_spec(rung, persona_id)
+    effective_persona = _resolve_persona_id(rung, persona_id)
+    spec = _resolve_grading_spec(rung, effective_persona)
     if not spec:
         return False, "Missing rung grading specification."
 
@@ -291,23 +353,58 @@ def grade_agent_outcome(
             return False, f"Disallowed table used: {bad_leaf}"
 
     target_value = _coerce_float(spec.get("target_value"))
-    tolerance = _coerce_float(spec.get("tolerance")) or 0.01
+    raw_tol = _coerce_float(spec.get("tolerance"))
+    tolerance = raw_tol if raw_tol is not None else 0.01
     allow_ratio = bool(spec.get("allow_ratio_normalization", False))
 
+    persona_target = spec.get("_persona_target")
+    persona_val = _coerce_float(persona_target.get("value")) if isinstance(persona_target, Mapping) else None
+    persona_tol_raw = _coerce_float(persona_target.get("tolerance")) if isinstance(persona_target, Mapping) else None
+    persona_tol = persona_tol_raw if persona_tol_raw is not None else tolerance
+    persona_name = str(persona_target.get("persona_id") or effective_persona) if isinstance(persona_target, Mapping) else effective_persona
+
+    observed_num = numeric_value
+    if observed_num is None and rows_preview:
+        observed_num = _extract_scalar_from_rows(rows_preview)
+
+    answer_and_row_nums: list[float] = []
+    if observed_num is not None:
+        answer_and_row_nums.append(observed_num)
+    answer_and_row_nums.extend(_extract_row_numerics(rows_preview))
+    answer_and_row_nums.extend(_extract_numeric_tokens(answer_summary or ""))
+
     if target_value is not None:
-        observed_num = numeric_value
-        if observed_num is None and rows_preview:
-            observed_num = _extract_scalar_from_rows(rows_preview)
         if observed_num is None:
             return False, f"Missing numeric_value (expected {target_value})."
 
-        candidates = [observed_num]
+        primary_candidates = [observed_num]
         if allow_ratio:
-            candidates.extend([observed_num * 100.0, observed_num / 100.0])
-        if not any(_numbers_close(cand, target_value, tolerance=tolerance) for cand in candidates):
+            primary_candidates.extend([observed_num * 100.0, observed_num / 100.0])
+
+        matched_primary_scalar = any(_numbers_close(cand, target_value, tolerance=tolerance) for cand in primary_candidates)
+        matched_persona_scalar = persona_val is not None and _numbers_close(observed_num, persona_val, tolerance=persona_tol)
+
+        if not matched_primary_scalar and not matched_persona_scalar:
             return (
                 False,
                 f"Numeric mismatch: expected {target_value} (±{tolerance}), got {observed_num}",
+            )
+
+        if matched_persona_scalar and not matched_primary_scalar:
+            expanded_all = list(answer_and_row_nums)
+            if allow_ratio:
+                expanded_all.extend([n * 100.0 for n in answer_and_row_nums] + [n / 100.0 for n in answer_and_row_nums])
+            if not any(_numbers_close(cand, target_value, tolerance=tolerance) for cand in expanded_all):
+                return (
+                    False,
+                    f"Numeric mismatch: expected {target_value} (±{tolerance}) alongside persona value.",
+                )
+
+    if persona_val is not None:
+        if not any(_numbers_close(obs, persona_val, tolerance=persona_tol) for obs in answer_and_row_nums):
+            return (
+                False,
+                f"Persona target mismatch for {persona_name}: expected {persona_val} (±{persona_tol})",
             )
 
     combined_text = "\n".join(
@@ -329,7 +426,6 @@ def grade_agent_outcome(
 
     secondary = spec.get("secondary_numerics")
     if secondary:
-        extracted_nums = _extract_numeric_tokens(combined_text)
         items: Sequence[Any]
         if isinstance(secondary, Mapping):
             items = list(secondary.values())
@@ -337,19 +433,48 @@ def grade_agent_outcome(
             items = list(secondary)
         else:
             items = [secondary]
+
         for expected_raw in items:
-            expected_f = _coerce_float(expected_raw)
+            sec_name = ""
+            exact_zero = False
+            sec_tol = max(tolerance, 1e-4)
+            if isinstance(expected_raw, Mapping):
+                sec_name = str(expected_raw.get("name") or "").strip()
+                expected_f = _coerce_float(expected_raw.get("value"))
+                item_tol = _coerce_float(expected_raw.get("tolerance"))
+                if item_tol is not None:
+                    exact_zero = item_tol == 0.0
+                    sec_tol = item_tol
+            else:
+                expected_f = _coerce_float(expected_raw)
+
             if expected_f is None:
                 continue
+
             cand_targets = [expected_f]
             if 0.0 < abs(expected_f) < 1.0:
                 cand_targets.append(expected_f * 100.0)
-            if not any(
-                _numbers_close(obs, tgt, tolerance=max(tolerance, 1e-4))
-                for obs in extracted_nums
-                for tgt in cand_targets
-            ):
-                return False, f"Missing expected secondary numeric: {expected_f}"
+
+            search_pool = list(answer_and_row_nums)
+            if sec_name:
+                named_vals = [
+                    parsed
+                    for row in rows_preview
+                    if isinstance(row, Mapping) and sec_name in row
+                    for parsed in [_coerce_float(row.get(sec_name))]
+                    if parsed is not None
+                ]
+                if named_vals:
+                    search_pool = named_vals
+
+            def _sec_matches(obs: float, tgt: float) -> bool:
+                if exact_zero:
+                    return abs(obs - tgt) <= 1e-9
+                return _numbers_close(obs, tgt, tolerance=sec_tol)
+
+            if not any(_sec_matches(obs, tgt) for obs in search_pool for tgt in cand_targets):
+                label = f" ({sec_name})" if sec_name else ""
+                return False, f"Missing expected secondary numeric{label}: {expected_f}"
 
     return True, f"Passed grading (target={target_value})"
 
@@ -517,8 +642,9 @@ def _finalize_trust_classification(
     catalog_context_summary: str,
     error_retries: int,
     passed_grading: bool,
-) -> tuple[int, list[str]]:
-    first_line = (answer_summary or "").splitlines()[0][:240]
+) -> tuple[str, list[str]]:
+    lines = (answer_summary or "").splitlines()
+    first_line = (lines[0] if lines else "")[:240]
     reconciled_rows = _normalize_result_rows_for_trust(rows_preview, numeric_value)
     assessment = classify_outcome(
         sql_or_gql=sql_or_gql,
@@ -535,18 +661,13 @@ def _finalize_trust_classification(
         has_verified_query_contract=("VERIFIED_METRIC_CONTRACT" in observed_signals),
         strict_prose_reconcile=False,
     )
-    tier_map = {
-        TrustTier.TIER_1_VERIFIED_OR_COMPILED: 1,
-        TrustTier.TIER_2_GROUNDED: 2,
-        TrustTier.TIER_3_REVIEW_REQUIRED: 3,
-    }
-    tier = tier_map.get(assessment.tier, 3)
+    tier = assessment.tier.value
     reasons = list(assessment.reasons)
-    if arm == "blind" and tier < 3:
-        tier = 3
+    if arm == "blind" and _TIER_SEVERITY.get(tier, 3) < 3:
+        tier = TrustTier.TIER_3_REVIEW_REQUIRED.value
         reasons.append("ungrounded_blind_query")
-    if not passed_grading and tier < 3:
-        tier = 3
+    if not passed_grading and _TIER_SEVERITY.get(tier, 3) < 3:
+        tier = TrustTier.TIER_3_REVIEW_REQUIRED.value
         reasons.append("failed_grading")
     return tier, sorted(set(reasons))
 
@@ -596,7 +717,7 @@ def run_live_agent_arm(
         pack_id=pack_id,
         context_layer=ctx_layer,
     )
-    resolved_persona = (persona_id or "").strip() or str(rung.get("default_persona") or "default")
+    resolved_persona = _resolve_persona_id(rung, persona_id)
 
     tool_ctx: BlindToolContext | GovernedToolContext
     has_persona_isolation = False
@@ -710,11 +831,16 @@ def run_live_agent_arm(
         prompt_user = f"{question}\n\nExecution persona scope: {resolved_persona}"
 
     contents: list[Any] = [types.Content(role="user", parts=[types.Part.from_text(text=prompt_user)])]
-    gen_config = types.GenerateContentConfig(
-        temperature=0.0,
-        system_instruction=system_instruction,
-        tools=[types.Tool(function_declarations=declarations)],
-    )
+    deadline = t0 + max(1.0, float(timeout_s))
+
+    def _turn_config(remaining_s: float) -> Any:
+        timeout_ms = max(1000, int(math.ceil(max(0.5, remaining_s) * 1000.0)))
+        return types.GenerateContentConfig(
+            temperature=0.0,
+            system_instruction=system_instruction,
+            tools=[types.Tool(function_declarations=declarations)],
+            http_options=types.HttpOptions(timeout=timeout_ms),
+        )
 
     active_model = model_id
     tokens_used = 0
@@ -728,7 +854,8 @@ def run_live_agent_arm(
     final_text = ""
 
     for turn_idx in range(1, max_turns + 1):
-        if (time.monotonic() - t0) > timeout_s:
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
             final_text = final_text or f"Execution stopped after reaching {timeout_s:.0f}s budget."
             break
 
@@ -736,15 +863,16 @@ def run_live_agent_arm(
             response = client.models.generate_content(
                 model=active_model,
                 contents=contents,
-                config=gen_config,
+                config=_turn_config(remaining_s),
             )
         except Exception as err:
             if turn_idx == 1 and active_model != _FALLBACK_MODEL_ID and _is_model_unavailable_error(err):
                 active_model = _FALLBACK_MODEL_ID
+                rem_retry = max(0.5, deadline - time.monotonic())
                 response = client.models.generate_content(
                     model=active_model,
                     contents=contents,
-                    config=gen_config,
+                    config=_turn_config(rem_retry),
                 )
             else:
                 error_retries += 1
@@ -777,6 +905,24 @@ def run_live_agent_arm(
             raw_args = dict(getattr(fc, "args", None) or {})
             status = "ok"
             result_payload: dict[str, Any]
+            exec_remaining = deadline - time.monotonic()
+            if exec_remaining <= 0:
+                status = "timeout"
+                error_retries += 1
+                result_payload = {"error": f"Execution budget ({timeout_s:.0f}s) exhausted before tool {fn_name}."}
+                tool_trace.append(
+                    {
+                        "turn": turn_idx,
+                        "tool_name": fn_name,
+                        "args_summary": _format_args_summary(raw_args),
+                        "status": status,
+                        "output_preview": json.dumps(result_payload, ensure_ascii=True),
+                    }
+                )
+                response_parts.append(
+                    types.Part.from_function_response(name=fn_name, response={"result": result_payload})
+                )
+                continue
 
             try:
                 if arm == "blind" and isinstance(tool_ctx, BlindToolContext):
@@ -791,7 +937,7 @@ def run_live_agent_arm(
                         result_payload = tool_ctx.get_table_ddl(str(raw_args.get("table_name") or ""))
                     elif fn_name == "execute_select_sql":
                         last_sql = str(raw_args.get("sql") or "")
-                        result_payload = tool_ctx.execute_select_sql(last_sql)
+                        result_payload = tool_ctx.execute_select_sql(last_sql, timeout_s=exec_remaining)
                         last_rows = list(result_payload.get("rows") or [])
                         last_refs = list(result_payload.get("referenced_tables") or [])
                     else:
@@ -823,7 +969,7 @@ def run_live_agent_arm(
                         )
                     elif fn_name == "execute_select_sql":
                         last_sql = str(raw_args.get("sql") or "")
-                        result_payload = tool_ctx.execute_select_sql(last_sql)
+                        result_payload = tool_ctx.execute_select_sql(last_sql, timeout_s=exec_remaining)
                         last_rows = list(result_payload.get("rows") or [])
                         last_refs = list(result_payload.get("referenced_tables") or [])
                     else:
@@ -834,6 +980,10 @@ def run_live_agent_arm(
                 status = "blocked"
                 error_retries += 1
                 result_payload = {"error": str(sec_err), "blocked_by_zero_trust_gate": True}
+            except TimeoutError as to_err:
+                status = "timeout"
+                error_retries += 1
+                result_payload = {"error": str(to_err)}
             except Exception as tool_err:
                 status = "error"
                 error_retries += 1
@@ -930,12 +1080,27 @@ def run_live_agent_arm(
         persona_id=resolved_persona,
     )
     scrub_pid = tool_ctx.project_id if tool_ctx.project_id and tool_ctx.project_id != "example-project-id" else project_id
+    raw_dump = json.dumps(raw_result.to_dict(), ensure_ascii=True)
+    extra_toks = [tool_ctx.project_id, project_id, os.environ.get("PROJECT_NUMBER", "")]
+    extra_toks.extend(_PROJECT_NUM_IN_PATH_RE.findall(raw_dump))
     redacted_dict = redact_bundle_data(
         raw_result.to_dict(),
-        extra_tokens=[tool_ctx.project_id, project_id],
+        extra_tokens=extra_toks,
         live_project_id=scrub_pid,
     )
     return AgentRunResult(**redacted_dict)
+
+
+def _lookup_identity_variant(rung: Mapping[str, Any], persona_id: str) -> dict[str, Any] | None:
+    variants = rung.get("identity_variants")
+    if isinstance(variants, Mapping):
+        val = variants.get(persona_id)
+        return dict(val) if isinstance(val, Mapping) else None
+    if isinstance(variants, Sequence) and not isinstance(variants, (str, bytes)):
+        for item in variants:
+            if isinstance(item, Mapping) and str(item.get("persona_id") or "") == persona_id:
+                return dict(item)
+    return None
 
 
 def run_offline_mock_arm(
@@ -955,18 +1120,36 @@ def run_offline_mock_arm(
     project_id = settings["PROJECT_ID"]
     model_id = settings["AGENT_MODEL_ID"]
     model_location = settings["AGENT_MODEL_LOCATION"]
-    resolved_persona = (persona_id or "").strip() or str(rung.get("default_persona") or "default")
+    resolved_persona = _resolve_persona_id(rung, persona_id)
 
     arm_data = dict(rung.get(arm) or (rung.get("arms") or {}).get(arm) or {})
     sql_or_gql = str(arm_data.get("sql_or_gql") or "SELECT 1 AS value")
     rows_preview = [dict(r) for r in (arm_data.get("result_rows") or [])[:20]]
-    numeric_value = _coerce_float(arm_data.get("metric_value"))
+    numeric_value = _coerce_float(arm_data.get("numeric_value"))
+    if numeric_value is None:
+        numeric_value = _coerce_float(arm_data.get("metric_value"))
     if numeric_value is None and rows_preview:
         numeric_value = _extract_scalar_from_rows(rows_preview)
 
     answer_headline = str(arm_data.get("answer_headline") or "")
     answer_detail = str(arm_data.get("answer_detail") or "")
-    answer_summary = f"{answer_headline} {answer_detail}".strip()
+    variant = _lookup_identity_variant(rung, resolved_persona) if arm == "governed" else None
+    if variant is not None:
+        var_num = _coerce_float(variant.get("numeric_value"))
+        if not rows_preview and numeric_value is not None and var_num is not None:
+            rows_preview = [
+                {
+                    "primary_metric": numeric_value,
+                    "persona_value": var_num,
+                    "rows_visible": variant.get("rows_visible"),
+                }
+            ]
+        var_head = str(variant.get("answer_headline") or "").strip()
+        var_det = str(variant.get("answer_detail") or "").strip()
+        answer_summary = " | ".join(part for part in (answer_headline, var_head, var_det or answer_detail) if part).strip()
+    else:
+        answer_summary = f"{answer_headline} {answer_detail}".strip()
+
     mechanism = str(arm_data.get("context_mechanism") or "")
     payload = str(arm_data.get("context_payload") or "")
     cost = dict(arm_data.get("cost") or {})
@@ -978,7 +1161,7 @@ def run_offline_mock_arm(
                 "tool_name": "list_tables",
                 "args_summary": '{"pattern": ""}',
                 "status": "ok",
-                "output_preview": f'{{"dataset_id": "{settings["BLIND_DATASET_ID"]}", "total_tables": 198}}',
+                "output_preview": f'{{"dataset_id": "{settings["BLIND_DATASET_ID"]}", "total_tables": 198, "truncated": true}}',
             },
             {
                 "turn": 2,
@@ -1046,7 +1229,30 @@ def run_offline_mock_arm(
         grading_reason = "No grading block in rung; inferred from arm."
 
     query_lang = str(arm_data.get("query_language") or _detect_query_language(sql_or_gql))
-    error_retries = int(cost.get("error_retries") or 0)
+    error_retries = int(
+        arm_data["error_retries"]
+        if arm_data.get("error_retries") is not None
+        else (cost.get("error_retries") or 0)
+    )
+    tokens_used = int(
+        arm_data.get("tokens_used")
+        or cost.get("llm_tokens_est")
+        or (6400 if arm == "blind" else 2800)
+    )
+    exploratory_queries = int(
+        arm_data["exploratory_queries"]
+        if arm_data.get("exploratory_queries") is not None
+        else (
+            cost["exploratory_queries"]
+            if cost.get("exploratory_queries") is not None
+            else (6 if arm == "blind" else 2)
+        )
+    )
+    latency_ms = int(
+        arm_data.get("latency_ms")
+        or cost.get("latency_ms")
+        or (1400 if arm == "blind" else 850)
+    )
     trust_tier, trust_reasons = _finalize_trust_classification(
         arm=arm,
         sql_or_gql=sql_or_gql,
@@ -1074,14 +1280,18 @@ def run_offline_mock_arm(
         observed_signals=observed_signals,
         tool_trace=tool_trace,
         catalog_context_summary=payload[:500] if arm == "governed" else "",
-        tokens_used=int(cost.get("llm_tokens_est") or (6400 if arm == "blind" else 2800)),
-        exploratory_queries=int(cost.get("exploratory_queries") or (6 if arm == "blind" else 2)),
+        tokens_used=tokens_used,
+        exploratory_queries=exploratory_queries,
         error_retries=error_retries,
-        latency_ms=int(cost.get("latency_ms") or (1400 if arm == "blind" else 850)),
+        latency_ms=latency_ms,
         rows_preview=rows_preview,
         model_id=model_id,
         model_location=model_location,
         persona_id=resolved_persona,
     )
-    redacted_dict = redact_bundle_data(raw_result.to_dict(), live_project_id=project_id)
+    redacted_dict = redact_bundle_data(
+        raw_result.to_dict(),
+        extra_tokens=[os.environ.get("PROJECT_NUMBER", "")],
+        live_project_id=project_id,
+    )
     return AgentRunResult(**redacted_dict)

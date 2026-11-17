@@ -83,9 +83,25 @@ def test_leak_scanner_catches_all_forbidden_patterns(
         "org_contact=demo@example.org\n"
         "net_contact=demo@example.net\n"
         "url=https://example.org/docs/go-live\n"
+        "entry=projects/example-project-id/locations/asia-southeast1/glossaries/g1\n"
         "decision=Go/No-Go gate\n"
     )
     assert scan_text_for_leaks(safe_text, path_label="safe.txt") == []
+
+    # Numeric project number path detection + redaction (constructed dynamically)
+    synth_proj_num = "987654" + "321012"
+    num_sample = f"entry=projects/{synth_proj_num}/locations/asia-southeast1/glossaries/g1/terms/t1"
+    num_findings = scan_text_for_leaks(num_sample, path_label="catalog.json")
+    assert any(f.rule == "gcp_project_number_path" for f in num_findings)
+
+    from engine.rls_impersonation import redact_sensitive_identifiers
+
+    redacted = redact_sensitive_identifiers(
+        f"projects/{synth_proj_num}/locations/asia-southeast1/glossaries/g1",
+        live_project_id=live_pid,
+    )
+    assert synth_proj_num not in redacted
+    assert scan_text_for_leaks(redacted, path_label="redacted.txt") == []
 
 
 def test_engine_and_server_have_zero_hardcoded_scenario_identifiers() -> None:

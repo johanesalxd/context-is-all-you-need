@@ -1099,6 +1099,8 @@ def test_phase2_pack_loader_helpers_and_rls_discovery(
     assert parse_bool_flag("true", default=False) is True
     assert parse_bool_flag("0", default=True) is False
     assert parse_bool_flag(None, default=True) is True
+    assert parse_bool_flag("flase", default=True, on_invalid=False) is False
+    assert parse_bool_flag("tyop", default=True, on_invalid=True) is True
 
     monkeypatch.setenv("PROJECT_ID", "example-project-id")
     settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=tmp_path / "missing.env")

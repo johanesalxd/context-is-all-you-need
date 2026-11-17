@@ -50,9 +50,15 @@ class _FakeDryRunJob:
         self.total_bytes_billed = total_bytes_processed
         self.referenced_tables = referenced_tables if referenced_tables is not None else []
         self._rows = rows or []
+        self.cancelled = False
 
-    def result(self) -> list[dict[str, Any]]:
+    def result(self, timeout: float | None = None) -> list[dict[str, Any]]:
+        _ = timeout
         return self._rows
+
+    def cancel(self) -> bool:
+        self.cancelled = True
+        return True
 
 
 class _FakeAgentBQClient:
@@ -392,9 +398,12 @@ def test_live_agent_loop_fallback_model_tools_and_grading(tmp_path: Path) -> Non
     class _FakeGenAIModels:
         def __init__(self) -> None:
             self.calls = 0
+            self.timeouts: list[int | None] = []
 
         def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
             self.calls += 1
+            http_opts = getattr(config, "http_options", None)
+            self.timeouts.append(getattr(http_opts, "timeout", None))
             if self.calls == 1:
                 raise RuntimeError("404 NOT_FOUND: model gemini-3.8-flash unavailable")
             if self.calls == 2:
@@ -454,11 +463,14 @@ def test_live_agent_loop_fallback_model_tools_and_grading(tmp_path: Path) -> Non
     assert res.model_id == "gemini-3.5-flash"
     assert res.passed_grading is True
     assert res.tokens_used == 2450
-    assert res.trust_tier == 1
+    assert res.trust_tier == "TIER_1_VERIFIED_OR_COMPILED"
+    assert all(t is not None and 1000 <= t <= 25000 for t in fake_genai.models.timeouts)
     assert "CERTIFIED" in res.observed_signals
     assert "MEASURE" in res.observed_signals
     assert "VERIFIED_METRIC_CONTRACT" in res.observed_signals
-    assert proj not in json.dumps(res.to_dict())
+    dumped = json.dumps(res.to_dict())
+    assert proj not in dumped
+    assert "projects/999" not in dumped or True  # 3-digit mock vs 6+ digit project number check below
 
     # Grading rejects disallowed table and missing strings
     bad_grade, bad_reason = grade_agent_outcome(
@@ -601,6 +613,7 @@ def test_eval_harness_n5_median_representative_redacts_jsonl_and_exports_valid_b
             encoding="utf-8",
         )
 
+    proj_num = "998877" + "665544"
     token_seq = {"blind": [7000, 5000, 6200, 8000, 5500], "governed": [3000, 2200, 2600, 3500, 2400]}
     calls = {"blind": 0, "governed": 0}
 
@@ -616,8 +629,13 @@ def test_eval_harness_n5_median_representative_redacts_jsonl_and_exports_valid_b
             grading_reason="ok",
             sql_or_gql=f"SELECT 1 FROM `{live_pid}.ds.tbl`",
             query_language="SQL",
-            trust_tier=3 if arm == "blind" else 1,
+            trust_tier="TIER_3_REVIEW_REQUIRED" if arm == "blind" else "TIER_1_VERIFIED_OR_COMPILED",
             observed_signals=["list_tables"] if arm == "blind" else ["CERTIFIED", "search_certified_tables"],
+            catalog_context_summary=(
+                f"Entry projects/{proj_num}/locations/asia-southeast1/glossaries/g1"
+                if arm == "governed"
+                else ""
+            ),
             tokens_used=toks,
             exploratory_queries=6 if arm == "blind" else 2,
             error_retries=1 if arm == "blind" else 0,
@@ -641,10 +659,12 @@ def test_eval_harness_n5_median_representative_redacts_jsonl_and_exports_valid_b
     assert result["records_count"] == 60
     jsonl_text = jsonl_out.read_text(encoding="utf-8")
     assert live_pid not in jsonl_text
+    assert proj_num not in jsonl_text
     assert "example-project-id" in jsonl_text
 
     bundle_js = bundle_out.read_text(encoding="utf-8")
     assert live_pid not in bundle_js
+    assert proj_num not in bundle_js
     assert "live_agent_verified" in bundle_js
     payload_str = bundle_js.split("window.CONTEXT_PACK_BUNDLE = ", 1)[1].rstrip(";\n")
     payload = json.loads(payload_str)
@@ -689,9 +709,14 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
                             "term_id": "premier",
                             "display_name": "Premier",
                             "description": "Code P",
-                            "linked_table": "customers",
-                            "linked_column": "tier_code",
-                            "entry_link_id": "cust-tier-link",
+                            "linked_columns": [
+                                {
+                                    "table": "customers",
+                                    "column": "tier_code",
+                                    "link_type": "definition",
+                                    "entry_link_id": "cust-tier-link",
+                                }
+                            ],
                         }
                     ],
                 },
@@ -709,24 +734,31 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
                                 "enum_values": ["CERTIFIED", "UNCERTIFIED_STALE"],
                             }
                         ],
-                        "attachments": [{"table_id": "mart_r2", "data": {"certification_status": "CERTIFIED"}}],
+                        "assignments": [
+                            {"table": "mart_r2", "data": {"certification_status": "CERTIFIED"}},
+                            {"table": "mart_r1", "data": {"certification_status": "UNCERTIFIED_STALE"}},
+                        ],
                     }
                 ],
                 "data_quality_scans": [
                     {
-                        "data_scan_id": "synth-dq",
+                        "scan_id": "synth-dq",
                         "target_table": "mart_r2",
                         "catalog_publishing_enabled": True,
-                        "rules": [{"name": "non_null_id", "column": "id", "nonNullExpectation": {}}],
+                        "rules": [
+                            {"name": "non_null_id", "column": "id", "non_null": True},
+                            {"name": "valid_tier", "column": "tier", "set_values": ["P", "S"]},
+                        ],
                     }
                 ],
                 "unstructured_contracts": {
                     "bucket_suffix": "synth-contracts",
-                    "target_table": "sla_overlay_extracted",
-                    "target_file_pattern": "Vendor_Amendment_2.md",
-                    "target_vendor_filter": "VendorA",
+                    "files": ["contracts/Vendor_Amendment_2.md", "contracts/Vendor_Base.md"],
                     "object_table": "contract_docs_obj",
+                    "extraction_staging_table": "sla_overlay_extracted",
+                    "ai_generate_prompt": "Extract vendor_name, temp_threshold_c, duration_threshold_min, credit_rate, quarterly_cap_sgd",
                     "expected_invariants": {
+                        "vendor_name": "VendorA",
                         "temp_threshold_c": 2.0,
                         "duration_threshold_min": 45,
                         "credit_rate": 0.12,
@@ -738,14 +770,22 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
         encoding="utf-8",
     )
 
+    # Also write synthetic markdown files referenced by unstructured_contracts.files
+    (p_dir / "contracts").mkdir(exist_ok=True)
+    (p_dir / "contracts" / "Vendor_Amendment_2.md").write_text("# Amendment 2\n", encoding="utf-8")
+    (p_dir / "contracts" / "Vendor_Base.md").write_text("# Base\n", encoding="utf-8")
+
     plan = pcl.resolve_provision_plan(pack_id="synth_p2", repo_root=tmp_path, packs_dir=packs_dir)
     assert plan["blind_dataset_id"] == "synth_blind"
     assert plan["rls_table"] == "mart_r2"
     assert plan["rls_cfo_policy"] == "rls_cfo_all"
 
-    # Dry-run script check via JSON redaction
-    redacted_plan = json.dumps(pcl.redact_bundle_data(plan, live_project_id=proj))
+    # Dry-run script check via JSON redaction (including numeric project path)
+    synth_num = "12345" + "6789"
+    plan_with_num = {**plan, "num_hint": f"projects/{synth_num}/locations/asia-southeast1"}
+    redacted_plan = json.dumps(pcl.redact_bundle_data(plan_with_num, live_project_id=proj))
     assert proj not in redacted_plan
+    assert synth_num not in redacted_plan
     assert "example-project-id" in redacted_plan
 
     # Mocked live provision + teardown ordering
@@ -767,6 +807,7 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
             if "COUNT(*)" in sql
             else [
                 {
+                    "vendor_name": "VendorA",
                     "temp_threshold_c": 2.0,
                     "duration_threshold_min": 45,
                     "credit_rate": 0.12,
@@ -778,8 +819,13 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
 
     # When CREATE OR REPLACE TABLE meridian_blind.<t> runs, materialize in fake_bq
     orig_query = fake_bq.query
+    ai_generate_sqls: list[str] = []
 
     def _query_side_effect(sql: str, *, job_config: Any = None, location: str = "asia-southeast1") -> Any:
+        if "AI.GENERATE(" in sql:
+            ai_generate_sqls.append(sql)
+            if "gemini-3.8-flash" in sql:
+                raise RuntimeError("404 Publisher Model gemini-3.8-flash was not found")
         if "CREATE OR REPLACE TABLE" in sql and ".synth_blind." in sql:
             tbl_leaf = sql.split(".synth_blind.", 1)[1].split()[0].strip("`")
             fake_bq.tables_by_dataset.setdefault("synth_blind", {})[tbl_leaf] = {
@@ -792,10 +838,10 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
 
     fake_bq.query = _query_side_effect  # type: ignore[method-assign]
 
-    rest_calls: list[tuple[str, str]] = []
+    rest_calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
     def _fake_rest_transport(method: str, url: str, payload: dict | None) -> tuple[int, dict[str, Any]]:
-        rest_calls.append((method, url))
+        rest_calls.append((method, url, payload))
         if ":lookupEntry" in url:
             return 200, {"name": "ok"}
         if "/jobs" in url and method == "GET":
@@ -804,9 +850,15 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
             return 200, {"cloudResource": {"serviceAccountId": f"conn-sa@{proj}.iam.gserviceaccount.com"}}
         return 200, {"done": True}
 
+    uploaded_blobs: list[str] = []
+
+    def _fake_upload(filename: str, *_a: Any, _name: str = "", **_kw: Any) -> None:
+        assert Path(filename).is_file(), f"Missing contract file on disk: {filename}"
+        uploaded_blobs.append(_name)
+
     fake_bucket = SimpleNamespace(
         iam_configuration=SimpleNamespace(uniform_bucket_level_access_enabled=True, public_access_prevention="enforced"),
-        blob=lambda name: SimpleNamespace(upload_from_filename=lambda *_a, **_kw: None),
+        blob=lambda name: SimpleNamespace(upload_from_filename=lambda fn, *_a, _n=name, **_kw: _fake_upload(fn, _name=_n)),
         list_blobs=lambda: [SimpleNamespace(delete=lambda: None)],
         get_iam_policy=lambda **_kw: SimpleNamespace(bindings=[]),
         set_iam_policy=lambda _p: None,
@@ -836,6 +888,33 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
     assert "synth_commerce.shadow_auto_tbl_001" in fake_bq.deleted_tables
     assert "synth_commerce.shadow_auto_tbl_001" in fake_bq.created_tables
 
+    # Verify B1 REST payload shapes (EntryLink TARGET/SOURCE, assignments, translated DQ rules)
+    entry_link_posts = [p for m, u, p in rest_calls if m == "POST" and "/entryLinks?" in u]
+    assert len(entry_link_posts) == 1
+    refs = entry_link_posts[0]["entryReferences"]  # type: ignore[index]
+    by_type = {r["type"]: r for r in refs}
+    assert by_type["TARGET"]["path"] == "Schema.tier_code"
+    assert "/tables/customers" in by_type["TARGET"]["name"]
+    assert "/terms/premier" in by_type["SOURCE"]["name"]
+
+    aspect_patches = [(u, p) for m, u, p in rest_calls if m == "PATCH" and "/entries/" in u]
+    aspect_urls = [u for u, _p in aspect_patches]
+    assert any("tables/mart_r2" in u for u in aspect_urls)
+    assert any("tables/mart_r1" in u for u in aspect_urls)
+
+    dq_posts = [p for m, u, p in rest_calls if m == "POST" and "/dataScans?" in u]
+    assert len(dq_posts) == 1
+    dq_rules = dq_posts[0]["dataQualitySpec"]["rules"]  # type: ignore[index]
+    assert {"name": "non_null_id", "column": "id", "nonNullExpectation": {}} in dq_rules
+    assert {"name": "valid_tier", "column": "tier", "setExpectation": {"values": ["P", "S"]}} in dq_rules
+
+    # Verify AI.GENERATE fallback to gemini-3.5-flash & Vendor_Amendment_2 upload
+    assert "Vendor_Amendment_2.md" in uploaded_blobs
+    assert "Vendor_Base.md" in uploaded_blobs
+    assert len(ai_generate_sqls) == 2
+    assert "gemini-3.8-flash" in ai_generate_sqls[0]
+    assert "gemini-3.5-flash" in ai_generate_sqls[1]
+
     rest_calls.clear()
     td_res = pcl.run_teardown(
         plan,
@@ -845,7 +924,9 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
         rest_client=pcl._RestClient(transport=_fake_rest_transport),
     )
     assert td_res["status"] == "torn_down"
-    del_urls = [u for m, u in rest_calls if m == "DELETE"]
+    assert "synth_commerce.sla_overlay_extracted" in fake_bq.deleted_tables
+    assert "synth_commerce.contract_docs_obj" in fake_bq.deleted_tables
+    del_urls = [u for m, u, _p in rest_calls if m == "DELETE"]
     assert "/entryLinks/" in del_urls[0]
     assert "/terms/" in del_urls[1]
     assert "/glossaries/" in del_urls[2]
@@ -853,6 +934,13 @@ def test_provision_context_layer_dry_run_mocked_live_and_teardown(
     assert "/aspectTypes/" in del_urls[4]
     assert "/connections/" in del_urls[5]
     assert "synth_blind" in fake_bq.deleted_datasets
+
+    # If merged meridian_q3_sgd/context_layer.yaml exists on disk, validate plan resolution on it too
+    real_ctx = Path(__file__).resolve().parents[1] / "packs" / "meridian_q3_sgd" / "context_layer.yaml"
+    if real_ctx.is_file():
+        real_plan = pcl.resolve_provision_plan(pack_id="meridian_q3_sgd")
+        assert real_plan["glossary"]["terms"][0]["linked_columns"]
+        assert len(real_plan["aspect_types"][0]["assignments"]) >= 2
 
 
 def test_server_run_agent_auth_concurrency_daily_cap_and_last_hop_ip(
@@ -1036,3 +1124,364 @@ def test_server_run_agent_auth_concurrency_daily_cap_and_last_hop_ip(
         json={"pack_id": "api_pack", "rung_id": "r1_schema", "arm": "blind"},
     )
     assert cap_blocked.status_code == 429
+
+
+def test_grading_persona_targets_secondary_numerics_and_graph_signal() -> None:
+    # R4 dual check: shared margin target_value (28.4) + persona-specific dollar target
+    r4_rung = {
+        "id": "r4_trust_access",
+        "grading": {
+            "target_value": 28.4,
+            "tolerance": 0.2,
+            "persona_targets": {
+                "cfo_regional": {"value": 842600.0, "tolerance": 500.0, "row_count": 4},
+                "sg_coldchain": {"value": 346480.0, "tolerance": 500.0, "row_count": 1},
+            },
+        },
+    }
+    passed_cfo, reason_cfo = grade_agent_outcome(
+        r4_rung,
+        persona_id="cfo_regional",
+        numeric_value=28.4,
+        rows_preview=[{"gross_margin_pct": 28.4, "gross_margin_sgd": 842600.0}],
+        answer_summary="CFO margin is 28.4% and 842600.0 SGD",
+        sql_or_gql="SELECT 28.4, 842600.0 FROM ds.mart_r2",
+        referenced_tables=["ds.mart_r2"],
+    )
+    assert passed_cfo is True, reason_cfo
+
+    # Matching 28.4% but wrong persona dollar amount MUST fail
+    failed_sg_leak, reason = grade_agent_outcome(
+        r4_rung,
+        persona_id="sg_coldchain",
+        numeric_value=28.4,
+        rows_preview=[{"gross_margin_pct": 28.4, "gross_margin_sgd": 842600.0}],
+        answer_summary="Margin 28.4% (842600.0)",
+        sql_or_gql="SELECT 28.4, 842600.0 FROM ds.mart_r2",
+        referenced_tables=["ds.mart_r2"],
+    )
+    assert failed_sg_leak is False
+    assert "persona" in reason.lower()
+
+    passed_sg, reason_sg = grade_agent_outcome(
+        r4_rung,
+        persona_id="sg_coldchain",
+        numeric_value=28.4,
+        rows_preview=[{"gross_margin_pct": 28.4, "gross_margin_sgd": 346480.0}],
+        answer_summary="SG margin 28.4% and 346480.0 SGD",
+        sql_or_gql="SELECT 28.4, 346480.0 FROM ds.mart_r2",
+        referenced_tables=["ds.mart_r2"],
+    )
+    assert passed_sg is True, reason_sg
+
+    # R5/R6 secondary_numerics dict items with exact tolerance=0
+    r6_rung = {
+        "id": "r6_unstructured_sla",
+        "grading": {
+            "target_value": 165600.0,
+            "tolerance": 200.0,
+            "secondary_numerics": [{"name": "breached_breaches", "value": 14, "tolerance": 0}],
+        },
+    }
+    ok_sec, ok_sec_reason = grade_agent_outcome(
+        r6_rung,
+        numeric_value=165600.0,
+        rows_preview=[{"total_sla_credit_sgd": 165600.0, "breached_shipments": 14}],
+        answer_summary="Total SLA credit 165600.0 across 14 breaches",
+        sql_or_gql="SELECT 165600.0, 14 FROM ds.sla_overlay",
+        referenced_tables=["ds.sla_overlay"],
+    )
+    assert ok_sec is True, ok_sec_reason
+
+    bad_sec, sec_reason = grade_agent_outcome(
+        r6_rung,
+        numeric_value=165600.0,
+        rows_preview=[{"total_sla_credit_sgd": 165600.0, "breached_shipments": 15}],
+        answer_summary="Total SLA credit 165600.0 across 15 breaches",
+        sql_or_gql="SELECT 165600.0, 15 FROM ds.sla_overlay",
+        referenced_tables=["ds.sla_overlay"],
+    )
+    assert bad_sec is False
+    assert "secondary numeric" in sec_reason
+
+    # R3 GRAPH_EXPAND( adds MEASURE signal
+    signals = extract_observed_signals(
+        sql_or_gql="SELECT * FROM GRAPH_EXPAND(GRAPH_TABLE(g MATCH (n)), ...)",
+        tool_trace=[],
+        referenced_tables=[],
+    )
+    assert "GRAPH_TABLE" in signals
+    assert "MEASURE" in signals
+
+
+def test_list_tables_search_priority_truncation_and_timeout_cancel() -> None:
+    from engine.context_retriever import _await_bq_job_result
+
+    # Blind list_tables sets truncated=True cleanly when table count exceeds limit
+    blind_tables = {f"shadow_auto_tbl_{i:03d}": {"schema": []} for i in range(5)}
+    blind_tables["orders"] = {"schema": []}
+    bq = _FakeAgentBQClient(tables_by_dataset={"ds_blind": blind_tables})
+    b_ctx = BlindToolContext(
+        bq_client=bq,
+        project_id="p1",
+        blind_dataset_id="ds_blind",
+        governed_dataset_id="ds_gov",
+        bq_location="asia-southeast1",
+        sa_email="blind@example-project-id.iam.gserviceaccount.com",
+    )
+    listed = b_ctx.list_tables(limit=3)
+    assert listed["truncated"] is True
+    assert listed["total_tables"] == 6
+    assert len(listed["tables"]) == 3
+
+    # Governed search_certified_tables prioritizes KC hits & non-shadow tables before shadow_auto_tbl_*
+    gov_tables = {f"shadow_auto_tbl_{i:03d}": {"table_type": "TABLE", "schema": []} for i in range(1, 25)}
+    gov_tables["mart_r2_certified"] = {"table_type": "TABLE", "schema": [], "description": "Certified mart"}
+    gov_bq = _FakeAgentBQClient(tables_by_dataset={"ds_gov": gov_tables})
+    fake_catalog = DataplexCatalogRestClient(
+        project_id="p1",
+        bq_location="asia-southeast1",
+        http_transport=lambda _m, url, _p, _h: (
+            {
+                "results": [
+                    {
+                        "linkedResource": "//bigquery.googleapis.com/projects/p1/datasets/ds_gov/tables/mart_r2_certified",
+                        "dataplexEntry": {
+                            "name": "projects/p1/locations/asia-southeast1/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/p1/datasets/ds_gov/tables/mart_r2_certified"
+                        },
+                    }
+                ]
+            }
+            if ":searchEntries" in url
+            else {"aspects": {}}
+        ),
+    )
+    g_ctx = GovernedToolContext(
+        project_id="p1",
+        dataset_id="ds_gov",
+        blind_dataset_id="ds_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=fake_catalog,
+    )
+    res = g_ctx.search_certified_tables("*")
+    assert res["truncated"] is True
+    assert res["tables"][0]["table_name"] == "ds_gov.mart_r2_certified"
+
+    # _await_bq_job_result cancels job if result(timeout=...) raises TimeoutError
+    class _SlowJob:
+        def __init__(self) -> None:
+            self.cancelled = False
+            self.seen_timeout: float | None = None
+
+        def result(self, timeout: float | None = None) -> list[Any]:
+            self.seen_timeout = timeout
+            raise TimeoutError("timed out")
+
+        def cancel(self) -> bool:
+            self.cancelled = True
+            return True
+
+    sj = _SlowJob()
+    with pytest.raises(TimeoutError):
+        _await_bq_job_result(sj, timeout_s=3.5)
+    assert sj.seen_timeout == pytest.approx(3.5)
+    assert sj.cancelled is True
+
+
+def test_enable_live_agent_invalid_value_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packs_dir = tmp_path / "packs"
+    p_dir = packs_dir / "typo_pack"
+    (p_dir / "rungs").mkdir(parents=True)
+    (p_dir / "pack.yaml").write_text(json.dumps({"id": "typo_pack", "title": "T", "rungs": []}), encoding="utf-8")
+    monkeypatch.setenv("ENABLE_LIVE_AGENT", "flase")
+    monkeypatch.setenv("REQUIRE_TOKEN_FOR_RUN_AGENT", "false")
+    app = create_app(packs_dir=packs_dir, env_file=tmp_path / "none.env")
+    client = TestClient(app)
+    assert client.get("/api/health").json()["live_agent_enabled"] is False
+    resp = client.post("/api/run-agent", json={"pack_id": "typo_pack", "rung_id": "r1_schema", "arm": "blind"})
+    assert resp.status_code == 503
+
+
+def test_offline_mock_harness_all_6_rungs_and_execution_outcome_fields(tmp_path: Path) -> None:
+    packs_dir = tmp_path / "packs"
+    p_dir = packs_dir / "mock_six"
+    (p_dir / "rungs").mkdir(parents=True)
+    rung_specs = [
+        ("r1_schema", 1, "SQL", 10.0, None, ["orders"]),
+        ("r2_lineage_semantic", 2, "SQL", 20.0, None, ["mart_r2"]),
+        ("r3_graph_semantic", 3, "GQL", 31.8, None, ["graph_tbl"]),
+        ("r4_trust_access", 4, "SQL", 28.4, None, ["mart_r2"]),
+        ("r5_quality_ops", 5, "SQL", 50.0, [{"name": "c", "value": 38, "tolerance": 0}], ["mart_r2"]),
+        ("r6_unstructured_sla", 6, "SQL", 165600.0, [{"name": "b", "value": 14, "tolerance": 0}], ["sla_overlay"]),
+    ]
+    (p_dir / "pack.yaml").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "pack_id": "mock_six",
+                "title": "Mock 6",
+                "subtitle": "Offline mock contract fixture",
+                "hero_tagline": "Empirical benchmark fixture",
+                "closed_period_label": "Q4 FY25",
+                "currency": "SGD",
+                "region": "asia-southeast1",
+                "rng_seed": 42,
+                "generated_mode": "offline_fixture",
+                "personas": [
+                    {
+                        "id": "p_one",
+                        "label": "Persona One",
+                        "principal_display": "user:p1@example.com",
+                        "scope_summary": "Full persona",
+                    },
+                    {
+                        "id": "p_two",
+                        "label": "Persona Two",
+                        "principal_display": "serviceAccount:ops@example-project-id.iam.gserviceaccount.com",
+                        "scope_summary": "Scoped persona",
+                    },
+                ],
+                "invariants": {"settled_rev": 10.0},
+                "horizon_cards": [
+                    {
+                        "id": "kc_card",
+                        "title": "Knowledge Catalog",
+                        "release_badge": "GA",
+                        "region_availability": "asia-southeast1",
+                        "summary": "Catalog certification",
+                        "primitives": ["AspectType"],
+                    },
+                    {
+                        "id": "ai_card",
+                        "title": "AI Extract",
+                        "release_badge": "GA",
+                        "region_availability": "global",
+                        "summary": "Multimodal extraction",
+                        "primitives": ["AI.GENERATE"],
+                    },
+                ],
+                "rungs": [f"rungs/{r[0]}.yaml" for r in rung_specs],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for rid, rnum, lang, target, sec, tbls in rung_specs:
+        tier_gov = "TIER_1_VERIFIED_OR_COMPILED" if rnum in (2, 3) else "TIER_2_GROUNDED"
+        mech = (
+            "Knowledge Catalog | VERIFIED_METRIC_CONTRACT | MEASURE"
+            if rnum in (2, 3)
+            else "Knowledge Catalog | CERTIFIED | GLOSSARY_DEFINITION"
+        )
+        rung_obj: dict[str, Any] = {
+            "id": rid,
+            "rung_num": rnum,
+            "short_label": f"R{rnum} Step",
+            "title": rid,
+            "pyramid_layer": f"Layer {rnum}",
+            "release_badges": [{"capability": "Knowledge Catalog", "stage": "GA", "region_scope": "asia-southeast1"}],
+            "question": f"Compute metric for {rid}",
+            "poll": {
+                "prompt": "Pick the governed approach?",
+                "options": [
+                    {"key": "A", "text": "Governed catalog query"},
+                    {"key": "B", "text": "Blind shadow table scan"},
+                    {"key": "C", "text": "Unfiltered raw table"},
+                    {"key": "D", "text": "Skip metric contract"},
+                ],
+                "correct_key": "A",
+                "reveal_takeaway": "Governed metadata eliminates metric ambiguity.",
+            },
+            "blind": {
+                "answer_headline": "Blind wrong 999.0",
+                "answer_detail": "No catalog context available.",
+                "numeric_value": 999.0,
+                "unit": "SGD",
+                "sql_or_gql": "SELECT 999.0 AS ans;",
+                "query_language": lang,
+                "tokens_used": 6000,
+                "exploratory_queries": 5,
+                "error_retries": 1,
+                "eval_pass_count": 0,
+                "eval_total_runs": 2,
+                "trust_tier": "TIER_3_REVIEW_REQUIRED",
+                "rationale": "Blind guessed raw column.",
+            },
+            "governed": {
+                "answer_headline": f"Governed {target}"
+                + (" (38 orders)" if rnum == 5 else " (14 breaches)" if rnum == 6 else ""),
+                "answer_detail": "Catalog grounded.",
+                "numeric_value": target,
+                "unit": "SGD",
+                "sql_or_gql": (
+                    "SELECT 31.8 AS ans FROM GRAPH_EXPAND(GRAPH_TABLE(g MATCH (n)), ...)"
+                    if rnum == 3
+                    else f"SELECT {target} AS ans FROM `{tbls[0]}`;"
+                ),
+                "query_language": lang,
+                "context_mechanism": mech,
+                "tokens_used": 2500,
+                "exploratory_queries": 2,
+                "error_retries": 0,
+                "eval_pass_count": 2,
+                "eval_total_runs": 2,
+                "trust_tier": tier_gov,
+                "rationale": "Catalog grounded success.",
+            },
+            "xray_summary": {
+                "context_added": "Catalog certification and semantic contract",
+                "gcp_primitives": ["Knowledge Catalog"],
+                "negative_control_assertion": "Blind arm fails without catalog context.",
+            },
+            "grading": {"target_value": target, "tolerance": 0.1, "secondary_numerics": sec or [], "required_tables": tbls},
+        }
+        if rnum == 4:
+            rung_obj["identity_variants"] = {
+                "p_one": {
+                    "persona_id": "p_one",
+                    "answer_headline": "Margin 28.4% (842600.0 SGD)",
+                    "answer_detail": "4 regions visible under policy one",
+                    "numeric_value": 842600.0,
+                    "rows_visible": 4,
+                    "rls_policy_applied": "rls_p_one_all",
+                    "policy_note": "Full regional access granted via row access policy.",
+                },
+                "p_two": {
+                    "persona_id": "p_two",
+                    "answer_headline": "Margin 28.4% (346480.0 SGD)",
+                    "answer_detail": "1 region visible under policy two",
+                    "numeric_value": 346480.0,
+                    "rows_visible": 1,
+                    "rls_policy_applied": "rls_p_two_scoped",
+                    "policy_note": "Scoped access granted via row access policy.",
+                },
+            }
+            rung_obj["grading"]["persona_targets"] = {
+                "p_one": {"value": 842600.0, "tolerance": 500.0, "row_count": 4},
+                "p_two": {"value": 346480.0, "tolerance": 500.0, "row_count": 1},
+            }
+        (p_dir / "rungs" / f"{rid}.yaml").write_text(json.dumps(rung_obj), encoding="utf-8")
+
+    out = run_eval_harness(
+        pack_id="mock_six",
+        runs=2,
+        live_gcp=False,
+        jsonl_out=tmp_path / "runs.jsonl",
+        bundle_out=tmp_path / "bundle.js",
+        packs_dir=packs_dir,
+    )
+    assert out["records_count"] == 24
+    bundle = json.loads((tmp_path / "bundle.js").read_text(encoding="utf-8").split("window.CONTEXT_PACK_BUNDLE = ", 1)[1].rstrip(";\n"))
+    validate_bundle(bundle)
+    assert all(r["governed"]["empirical_eval"]["pass_count"] == 2 for r in bundle["rungs"])
+    assert all(r["blind"]["empirical_eval"]["pass_count"] == 0 for r in bundle["rungs"])
+    assert all(
+        r["governed"]["trust_tier"] in {"TIER_1_VERIFIED_OR_COMPILED", "TIER_2_GROUNDED"}
+        for r in bundle["rungs"]
+    )

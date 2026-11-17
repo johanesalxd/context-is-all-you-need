@@ -567,6 +567,49 @@ def _poll_entry_exists(rest: _RestClient, *, project_id: str, bq_location: str, 
         time.sleep(3.0)
 
 
+def _iter_term_column_links(term: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Normalizes glossary term linked_columns (list) or legacy single linked_table/linked_column."""
+    t_id = str(term.get("term_id") or "").strip()
+    links: list[dict[str, str]] = []
+    for raw in term.get("linked_columns") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        tbl = str(raw.get("table") or "").strip()
+        col = str(raw.get("column") or "").strip()
+        if not tbl or not col:
+            continue
+        ltype = str(raw.get("link_type") or "definition").strip() or "definition"
+        lid = str(raw.get("entry_link_id") or f"{tbl}-{col}-{t_id}").strip()
+        links.append({"table": tbl, "column": col, "link_type": ltype, "entry_link_id": lid})
+    if not links and term.get("linked_table") and term.get("linked_column"):
+        tbl = str(term["linked_table"]).strip()
+        col = str(term["linked_column"]).strip()
+        lid = str(term.get("entry_link_id") or f"{tbl}-{col}-{t_id}").strip()
+        links.append({"table": tbl, "column": col, "link_type": "definition", "entry_link_id": lid})
+    return links
+
+
+def _translate_dq_rules(raw_rules: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Translates simplified YAML DQ rules into Dataplex v1 DataQualityRule JSON payloads."""
+    translated: list[dict[str, Any]] = []
+    for raw in raw_rules:
+        if not isinstance(raw, Mapping):
+            continue
+        rule: dict[str, Any] = {}
+        for k in ("name", "column", "dimension", "description", "ignoreNull", "threshold", "suspended"):
+            if k in raw:
+                rule[k] = raw[k]
+        if "set_values" in raw and "setExpectation" not in raw:
+            rule["setExpectation"] = {"values": [str(v) for v in (raw.get("set_values") or [])]}
+        if raw.get("non_null") is True and "nonNullExpectation" not in raw:
+            rule["nonNullExpectation"] = {}
+        for k, v in raw.items():
+            if k.endswith("Expectation") and k not in rule:
+                rule[k] = v
+        translated.append(rule)
+    return translated
+
+
 def _create_or_update_entry_link(
     rest: _RestClient,
     *,
@@ -576,16 +619,17 @@ def _create_or_update_entry_link(
     bq_entry_name: str,
     linked_column: str,
     term_entry_name: str,
+    link_type_slug: str = "definition",
 ) -> None:
     parent = f"projects/{project_id}/locations/{bq_location}/entryGroups/@bigquery"
     url = f"{_DATAPLEX_BASE}/{parent}/entryLinks?entryLinkId={quote(entry_link_id)}"
-    link_type = "projects/dataplex-types/locations/global/entryLinkTypes/definition"
+    link_type = f"projects/dataplex-types/locations/global/entryLinkTypes/{link_type_slug}"
 
     primary_body = {
         "entryLinkType": link_type,
         "entryReferences": [
-            {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "SOURCE"},
-            {"name": term_entry_name, "type": "TARGET"},
+            {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "TARGET"},
+            {"name": term_entry_name, "type": "SOURCE"},
         ],
     }
     status, resp = rest.request("POST", url, payload=primary_body, allow_statuses=(200, 201, 400, 409))
@@ -593,8 +637,8 @@ def _create_or_update_entry_link(
         swapped_body = {
             "entryLinkType": link_type,
             "entryReferences": [
-                {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "TARGET"},
-                {"name": term_entry_name, "type": "SOURCE"},
+                {"name": bq_entry_name, "path": f"Schema.{linked_column}", "type": "SOURCE"},
+                {"name": term_entry_name, "type": "TARGET"},
             ],
         }
         status2, resp2 = rest.request("POST", url, payload=swapped_body, allow_statuses=(200, 201, 409))
@@ -833,7 +877,9 @@ def run_provision(
             else:
                 rest.wait_lro(t_resp)
 
-            if term.get("linked_table") and term.get("linked_column"):
+            for link_spec in _iter_term_column_links(term):
+                linked_tbl = link_spec["table"]
+                linked_col = link_spec["column"]
                 term_entry = (
                     f"projects/{project_id}/locations/{bq_location}/entryGroups/@dataplex/entries/"
                     f"projects/{proj_num}/locations/{bq_location}/glossaries/{g_id}/terms/{t_id}"
@@ -841,18 +887,18 @@ def run_provision(
                 _poll_entry_exists(rest, project_id=project_id, bq_location=bq_location, entry_name=term_entry)
                 bq_entry = (
                     f"projects/{project_id}/locations/{bq_location}/entryGroups/@bigquery/entries/"
-                    f"bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{term['linked_table']}"
+                    f"bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{linked_tbl}"
                 )
                 _poll_entry_exists(rest, project_id=project_id, bq_location=bq_location, entry_name=bq_entry)
-                link_id = str(term.get("entry_link_id") or f"{term['linked_table']}-{term['linked_column']}-{t_id}")
                 _create_or_update_entry_link(
                     rest,
                     project_id=project_id,
                     bq_location=bq_location,
-                    entry_link_id=link_id,
+                    entry_link_id=link_spec["entry_link_id"],
                     bq_entry_name=bq_entry,
-                    linked_column=str(term["linked_column"]),
+                    linked_column=linked_col,
                     term_entry_name=term_entry,
+                    link_type_slug=link_spec["link_type"],
                 )
 
     # Step (e): Custom AspectType + Entry Aspects + Auto Data Quality DataScan.
@@ -879,8 +925,8 @@ def run_provision(
 
         aspect_key = f"{proj_num}.{bq_location}.{at_id}"
         aspect_type_ref = f"projects/{project_id}/locations/{bq_location}/aspectTypes/{at_id}"
-        for attach in aspect_spec.get("attachments") or []:
-            tbl_id = str(attach["table_id"])
+        for attach in (aspect_spec.get("assignments") or aspect_spec.get("attachments") or []):
+            tbl_id = str(attach.get("table") or attach["table_id"])
             entry_name = (
                 f"projects/{project_id}/locations/{bq_location}/entryGroups/@bigquery/entries/"
                 f"bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{tbl_id}"
@@ -898,7 +944,7 @@ def run_provision(
             )
 
     for scan_spec in plan.get("data_quality_scans") or []:
-        scan_id = str(scan_spec["data_scan_id"])
+        scan_id = str(scan_spec.get("scan_id") or scan_spec["data_scan_id"])
         target_tbl = str(scan_spec["target_table"])
         scan_body = {
             "displayName": str(scan_spec.get("display_name") or scan_id),
@@ -910,7 +956,7 @@ def run_provision(
             "dataQualitySpec": {
                 "samplingPercent": float(scan_spec.get("sampling_percent") or 100.0),
                 "catalogPublishingEnabled": bool(scan_spec.get("catalog_publishing_enabled", True)),
-                "rules": list(scan_spec.get("rules") or []),
+                "rules": _translate_dq_rules(scan_spec.get("rules") or []),
             },
         }
         ds_create_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans?dataScanId={quote(scan_id)}"
@@ -965,8 +1011,14 @@ def run_provision(
             bucket.patch()
 
         base_packs = Path(packs_dir) if packs_dir else (root / "packs")
-        source_dir = base_packs / plan["pack_id"] / str(unstructured.get("source_dir") or "contracts")
-        for md_file in sorted(source_dir.glob("*.md")):
+        pack_dir = base_packs / plan["pack_id"]
+        listed_files = [str(f).strip() for f in (unstructured.get("files") or []) if str(f).strip()]
+        if listed_files:
+            upload_paths = [pack_dir / rel_f for rel_f in listed_files]
+        else:
+            source_dir = pack_dir / str(unstructured.get("source_dir") or "contracts")
+            upload_paths = sorted(source_dir.glob("*.md"))
+        for md_file in upload_paths:
             blob = bucket.blob(md_file.name)
             blob.upload_from_filename(str(md_file), content_type="text/plain")
 
@@ -998,54 +1050,76 @@ def run_provision(
         )
         bq.query(ext_ddl, location=bq_location).result()
 
-        extracted_tbl = str(unstructured.get("target_table") or "sla_overlay_extracted")
+        extracted_tbl = str(
+            unstructured.get("extraction_staging_table")
+            or unstructured.get("target_table")
+            or "sla_overlay_extracted"
+        )
         target_pattern = str(unstructured.get("target_file_pattern") or "Amendment_2.md")
         vendor_filter = str(unstructured.get("target_vendor_filter") or "")
-        model_endpoint = (
-            f"https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/{plan['model_location']}"
-            f"/publishers/google/models/{plan['model_id']}"
-        )
         prompt_text = str(
-            unstructured.get("extraction_prompt")
+            unstructured.get("ai_generate_prompt")
+            or unstructured.get("extraction_prompt")
             or "Extract structured SLA amendment parameters from this contract document as exact numeric values."
         ).replace("'", "\\'")
-        output_schema = str(
-            unstructured.get("output_schema")
-            or "vendor STRING, temp_threshold_c FLOAT64, duration_threshold_min INT64, credit_rate FLOAT64, quarterly_cap_sgd FLOAT64"
+        default_schema = (
+            "overlay_id STRING, vendor_name STRING, sku_class STRING, effective_quarter STRING, "
+            "source_document STRING, temp_threshold_c FLOAT64, duration_threshold_min INT64, "
+            "credit_rate FLOAT64, quarterly_cap_sgd FLOAT64"
         )
+        output_schema = str(unstructured.get("output_schema") or default_schema)
         vendor_expr = f"'{vendor_filter}'" if vendor_filter else "REGEXP_EXTRACT(uri, r'/([^/]+)\\.md$')"
-        ai_sql = (
-            f"CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.{extracted_tbl}` AS\n"
-            f"WITH generated AS (\n"
-            f"  SELECT\n"
-            f"    uri,\n"
-            f"    AI.GENERATE(\n"
-            f"      ('{prompt_text}', OBJ.GET_ACCESS_URL(ref, 'r')),\n"
-            f"      connection_id => '{bq_location}.{conn_id}',\n"
-            f"      endpoint => '{model_endpoint}',\n"
-            f"      output_schema => '{output_schema}'\n"
-            f"    ) AS res\n"
-            f"  FROM `{project_id}.{dataset_id}.{obj_tbl}`\n"
-            f"  WHERE uri LIKE '%{target_pattern}%'\n"
-            f")\n"
-            f"SELECT\n"
-            f"  COALESCE(res.vendor, {vendor_expr}) AS vendor,\n"
-            f"  res.temp_threshold_c,\n"
-            f"  res.duration_threshold_min,\n"
-            f"  res.credit_rate,\n"
-            f"  res.quarterly_cap_sgd,\n"
-            f"  uri AS source_uri,\n"
-            f"  res.status AS extraction_status\n"
-            f"FROM generated;"
-        )
 
-        # Retry briefly if BigQuery connection IAM binding takes a few seconds to propagate.
+        def _build_ai_sql(target_model_id: str) -> str:
+            model_endpoint = (
+                f"https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/{plan['model_location']}"
+                f"/publishers/google/models/{target_model_id}"
+            )
+            return (
+                f"CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.{extracted_tbl}` AS\n"
+                f"WITH generated AS (\n"
+                f"  SELECT\n"
+                f"    uri,\n"
+                f"    AI.GENERATE(\n"
+                f"      ('{prompt_text}', OBJ.GET_ACCESS_URL(ref, 'r')),\n"
+                f"      connection_id => '{bq_location}.{conn_id}',\n"
+                f"      endpoint => '{model_endpoint}',\n"
+                f"      output_schema => '{output_schema}'\n"
+                f"    ) AS res\n"
+                f"  FROM `{project_id}.{dataset_id}.{obj_tbl}`\n"
+                f"  WHERE uri LIKE '%{target_pattern}%'\n"
+                f")\n"
+                f"SELECT\n"
+                f"  res.overlay_id,\n"
+                f"  COALESCE(res.vendor_name, {vendor_expr}) AS vendor_name,\n"
+                f"  res.sku_class,\n"
+                f"  res.effective_quarter,\n"
+                f"  res.source_document,\n"
+                f"  res.temp_threshold_c,\n"
+                f"  res.duration_threshold_min,\n"
+                f"  res.credit_rate,\n"
+                f"  res.quarterly_cap_sgd,\n"
+                f"  uri AS source_uri,\n"
+                f"  res.status AS extraction_status\n"
+                f"FROM generated;"
+            )
+
+        active_model_id = str(plan["model_id"])
+        fallback_model_id = "gemini-3.5-flash"
+        # Retry briefly for IAM propagation AND fall back on 404/not-found to gemini-3.5-flash.
         for attempt in range(6):
             try:
-                bq.query(ai_sql, location=bq_location).result()
+                bq.query(_build_ai_sql(active_model_id), location=bq_location).result()
                 break
             except Exception as err:
                 msg = str(err).lower()
+                unavailable = any(
+                    tok in msg
+                    for tok in ("404", "not_found", "not found", "unavailable", "does not have access to")
+                )
+                if unavailable and active_model_id != fallback_model_id:
+                    active_model_id = fallback_model_id
+                    continue
                 transient = any(tok in msg for tok in ("access denied", "permission", "403", "does not have", "iam"))
                 if attempt < 5 and transient:
                     time.sleep(10.0)
@@ -1066,7 +1140,17 @@ def run_provision(
             row = ext_rows[0]
             for k, expected_v in invariants.items():
                 actual_v = row.get(k) if hasattr(row, "get") else row[k]
-                if actual_v is None or abs(float(actual_v) - float(expected_v)) > 1e-4:
+                if isinstance(expected_v, str):
+                    if actual_v is None or str(actual_v).strip().lower() != expected_v.strip().lower():
+                        raise RuntimeError(
+                            f"AI.GENERATE invariant mismatch on {extracted_tbl}.{k}: expected {expected_v!r}, got {actual_v!r}"
+                        )
+                elif isinstance(expected_v, bool):
+                    if bool(actual_v) is not expected_v:
+                        raise RuntimeError(
+                            f"AI.GENERATE invariant mismatch on {extracted_tbl}.{k}: expected {expected_v}, got {actual_v}"
+                        )
+                elif actual_v is None or abs(float(actual_v) - float(expected_v)) > 1e-4:
                     raise RuntimeError(
                         f"AI.GENERATE invariant mismatch on {extracted_tbl}.{k}: expected {expected_v}, got {actual_v}"
                     )
@@ -1111,8 +1195,8 @@ def run_teardown(
     if g_id:
         for term in glossary.get("terms") or []:
             t_id = str(term["term_id"])
-            if term.get("linked_table") and term.get("linked_column"):
-                link_id = str(term.get("entry_link_id") or f"{term['linked_table']}-{term['linked_column']}-{t_id}")
+            for link_spec in _iter_term_column_links(term):
+                link_id = link_spec["entry_link_id"]
                 link_url = (
                     f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}"
                     f"/entryGroups/@bigquery/entryLinks/{quote(link_id)}"
@@ -1136,7 +1220,7 @@ def run_teardown(
 
     # 2. DataScans
     for scan in plan.get("data_quality_scans") or []:
-        scan_id = str(scan["data_scan_id"])
+        scan_id = str(scan.get("scan_id") or scan["data_scan_id"])
         ds_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{scan_id}?force=true"
         st, resp = rest.request("DELETE", ds_url, allow_statuses=(200, 202, 204, 404))
         if st != 404 and isinstance(resp, dict):
@@ -1154,9 +1238,11 @@ def run_teardown(
 
     # 4. Object Table / Extracted SLA Overlay -> BigQuery Connection
     unstructured = dict(plan.get("unstructured_contracts") or {})
-    for tbl_key in ("target_table", "object_table"):
+    seen_del_tbls: set[str] = set()
+    for tbl_key in ("extraction_staging_table", "target_table", "object_table"):
         tbl_name = str(unstructured.get(tbl_key) or "").strip()
-        if tbl_name:
+        if tbl_name and tbl_name not in seen_del_tbls:
+            seen_del_tbls.add(tbl_name)
             bq.delete_table(f"{project_id}.{dataset_id}.{tbl_name}", not_found_ok=True)
             deleted_steps.append(f"table:{dataset_id}.{tbl_name}")
 
@@ -1253,7 +1339,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         result = run_provision(plan)
 
-    print(json.dumps(redact_bundle_data(result, live_project_id=plan["project_id"]), indent=2))
+    extra_scrub = [t for t in (plan["project_id"], os.environ.get("PROJECT_NUMBER", "")) if t]
+    print(json.dumps(redact_bundle_data(result, extra_tokens=extra_scrub, live_project_id=plan["project_id"]), indent=2))
     return 0
 
 

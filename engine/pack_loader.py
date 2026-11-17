@@ -111,8 +111,13 @@ def _env_or_default(key: str, example_defaults: Mapping[str, str], fallback: str
     return fallback
 
 
-def parse_bool_flag(raw: str | None, *, default: bool) -> bool:
-    """Parses environment boolean strings safely."""
+def parse_bool_flag(
+    raw: str | None,
+    *,
+    default: bool,
+    on_invalid: bool | None = None,
+) -> bool:
+    """Parses environment boolean strings safely, supporting fail-closed on_invalid."""
     if raw is None or not raw.strip():
         return default
     cleaned = raw.strip().lower()
@@ -120,7 +125,7 @@ def parse_bool_flag(raw: str | None, *, default: bool) -> bool:
         return True
     if cleaned in {"0", "false", "no", "off"}:
         return False
-    return default
+    return default if on_invalid is None else on_invalid
 
 
 def resolve_phase2_settings(

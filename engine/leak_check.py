@@ -55,6 +55,7 @@ _STRUCTURAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("google_email", re.compile(r"@(?:[a-z0-9-]+\.)*[g]oogle\.com\b", re.IGNORECASE)),
     ("altostrat_email", re.compile(r"@(?:[a-z0-9-]+\.)*[a]ltostrat\.com\b", re.IGNORECASE)),
     ("gcp_6digit_project_id", re.compile(r"\b[a-z][a-z0-9-]{3,23}-[0-9]{6}\b")),
+    ("gcp_project_number_path", re.compile(r"projects/[0-9]{6,}\b")),
 )
 
 _SA_EMAIL_PATTERN = re.compile(

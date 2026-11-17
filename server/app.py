@@ -167,7 +167,7 @@ def create_app(
 
     def _enforce_access_and_rate_limit(http_req: Request) -> None:
         settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=env_file)
-        req_token = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_RUN_RUNG"), default=False)
+        req_token = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_RUN_RUNG"), default=False, on_invalid=True)
         _verify_share_token(http_req, require_token=req_token, fail_closed_on_missing=True)
         _check_rate_limit(http_req)
 
@@ -176,9 +176,9 @@ def create_app(
         settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=env_file)
         live_pid = settings["PROJECT_ID"]
         token_configured = bool(_resolve_share_token())
-        req_run_rung = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_RUN_RUNG"), default=False)
-        req_live_agent = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_LIVE_AGENT"), default=True)
-        live_agent_enabled = parse_bool_flag(settings.get("ENABLE_LIVE_AGENT"), default=True)
+        req_run_rung = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_RUN_RUNG"), default=False, on_invalid=True)
+        req_live_agent = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_LIVE_AGENT"), default=True, on_invalid=True)
+        live_agent_enabled = parse_bool_flag(settings.get("ENABLE_LIVE_AGENT"), default=True, on_invalid=False)
         return {
             "status": "ok",
             "packs": discover_packs(resolved_packs_dir),
@@ -455,10 +455,10 @@ def create_app(
     @application.post("/api/run-agent")
     def run_agent(req: RunAgentRequest, http_req: Request) -> dict[str, Any]:
         settings = resolve_phase2_settings(DEFAULT_REPO_ROOT, env_file=env_file)
-        if not parse_bool_flag(settings.get("ENABLE_LIVE_AGENT"), default=True):
+        if not parse_bool_flag(settings.get("ENABLE_LIVE_AGENT"), default=True, on_invalid=False):
             raise HTTPException(status_code=503, detail="Live agent endpoint is disabled (ENABLE_LIVE_AGENT=false).")
 
-        req_live_token = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_LIVE_AGENT"), default=True)
+        req_live_token = parse_bool_flag(settings.get("REQUIRE_TOKEN_FOR_LIVE_AGENT"), default=True, on_invalid=True)
         _verify_share_token(http_req, require_token=req_live_token, fail_closed_on_missing=True)
         _check_rate_limit(http_req)
 
@@ -540,9 +540,10 @@ def create_app(
             raise
         except Exception as exc:
             status_code = 403 if getattr(exc, "code", None) == 403 else 500
+            extra_scrub = [t for t in (live_project_id, os.environ.get("PROJECT_NUMBER", "")) if t]
             safe_err = redact_sensitive_identifiers(
                 str(exc),
-                extra_tokens=[live_project_id],
+                extra_tokens=extra_scrub,
                 live_project_id=live_project_id,
             )
             raise HTTPException(
@@ -552,6 +553,7 @@ def create_app(
         finally:
             agent_semaphore.release()
 
+        extra_scrub = [t for t in (live_project_id, os.environ.get("PROJECT_NUMBER", "")) if t]
         return redact_bundle_data(
             {
                 "pack_id": req.pack_id,
@@ -562,7 +564,7 @@ def create_app(
                 "bq_location": bq_location,
                 "arms": arms_output,
             },
-            extra_tokens=[live_project_id],
+            extra_tokens=extra_scrub,
             live_project_id=live_project_id,
         )
 
