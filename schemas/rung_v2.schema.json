@@ -429,6 +429,11 @@
             "reveal_takeaway": {
               "type": "string",
               "minLength": 5
+            },
+            "external_poll_url": {
+              "type": "string",
+              "pattern": "^https://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]+$",
+              "maxLength": 512
             }
           }
         },

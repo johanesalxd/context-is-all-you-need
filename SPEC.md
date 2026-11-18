@@ -175,3 +175,23 @@ To ensure a real Blind LLM agent faces authentic enterprise ambiguity without ri
 | **`gcp-context-engine`** | `engine/**`, `server/**`, `scripts/provision_context_layer.py`, `scripts/deploy_cloud_run.sh`, `scripts/teardown_pack.sh`, `tests/test_schema_and_trust.py`, `tests/test_cloud_run_wiring.py`, `tests/test_live_agent_and_eval.py`, `tests/test_zero_leak.py` |
 | **`stage-workbench-v2`** | `web/index.html`, `web/css/**`, `web/js/**`, `README.md`, `tests/test_web_bundle_contract.py` |
 | **`cloud-runner` (Post-Approval)** | Merges approved SHAs onto `main`, runs `provision_context_layer.py --live-gcp`, executes `eval_harness.py --runs 5 --live-gcp` -> `results/live_eval_runs.jsonl` + `web/data/rungs_bundle.js`, redeploys Cloud Run, and captures `1600x1000` headless Chrome QA screenshots. |
+
+---
+
+## 9. Milestone 5 — In-App QR Audience Poll (`/vote`) & Stage `[P]` Live Integration
+
+1. **Multi-Instance Poll Store (`engine/poll_store.py`):**
+   - `FirestorePollStore(project_id, database_id)` targeting a named Firestore Native database (`FIRESTORE_DATABASE_ID`, default `<prefix>-polls` -> `meridian-polls` in `asia-southeast1`, `"example-polls"` in `.env.example`), with `InMemoryPollStore` fallback strictly for local/offline mode (`PROJECT_ID="example-project-id"` or `FIRESTORE_DATABASE_ID` empty/`"none"`).
+   - Zero-PII voter ballot IDs (`e{epoch}_{sha256(pack_id:rung_id:e{epoch}:voter_token)[:32]}`), idempotent `A -> B` vote switching, `MAX_VOTERS_PER_EPOCH = 300` cap for net-new voters, `1.0s` TTL read cache, and transactional `epoch` increment on `reset_poll`.
+   - Offline SVG QR code generation via `segno` (`render_poll_qr_svg(vote_url)`).
+2. **Server Routes & Security Boundaries (`server/app.py`):**
+   - `GET /vote` (`GET /vote/`, `GET /vote.html`) serving `web/vote.html` (`Cache-Control: no-cache`).
+   - `GET /api/poll/state` (**zero-spoiler invariant:** strictly omits `correct_key` and `reveal_takeaway` so audience voters never see answers before Stage reveal, while static Stage bundle `web/data/rungs_bundle.js` retains presenter reveal data for offline `file://` Stage Mode; `POLL_READ_RPM_LIMIT=3000/min` per IP).
+   - `POST /api/poll/vote` (shared hotel-NAT IP limit `POLL_VOTE_RPM_LIMIT=240/min` + `15/min` per hashed `voter_token` capped at `2000` tracked entries).
+   - `POST /api/poll/reset` and `POST /api/poll/sync-stage` strictly gated by `DEMO_SHARE_TOKEN` (`X-Demo-Key`, fail-closed `401`/`503`).
+   - `GET /api/poll/qr.svg` generating QR strictly for server-derived `{origin}/vote?pack=...&rung=...` from validated `pack_id`/`rung_id` and `PUBLIC_BASE_URL` or validated `Host` header (never raw URL params).
+3. **Stage `[P]` Modal & Mobile `/vote` UI (`web/`):**
+   - Stage `[P]` modal renders a 2-column QR + live animated vote-bar view with `2000ms` visibility-aware diff-guarded polling, presenter stage-sync, `Clear Room Votes`, and optional `poll.external_poll_url` (`schemas/rung_v2.schema.json`).
+   - `/vote` (`web/vote.html`, `web/js/vote.js`) provides a zero-CDN, dark-default executive voting UI with `>=56px` touch targets, R1–R6 switcher, `"Live on Stage"` jump banner, and `3000ms` live refresh.
+4. **Cloud Run Provisioning & Teardown (`scripts/deploy_cloud_run.sh`, `scripts/teardown_pack.sh`):**
+   - Enables `firestore.googleapis.com`, provisions `${FIRESTORE_DATABASE_ID}` (`firestore-native` in `${BQ_LOCATION}`), grants `roles/datastore.user` strictly to `<prefix>-web-runner` (never to blind/governed agent SAs), and supports `--delete-poll-db` teardown.

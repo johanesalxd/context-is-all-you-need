@@ -134,13 +134,24 @@ def resolve_phase2_settings(
     env_file: Path | None = None,
     pack_id: str | None = None,
 ) -> dict[str, str]:
-    """Resolves Phase 1 + Phase 2 live Knowledge Catalog & Agent settings."""
+    """Resolves Phase 1 + Phase 2 + Milestone 5 live Knowledge Catalog, Agent, and Poll settings."""
     root = repo_root or DEFAULT_REPO_ROOT
     base = resolve_env_settings(root, env_file=env_file)
     example_defaults = parse_env_file(root / ".env.example")
     resolved_pack = pack_id or base["PACK_ID"]
     prefix = resolved_pack.split("_")[0] if resolved_pack else "example"
     default_blind_ds = f"{prefix}_blind" if prefix else "example_blind"
+    default_poll_db = f"{prefix}-polls" if prefix else "example-polls"
+
+    raw_db_env = os.environ.get("FIRESTORE_DATABASE_ID")
+    if raw_db_env is not None:
+        firestore_db_id = raw_db_env.strip()
+    else:
+        ex_db = (example_defaults.get("FIRESTORE_DATABASE_ID") or "").strip()
+        if ex_db and ex_db != "example-polls":
+            firestore_db_id = ex_db
+        else:
+            firestore_db_id = default_poll_db
 
     return {
         **base,
@@ -153,6 +164,11 @@ def resolve_phase2_settings(
         "REQUIRE_TOKEN_FOR_RUN_RUNG": _env_or_default("REQUIRE_TOKEN_FOR_RUN_RUNG", example_defaults, "false"),
         "DAILY_AGENT_CALL_LIMIT": _env_or_default("DAILY_AGENT_CALL_LIMIT", example_defaults, "200"),
         "EVAL_RUNS": _env_or_default("EVAL_RUNS", example_defaults, "5"),
+        "FIRESTORE_DATABASE_ID": firestore_db_id,
+        "ENABLE_LIVE_POLL": _env_or_default("ENABLE_LIVE_POLL", example_defaults, "true"),
+        "POLL_READ_RPM_LIMIT": _env_or_default("POLL_READ_RPM_LIMIT", example_defaults, "3000"),
+        "POLL_VOTE_RPM_LIMIT": _env_or_default("POLL_VOTE_RPM_LIMIT", example_defaults, "240"),
+        "PUBLIC_BASE_URL": _env_or_default("PUBLIC_BASE_URL", example_defaults, ""),
     }
 
 

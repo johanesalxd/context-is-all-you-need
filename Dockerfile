@@ -16,10 +16,12 @@ RUN pip install --no-cache-dir \
     "google-cloud-bigquery>=3.26.0" \
     "google-cloud-bigquery-connection>=1.15.0" \
     "google-cloud-dataplex>=2.6.0" \
+    "google-cloud-firestore>=2.34.1" \
     "google-cloud-storage>=2.18.0" \
     "google-genai>=1.0.0" \
     "jsonschema>=4.23.0" \
     "pyyaml>=6.0.2" \
+    "segno>=1.6.6" \
     "uvicorn>=0.32.0"
 
 COPY schemas ./schemas

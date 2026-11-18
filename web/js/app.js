@@ -416,6 +416,14 @@
       pollOpen: false,
       pollSelectedKey: null,
       pollRevealed: false,
+      pollLiveCounts: { A: 0, B: 0, C: 0, D: 0 },
+      pollLiveTotal: 0,
+      pollLiveEpoch: 1,
+      pollLiveOnline: false,
+      pollResetBusy: false,
+      pollResetConfirmPending: false,
+      pendingPollReset: false,
+      pollStatusMsg: null,
       stageXrayOpen: false,
       liveTargetMode: "governed",
       liveLoading: false,
@@ -433,6 +441,152 @@
       pendingAgentAction: false,
       copiedPane: null
     };
+
+    let pollIntervalId = null;
+    let pollResetConfirmTimerId = null;
+
+    function cancelPollResetConfirm() {
+      if (pollResetConfirmTimerId !== null) {
+        window.clearTimeout(pollResetConfirmTimerId);
+        pollResetConfirmTimerId = null;
+      }
+      state.pollResetConfirmPending = false;
+    }
+
+    function stopPollTimer() {
+      if (pollIntervalId !== null) {
+        window.clearInterval(pollIntervalId);
+        pollIntervalId = null;
+      }
+    }
+
+    function patchPollModalInPlace(rungId, counts, totalVotes) {
+      const modal = document.querySelector(`[data-poll-modal-rung="${rungId}"]`);
+      if (!modal) {
+        return false;
+      }
+      const badge = modal.querySelector("#poll-live-count-badge");
+      if (badge) {
+        badge.textContent = `${totalVotes} room votes`;
+      }
+      const optButtons = modal.querySelectorAll("[data-poll-key]");
+      for (const btn of optButtons) {
+        const key = btn.getAttribute("data-poll-key");
+        if (!key) {
+          continue;
+        }
+        const optCount = Number(counts[key] || 0);
+        const pct = totalVotes > 0 ? Math.round((optCount / totalVotes) * 100) : 0;
+        const bar = btn.querySelector(".poll-option-bar");
+        if (bar) {
+          bar.style.width = `${pct}%`;
+        }
+        const stat = btn.querySelector(".poll-option-stat");
+        if (stat) {
+          if (totalVotes > 0) {
+            stat.textContent = `${optCount} · ${pct}%`;
+            stat.removeAttribute("hidden");
+          } else {
+            stat.textContent = "";
+            stat.setAttribute("hidden", "hidden");
+          }
+        }
+      }
+      return true;
+    }
+
+    async function fetchPollState() {
+      if (window.location.protocol === "file:" || !state.pollOpen || state.isHorizon || state.authDialogOpen) {
+        return;
+      }
+      const rung = activeRung();
+      const url = `/api/poll/state?pack_id=${encodeURIComponent(bundle.pack_id)}&rung_id=${encodeURIComponent(rung.id)}`;
+      try {
+        const res = await fetch(url, { method: "GET", cache: "no-store" });
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json().catch(() => null);
+        if (!data || typeof data !== "object") {
+          return;
+        }
+        if (!state.pollOpen || state.isHorizon || state.authDialogOpen || activeRung().id !== rung.id) {
+          return;
+        }
+        const rawCounts = data.counts && typeof data.counts === "object" ? data.counts : {};
+        const nextCounts = {
+          A: Number(rawCounts.A || 0),
+          B: Number(rawCounts.B || 0),
+          C: Number(rawCounts.C || 0),
+          D: Number(rawCounts.D || 0)
+        };
+        const nextTotal = Number(data.total_votes || 0);
+        const nextEpoch = Number(data.epoch || 1);
+        const countsChanged =
+          nextCounts.A !== state.pollLiveCounts.A ||
+          nextCounts.B !== state.pollLiveCounts.B ||
+          nextCounts.C !== state.pollLiveCounts.C ||
+          nextCounts.D !== state.pollLiveCounts.D;
+        if (
+          !state.pollLiveOnline ||
+          countsChanged ||
+          nextTotal !== state.pollLiveTotal ||
+          nextEpoch !== state.pollLiveEpoch
+        ) {
+          state.pollLiveOnline = true;
+          state.pollLiveCounts = nextCounts;
+          state.pollLiveTotal = nextTotal;
+          state.pollLiveEpoch = nextEpoch;
+          if (!patchPollModalInPlace(rung.id, nextCounts, nextTotal)) {
+            render();
+          }
+        }
+      } catch (_err) {
+        // Keep current counts silently if network temporarily drops.
+      }
+    }
+
+    function syncStageIfAuthorized() {
+      if (window.location.protocol === "file:" || state.isHorizon) {
+        return;
+      }
+      const savedKey = getSavedDemoKey();
+      if (!savedKey) {
+        return;
+      }
+      const rung = activeRung();
+      fetch("/api/poll/sync-stage", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Demo-Key": savedKey
+        },
+        body: JSON.stringify({
+          pack_id: bundle.pack_id,
+          rung_id: rung.id
+        })
+      }).catch(() => {});
+    }
+
+    function startPollTimer() {
+      stopPollTimer();
+      if (!state.pollOpen || state.isHorizon || window.location.protocol === "file:") {
+        return;
+      }
+      fetchPollState();
+      syncStageIfAuthorized();
+      pollIntervalId = window.setInterval(() => {
+        if (state.pollOpen && !state.isHorizon && document.visibilityState === "visible") {
+          fetchPollState();
+        }
+      }, 2000);
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && state.pollOpen && !state.isHorizon && window.location.protocol !== "file:") {
+        fetchPollState();
+      }
+    });
 
     function activeRung() {
       return bundle.rungs[state.rungIndex] || bundle.rungs[0];
@@ -496,13 +650,22 @@
         beat: "compare",
         pollSelectedKey: null,
         pollRevealed: false,
+        pollLiveCounts: { A: 0, B: 0, C: 0, D: 0 },
+        pollLiveTotal: 0,
+        pollLiveEpoch: 1,
+        pollLiveOnline: false,
+        pollStatusMsg: null,
         liveResult: null,
         agentError: null,
         agentResult: null
       });
+      if (state.pollOpen) {
+        startPollTimer();
+      }
     }
 
     function selectHorizon() {
+      stopPollTimer();
       setState({
         isHorizon: true,
         pollOpen: false,
@@ -531,6 +694,11 @@
           beat: "question",
           pollSelectedKey: null,
           pollRevealed: false,
+          pollLiveCounts: { A: 0, B: 0, C: 0, D: 0 },
+          pollLiveTotal: 0,
+          pollLiveEpoch: 1,
+          pollLiveOnline: false,
+          pollStatusMsg: null,
           liveResult: null,
           agentError: null,
           agentResult: null
@@ -566,6 +734,11 @@
           beat: "governed",
           pollSelectedKey: null,
           pollRevealed: false,
+          pollLiveCounts: { A: 0, B: 0, C: 0, D: 0 },
+          pollLiveTotal: 0,
+          pollLiveEpoch: 1,
+          pollLiveOnline: false,
+          pollStatusMsg: null,
           liveResult: null,
           agentError: null,
           agentResult: null
@@ -587,6 +760,7 @@
     }
 
     function toggleMode() {
+      stopPollTimer();
       setState({
         mode: state.mode === "stage" ? "workbench" : "stage",
         pollOpen: false,
@@ -602,10 +776,27 @@
 
     function togglePoll() {
       if (state.isHorizon && !state.pollOpen) {
-        setState({ isHorizon: false, pollOpen: true, stageXrayOpen: false });
+        setState({
+          isHorizon: false,
+          pollOpen: true,
+          pollStatusMsg: null,
+          stageXrayOpen: false
+        });
+        startPollTimer();
         return;
       }
-      setState({ pollOpen: !state.pollOpen, stageXrayOpen: false });
+      const nextOpen = !state.pollOpen;
+      if (!nextOpen) {
+        stopPollTimer();
+      }
+      setState({
+        pollOpen: nextOpen,
+        pollStatusMsg: nextOpen ? null : state.pollStatusMsg,
+        stageXrayOpen: false
+      });
+      if (nextOpen) {
+        startPollTimer();
+      }
     }
 
     function toggleStageXray() {
@@ -718,12 +909,13 @@
       }
     }
 
-    function openAuthPrompt(errorMsg, retryAgentAfterSave) {
+    function openAuthPrompt(errorMsg, retryAgentAfterSave, retryPollResetAfterSave) {
       setState({
         authDialogOpen: true,
         authDialogError: errorMsg || null,
         authInputDraft: "",
-        pendingAgentAction: Boolean(retryAgentAfterSave)
+        pendingAgentAction: Boolean(retryAgentAfterSave),
+        pendingPollReset: Boolean(retryPollResetAfterSave)
       });
       window.requestAnimationFrame(() => {
         const input = document.getElementById("demo-key-input");
@@ -731,6 +923,72 @@
           input.focus();
         }
       });
+    }
+
+    async function handleClearRoomVotes() {
+      if (window.location.protocol === "file:" || state.pollResetBusy || state.isHorizon) {
+        return;
+      }
+      const savedKey = getSavedDemoKey();
+      if (!savedKey) {
+        openAuthPrompt("A Demo Share Key (X-Demo-Key) is required to clear room votes.", false, true);
+        return;
+      }
+      const rung = activeRung();
+      setState({
+        pollResetBusy: true,
+        pollStatusMsg: null,
+        authDialogOpen: false,
+        authDialogError: null,
+        pendingPollReset: false
+      });
+
+      try {
+        const response = await fetch("/api/poll/reset", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Demo-Key": savedKey
+          },
+          body: JSON.stringify({
+            pack_id: bundle.pack_id,
+            rung_id: rung.id
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          const detail = extractErrorMessage(data, response.status);
+          setState({ pollResetBusy: false });
+          openAuthPrompt(`Authentication failed (401): ${detail}. Paste a valid X-Demo-Key to clear room votes.`, false, true);
+          return;
+        }
+        if (!response.ok) {
+          setState({
+            pollResetBusy: false,
+            pollStatusMsg: `Clear votes failed (${extractErrorMessage(data, response.status)})`
+          });
+          return;
+        }
+        const rawCounts = data.counts && typeof data.counts === "object" ? data.counts : {};
+        setState({
+          pollResetBusy: false,
+          pollLiveOnline: true,
+          pollLiveCounts: {
+            A: Number(rawCounts.A || 0),
+            B: Number(rawCounts.B || 0),
+            C: Number(rawCounts.C || 0),
+            D: Number(rawCounts.D || 0)
+          },
+          pollLiveTotal: Number(data.total_votes || 0),
+          pollLiveEpoch: Number(data.epoch || 1),
+          pollStatusMsg: `Room votes cleared (Epoch ${Number(data.epoch || 1)}).`
+        });
+      } catch (err) {
+        setState({
+          pollResetBusy: false,
+          pollStatusMsg: `Clear votes unreachable: ${err && err.message ? err.message : "Network error"}`
+        });
+      }
     }
 
     async function handleRunLiveAgent() {
@@ -2010,7 +2268,9 @@
           }),
           el("button", {
             className: "btn btn-primary",
-            text: state.pendingAgentAction ? "Save Key & Run Agent" : "Save Key",
+            text: state.pendingAgentAction
+              ? "Save Key & Run Agent"
+              : (state.pendingPollReset ? "Save Key & Clear Votes" : "Save Key"),
             attrs: { type: "submit" }
           }),
           hasSaved
@@ -2025,7 +2285,8 @@
                     authDialogError: null,
                     authKeyVisible: false,
                     authInputDraft: "",
-                    pendingAgentAction: false
+                    pendingAgentAction: false,
+                    pendingPollReset: false
                   });
                 }
               })
@@ -2039,7 +2300,8 @@
               authDialogError: null,
               authKeyVisible: false,
               authInputDraft: "",
-              pendingAgentAction: false
+              pendingAgentAction: false,
+              pendingPollReset: false
             })
           })
         )
@@ -2053,16 +2315,23 @@
           return;
         }
         saveDemoKey(val);
-        const shouldRetry = state.pendingAgentAction;
+        const shouldRetryAgent = state.pendingAgentAction;
+        const shouldRetryPollReset = state.pendingPollReset;
         setState({
           authDialogOpen: false,
           authDialogError: null,
           authKeyVisible: false,
           authInputDraft: "",
-          pendingAgentAction: false
+          pendingAgentAction: false,
+          pendingPollReset: false
         });
-        if (shouldRetry) {
+        if (shouldRetryAgent) {
           handleRunLiveAgent();
+        } else if (shouldRetryPollReset) {
+          syncStageIfAuthorized();
+          handleClearRoomVotes();
+        } else if (state.pollOpen) {
+          syncStageIfAuthorized();
         }
       });
 
@@ -2177,7 +2446,7 @@
         disabledNote
           ? el("p", { className: "outcome-detail", text: disabledNote })
           : null,
-        buildDemoKeyInlineBar(),
+        !state.pollOpen ? buildDemoKeyInlineBar() : null,
         state.agentLoading
           ? el("div", { className: "live-result-banner is-info", attrs: { role: "status", "aria-live": "polite" } },
               el("span", { text: `Running zero-trust ${state.agentArm} agent loop on ${rung.short_label}${personaId ? " (" + personaId + ")" : ""} via POST /api/run-agent...` })
@@ -2586,6 +2855,23 @@
       }
       const rung = activeRung();
       const poll = rung.poll;
+      const isFileProtocol = window.location.protocol === "file:";
+      const totalVotes = Number(state.pollLiveTotal || 0);
+      const externalPollUrl =
+        poll.external_poll_url && String(poll.external_poll_url).startsWith("https://")
+          ? String(poll.external_poll_url)
+          : null;
+
+      const closePoll = () => {
+        stopPollTimer();
+        cancelPollResetConfirm();
+        setState({
+          pollOpen: false,
+          authDialogOpen: false,
+          authDialogError: null,
+          pendingPollReset: false
+        });
+      };
 
       const optionsList = el("div", { className: "poll-options" },
         ...poll.options.map((opt) => {
@@ -2600,6 +2886,8 @@
           } else if (isSelected) {
             cls += " is-selected";
           }
+          const optCount = Number((state.pollLiveCounts && state.pollLiveCounts[opt.key]) || 0);
+          const pct = totalVotes > 0 ? Math.round((optCount / totalVotes) * 100) : 0;
 
           return el("button", {
             className: cls,
@@ -2610,10 +2898,86 @@
             },
             onClick: () => setState({ pollSelectedKey: opt.key })
           },
-            el("span", { className: "poll-key-pill", text: opt.key }),
-            el("span", { text: opt.text })
+            el("span", {
+              className: "poll-option-bar",
+              attrs: { style: `width: ${pct}%`, "aria-hidden": "true" }
+            }),
+            el("span", { className: "poll-option-row" },
+              el("span", { className: "poll-key-pill", text: opt.key }),
+              el("span", { className: "poll-option-text", text: opt.text }),
+              el("span", {
+                className: "poll-option-stat badge badge-mono",
+                text: totalVotes > 0 ? `${optCount} · ${pct}%` : "",
+                attrs: { hidden: totalVotes > 0 ? null : "hidden" }
+              })
+            )
           );
         })
+      );
+
+      const votePath = `/vote?pack=${encodeURIComponent(bundle.pack_id)}&rung=${encodeURIComponent(rung.id)}`;
+      const qrSrc = `/api/poll/qr.svg?pack_id=${encodeURIComponent(bundle.pack_id)}&rung_id=${encodeURIComponent(rung.id)}`;
+
+      const qrAside = isFileProtocol
+        ? el("aside", { className: "poll-qr-aside", attrs: { "aria-label": "Offline poll mode" } },
+            el("p", {
+              className: "poll-offline-note",
+              text: "Offline file:// Mode — Use Show-of-Hands Vote (QR activates automatically on Cloud Run)"
+            }),
+            externalPollUrl
+              ? el("a", {
+                  className: "btn",
+                  text: "External Poll ↗",
+                  attrs: { href: externalPollUrl, target: "_blank", rel: "noopener" }
+                })
+              : null
+          )
+        : el("aside", { className: "poll-qr-aside", attrs: { "aria-label": "Audience QR voting link" } },
+            el("div", { className: "poll-qr-card" },
+              el("img", {
+                className: "poll-qr-img",
+                attrs: {
+                  src: qrSrc,
+                  alt: "Scan QR code to vote on your phone",
+                  width: "185",
+                  height: "185"
+                }
+              })
+            ),
+            el("span", { className: "poll-qr-label", text: "Scan to Vote Live" }),
+            el("a", {
+              className: "poll-qr-link badge-mono",
+              text: votePath,
+              attrs: { href: votePath, target: "_blank", rel: "noopener" }
+            }),
+            el("span", {
+              className: "badge badge-mono poll-live-count-badge",
+              attrs: { id: "poll-live-count-badge" },
+              text: `${totalVotes} room votes`
+            }),
+            externalPollUrl
+              ? el("a", {
+                  className: "btn",
+                  text: "External Poll ↗",
+                  attrs: { href: externalPollUrl, target: "_blank", rel: "noopener" }
+                })
+              : null
+          );
+
+      const mainCol = el("div", { className: "poll-main-col" },
+        optionsList,
+        state.pollRevealed
+          ? el("div", { className: "poll-takeaway", attrs: { role: "status" } },
+              el("strong", { text: `Answer ${poll.correct_key}: ` }),
+              el("span", { text: poll.reveal_takeaway })
+            )
+          : null,
+        state.authDialogOpen ? buildDemoKeyInlineBar() : null,
+        state.pollStatusMsg
+          ? el("div", { className: "live-result-banner is-info", attrs: { role: "status", "aria-live": "polite" } },
+              el("span", { text: state.pollStatusMsg })
+            )
+          : null
       );
 
       const backdrop = el("div", {
@@ -2621,16 +2985,17 @@
         attrs: { role: "presentation" },
         onClick: (e) => {
           if (e.target === backdrop) {
-            setState({ pollOpen: false });
+            closePoll();
           }
         }
       },
         el("div", {
-          className: "modal-dialog",
+          className: "modal-dialog has-live-qr",
           attrs: {
             role: "dialog",
             "aria-modal": "true",
-            "aria-labelledby": "poll-modal-title"
+            "aria-labelledby": "poll-modal-title",
+            "data-poll-modal-rung": rung.id
           }
         },
           el("div", { className: "modal-head" },
@@ -2642,16 +3007,10 @@
               className: "btn",
               text: "Close [Esc]",
               attrs: { type: "button", "aria-label": "Close poll dialog" },
-              onClick: () => setState({ pollOpen: false })
+              onClick: () => closePoll()
             })
           ),
-          optionsList,
-          state.pollRevealed
-            ? el("div", { className: "poll-takeaway", attrs: { role: "status" } },
-                el("strong", { text: `Answer ${poll.correct_key}: ` }),
-                el("span", { text: poll.reveal_takeaway })
-              )
-            : null,
+          el("div", { className: "poll-layout-grid" }, qrAside, mainCol),
           el("div", { className: "modal-foot" },
             el("span", { className: "eval-label", text: "Select A / B / C / D then reveal answer" }),
             el("div", { className: "stage-actions" },
@@ -2661,6 +3020,33 @@
                 attrs: { type: "button" },
                 onClick: () => setState({ pollSelectedKey: null, pollRevealed: false })
               }),
+              !isFileProtocol
+                ? el("button", {
+                    className: `btn${state.pollResetConfirmPending ? " btn-danger" : ""}`,
+                    text: state.pollResetBusy
+                      ? "Clearing..."
+                      : (state.pollResetConfirmPending ? "Confirm Clear?" : "Clear Room Votes"),
+                    attrs: {
+                      type: "button",
+                      disabled: state.pollResetBusy ? true : null
+                    },
+                    onClick: () => {
+                      if (!state.pollResetConfirmPending) {
+                        cancelPollResetConfirm();
+                        setState({ pollResetConfirmPending: true });
+                        pollResetConfirmTimerId = window.setTimeout(() => {
+                          pollResetConfirmTimerId = null;
+                          if (state.pollResetConfirmPending) {
+                            setState({ pollResetConfirmPending: false });
+                          }
+                        }, 4000);
+                        return;
+                      }
+                      cancelPollResetConfirm();
+                      handleClearRoomVotes();
+                    }
+                  })
+                : null,
               el("button", {
                 className: "btn btn-primary",
                 text: state.pollRevealed ? "Answer Revealed" : "Reveal Answer",
@@ -2706,11 +3092,17 @@
       if (e.code === "Escape") {
         if (state.authDialogOpen) {
           e.preventDefault();
-          setState({ authDialogOpen: false, authDialogError: null, pendingAgentAction: false });
+          setState({
+            authDialogOpen: false,
+            authDialogError: null,
+            pendingAgentAction: false,
+            pendingPollReset: false
+          });
           return;
         }
         if (state.pollOpen) {
           e.preventDefault();
+          stopPollTimer();
           setState({ pollOpen: false });
           return;
         }

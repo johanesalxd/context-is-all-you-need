@@ -9,3 +9,5 @@ __pycache__
 .opus_evals
 tests
 scripts
+
+uv.lock

@@ -62,6 +62,10 @@ ENABLE_LIVE_AGENT="${ENABLE_LIVE_AGENT:-true}"
 REQUIRE_TOKEN_FOR_LIVE_AGENT="${REQUIRE_TOKEN_FOR_LIVE_AGENT:-true}"
 REQUIRE_TOKEN_FOR_RUN_RUNG="${REQUIRE_TOKEN_FOR_RUN_RUNG:-false}"
 DAILY_AGENT_CALL_LIMIT="${DAILY_AGENT_CALL_LIMIT:-200}"
+ENABLE_LIVE_POLL="${ENABLE_LIVE_POLL:-true}"
+POLL_READ_RPM_LIMIT="${POLL_READ_RPM_LIMIT:-3000}"
+POLL_VOTE_RPM_LIMIT="${POLL_VOTE_RPM_LIMIT:-240}"
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
 DEMO_SHARE_TOKEN="${DEMO_SHARE_TOKEN:-}"
 DRY_RUN=0
 ENABLE_SHARE_TOKEN=0
@@ -159,6 +163,19 @@ RLS_CFO_POLICY="${RLS_DISCOVERY##*|}"
 
 PACK_PREFIX="${PACK_ID%%_*}"
 [[ -n "${PACK_PREFIX}" ]] || PACK_PREFIX="meridian"
+if [[ -z "${FIRESTORE_DATABASE_ID:-}" || "${FIRESTORE_DATABASE_ID}" == "example-polls" ]]; then
+  FIRESTORE_DATABASE_ID="${PACK_PREFIX}-polls"
+fi
+if [[ "${ENABLE_LIVE_POLL}" == "true" && "${FIRESTORE_DATABASE_ID}" != "none" ]]; then
+  if [[ ! "${FIRESTORE_DATABASE_ID}" =~ ^[a-z][a-z0-9-]{2,61}[a-z0-9]$ ]]; then
+    echo "ERROR: Invalid FIRESTORE_DATABASE_ID '${FIRESTORE_DATABASE_ID}'; expected ^[a-z][a-z0-9-]{2,61}[a-z0-9]$." >&2
+    exit 1
+  fi
+fi
+if [[ -n "${PUBLIC_BASE_URL}" && ! "${PUBLIC_BASE_URL}" =~ ^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:[0-9]{1,5})?/?$ ]]; then
+  echo "ERROR: Invalid PUBLIC_BASE_URL '${PUBLIC_BASE_URL}'; expected bare https://host[:port] or http://host[:port] origin without path." >&2
+  exit 1
+fi
 RUNNER_SA_NAME="${PACK_PREFIX}-web-runner"
 RUNNER_SA_EMAIL="${RUNNER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 SG_RLS_SA_EMAIL="${PACK_PREFIX}-sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -170,10 +187,11 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "  Project:          ${PROJECT_ID}"
   echo "  Region:           ${CLOUD_RUN_REGION}"
   echo "  Service:          ${SERVICE_NAME}"
-  echo "  Runtime SA:       ${RUNNER_SA_EMAIL} (dataset READER on ${DATASET_ID} + zero access to ${BLIND_DATASET_ID} + bigquery.jobUser + aiplatform.user + TokenCreator on ${SG_RLS_SA_EMAIL}, ${BLIND_AGENT_SA_EMAIL}, ${GOVERNED_AGENT_SA_EMAIL})"
+  echo "  Runtime SA:       ${RUNNER_SA_EMAIL} (dataset READER on ${DATASET_ID} + zero access to ${BLIND_DATASET_ID} + bigquery.jobUser + aiplatform.user + datastore.user + TokenCreator on ${SG_RLS_SA_EMAIL}, ${BLIND_AGENT_SA_EMAIL}, ${GOVERNED_AGENT_SA_EMAIL})"
+  echo "  Poll Database:    Firestore Native '${FIRESTORE_DATABASE_ID}' in ${BQ_LOCATION} (roles/datastore.user strictly on ${RUNNER_SA_EMAIL}; excluded from ${BLIND_AGENT_SA_EMAIL} and ${GOVERNED_AGENT_SA_EMAIL})"
   echo "  RLS Policy Sync:  Grant ${RLS_CFO_POLICY} on ${DATASET_ID}.${RLS_TABLE} to ${GOVERNED_AGENT_SA_EMAIL} and ${RUNNER_SA_EMAIL}"
   echo "  Live Agent Config: model=${AGENT_MODEL_ID}@${AGENT_MODEL_LOCATION}, blind_dataset=${BLIND_DATASET_ID}, enable_live_agent=${ENABLE_LIVE_AGENT}, require_token_live=${REQUIRE_TOKEN_FOR_LIVE_AGENT}, daily_limit=${DAILY_AGENT_CALL_LIMIT}"
-  echo "  Guardrails:       min-instances=0, max-instances=2, BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED}, RUN_RUNG_RPM_LIMIT=${RUN_RUNG_RPM_LIMIT}, DEMO_SHARE_TOKEN enabled"
+  echo "  Guardrails:       min-instances=0, max-instances=2, BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED}, RUN_RUNG_RPM_LIMIT=${RUN_RUNG_RPM_LIMIT}, ENABLE_LIVE_POLL=${ENABLE_LIVE_POLL}, POLL_READ_RPM_LIMIT=${POLL_READ_RPM_LIMIT}, POLL_VOTE_RPM_LIMIT=${POLL_VOTE_RPM_LIMIT}, DEMO_SHARE_TOKEN enabled"
   exit 0
 fi
 
@@ -207,6 +225,24 @@ for runner_role in roles/bigquery.jobUser roles/aiplatform.user; do
     --condition=None \
     --quiet >/dev/null
 done
+
+# Enable Firestore Native API, provision dedicated poll database, and grant datastore.user ONLY when ENABLE_LIVE_POLL=true.
+if [[ "${ENABLE_LIVE_POLL}" == "true" && -n "${FIRESTORE_DATABASE_ID}" && "${FIRESTORE_DATABASE_ID}" != "none" ]]; then
+  gcloud services enable firestore.googleapis.com --project="${PROJECT_ID}" --quiet >/dev/null
+  if ! gcloud firestore databases describe --database="${FIRESTORE_DATABASE_ID}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud firestore databases create \
+      --database="${FIRESTORE_DATABASE_ID}" \
+      --location="${BQ_LOCATION}" \
+      --type=firestore-native \
+      --project="${PROJECT_ID}" \
+      --quiet >/dev/null
+  fi
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${RUNNER_SA_EMAIL}" \
+    --role="roles/datastore.user" \
+    --condition=None \
+    --quiet >/dev/null
+fi
 
 # Grant TokenCreator strictly on the RLS persona SA, Blind Agent SA, and Governed Agent SA
 for target_sa in "${SG_RLS_SA_EMAIL}" "${BLIND_AGENT_SA_EMAIL}" "${GOVERNED_AGENT_SA_EMAIL}"; do
@@ -297,6 +333,11 @@ ENABLE_LIVE_AGENT: "${ENABLE_LIVE_AGENT}"
 REQUIRE_TOKEN_FOR_LIVE_AGENT: "${REQUIRE_TOKEN_FOR_LIVE_AGENT}"
 REQUIRE_TOKEN_FOR_RUN_RUNG: "${REQUIRE_TOKEN_FOR_RUN_RUNG}"
 DAILY_AGENT_CALL_LIMIT: "${DAILY_AGENT_CALL_LIMIT}"
+FIRESTORE_DATABASE_ID: "${FIRESTORE_DATABASE_ID}"
+ENABLE_LIVE_POLL: "${ENABLE_LIVE_POLL}"
+POLL_READ_RPM_LIMIT: "${POLL_READ_RPM_LIMIT}"
+POLL_VOTE_RPM_LIMIT: "${POLL_VOTE_RPM_LIMIT}"
+PUBLIC_BASE_URL: "${PUBLIC_BASE_URL}"
 DEMO_SHARE_TOKEN: "${DEMO_SHARE_TOKEN}"
 SQL_ROLE_SA_MAP_JSON: '${ROLE_SA_MAP_JSON}'
 AGENT_SA_MAP_JSON: '${AGENT_SA_MAP_JSON}'

@@ -53,6 +53,7 @@ DRY_RUN=0
 CONFIRM_YES=0
 DELETE_RLS_SAS=0
 DELETE_CLOUD_RUN=0
+DELETE_POLL_DB=0
 TEARDOWN_CONTEXT_LAYER=1
 SERVICE_NAME="${SERVICE_NAME:-context-is-all-you-need}"
 
@@ -96,8 +97,12 @@ while [[ $# -gt 0 ]]; do
       DELETE_CLOUD_RUN=1
       shift
       ;;
+    --delete-poll-db)
+      DELETE_POLL_DB=1
+      shift
+      ;;
     --help|-h)
-      echo "Usage: $0 [--pack PACK_ID] [--dry-run] [--yes] [--teardown-context-layer] [--delete-rls-sas] [--delete-cloud-run]"
+      echo "Usage: $0 [--pack PACK_ID] [--dry-run] [--yes] [--teardown-context-layer] [--delete-rls-sas] [--delete-cloud-run] [--delete-poll-db]"
       exit 0
       ;;
     *)
@@ -116,6 +121,12 @@ if [[ ! "${DATASET_ID}" =~ ^[A-Za-z_][A-Za-z0-9_]{0,1023}$ ]]; then
   exit 1
 fi
 
+PACK_PREFIX="${PACK_ID%%_*}"
+[[ -n "${PACK_PREFIX}" ]] || PACK_PREFIX="meridian"
+if [[ -z "${FIRESTORE_DATABASE_ID:-}" || "${FIRESTORE_DATABASE_ID}" == "example-polls" ]]; then
+  FIRESTORE_DATABASE_ID="${PACK_PREFIX}-polls"
+fi
+
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   if [[ "${TEARDOWN_CONTEXT_LAYER}" -eq 1 ]]; then
     echo "[DRY-RUN] Would tear down Phase 2 context layer for pack=${PACK_ID} before deleting ${PROJECT_ID}.${DATASET_ID}."
@@ -129,7 +140,10 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   fi
   echo "[DRY-RUN] Would delete BigQuery dataset ${PROJECT_ID}.${DATASET_ID} (location=${BQ_LOCATION}) and all its contents."
   if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
-    echo "[DRY-RUN] Would delete Cloud Run service ${SERVICE_NAME} (${BQ_LOCATION}) and meridian-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+    echo "[DRY-RUN] Would delete Cloud Run service ${SERVICE_NAME} (${BQ_LOCATION}), remove project IAM bindings (jobUser, aiplatform.user, datastore.user), and delete ${PACK_PREFIX}-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+  fi
+  if [[ "${DELETE_POLL_DB}" -eq 1 ]]; then
+    echo "[DRY-RUN] Would delete Firestore Native poll database '${FIRESTORE_DATABASE_ID}' in project ${PROJECT_ID}."
   fi
   if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
     echo "[DRY-RUN] Would remove project jobUser bindings and delete dedicated RLS SAs: meridian-sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.com, meridian-denied-probe@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -181,8 +195,8 @@ fi
 
 if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
   gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${BQ_LOCATION}" --quiet >/dev/null 2>&1 || true
-  runner_sa="meridian-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
-  for runner_role in roles/bigquery.jobUser roles/aiplatform.user; do
+  runner_sa="${PACK_PREFIX}-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+  for runner_role in roles/bigquery.jobUser roles/aiplatform.user roles/datastore.user; do
     gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
       --member="serviceAccount:${runner_sa}" \
       --role="${runner_role}" \
@@ -192,5 +206,12 @@ if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
   if gcloud iam service-accounts describe "${runner_sa}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     gcloud iam service-accounts delete "${runner_sa}" --project="${PROJECT_ID}" --quiet >/dev/null
     echo "Deleted Cloud Run runtime SA: ${runner_sa}"
+  fi
+fi
+
+if [[ "${DELETE_POLL_DB}" -eq 1 ]]; then
+  if gcloud firestore databases describe --database="${FIRESTORE_DATABASE_ID}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud firestore databases delete --database="${FIRESTORE_DATABASE_ID}" --project="${PROJECT_ID}" --quiet >/dev/null
+    echo "Deleted Firestore poll database: ${FIRESTORE_DATABASE_ID}"
   fi
 fi
