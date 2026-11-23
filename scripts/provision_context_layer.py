@@ -270,6 +270,7 @@ def resolve_provision_plan(
 ) -> dict[str, Any]:
     """Builds the 100% pack-driven Phase 2 governance provisioning plan without network calls."""
     root = (repo_root or REPO_ROOT).resolve()
+    effective_packs_dir = packs_dir or (root / "packs")
     load_dotenv_if_present(root)
     settings = resolve_phase2_settings(root, pack_id=pack_id)
     project_id = settings["PROJECT_ID"]
@@ -283,7 +284,7 @@ def resolve_provision_plan(
     try:
         ctx = load_context_layer(
             pack_id,
-            packs_dir=packs_dir,
+            packs_dir=effective_packs_dir,
             project_id=project_id,
             dataset_id=dataset_id,
             bq_location=bq_location,
@@ -312,7 +313,7 @@ def resolve_provision_plan(
         ctx.get("web_runner_sa") or f"{prefix}-web-runner@{project_id}.iam.gserviceaccount.com"
     ).strip()
 
-    rls_table, rls_cfo_policy = discover_rls_target(pack_id, packs_dir=packs_dir)
+    rls_table, rls_cfo_policy = discover_rls_target(pack_id, packs_dir=effective_packs_dir)
     unstructured = dict(ctx.get("unstructured_contracts") or {})
     bucket_suffix = str(unstructured.get("bucket_suffix") or f"{prefix}-contracts").strip()
     bucket_name = f"{project_id}-{bucket_suffix}"
@@ -346,9 +347,13 @@ def resolve_provision_plan(
         "shadow_source_table": shadow_source,
         "shadow_table_prefix": shadow_prefix,
         "shadow_table_count": shadow_count,
+        "shadow_table_description": str(ctx.get("shadow_table_description") or "").strip(),
         "glossary": ctx.get("glossary") or {},
         "aspect_types": list(ctx.get("aspect_types") or []),
         "data_quality_scans": list(ctx.get("data_quality_scans") or []),
+        "data_profile_scans": list(ctx.get("data_profile_scans") or []),
+        "data_documentation_scans": list(ctx.get("data_documentation_scans") or []),
+        "data_products": list(ctx.get("data_products") or []),
         "unstructured_contracts": unstructured,
         "bucket_name": bucket_name,
     }
@@ -388,6 +393,73 @@ def _reconcile_dataset_acls(
         bq_client.update_dataset(ds, ["access_entries"])
 
 
+def _resolve_dataplex_service_agent(project_id: str) -> str | None:
+    try:
+        proj_num = _resolve_project_number(project_id)
+    except Exception:
+        return None
+    if proj_num and proj_num.isdigit():
+        return f"service-{proj_num}@gcp-sa-dataplex.iam.gserviceaccount.com"
+    return None
+
+
+def _fetch_rls_grantees_via_rest(
+    rest_client: _RestClient | None,
+    *,
+    project_id: str,
+    dataset_id: str,
+    rls_table: str,
+    rls_cfo_policy: str,
+) -> tuple[bool, list[str]]:
+    if rest_client is None:
+        return False, []
+    base = (
+        f"https://bigquery.googleapis.com/bigquery/v2/projects/{quote(project_id)}"
+        f"/datasets/{quote(dataset_id)}/tables/{quote(rls_table)}/rowAccessPolicies"
+    )
+    try:
+        st, resp = rest_client.request("GET", base, allow_statuses=(200, 403, 404))
+    except Exception:
+        return False, []
+    if st != 200 or not isinstance(resp, Mapping):
+        return False, []
+    for item in resp.get("rowAccessPolicies") or []:
+        if not isinstance(item, Mapping):
+            continue
+        ref = item.get("rowAccessPolicyReference")
+        pol_id = str(
+            (ref.get("policyId") if isinstance(ref, Mapping) else None)
+            or item.get("policy_id")
+            or item.get("policyId")
+            or ""
+        )
+        if pol_id != rls_cfo_policy:
+            continue
+        direct = [str(g).strip() for g in (item.get("grantees") or item.get("grantee_list") or []) if str(g).strip()]
+        if direct:
+            return True, direct
+        try:
+            st_iam, iam_resp = rest_client.request(
+                "POST",
+                f"{base}/{quote(rls_cfo_policy)}:getIamPolicy",
+                payload={},
+                allow_statuses=(200, 403, 404),
+            )
+            if st_iam == 200 and isinstance(iam_resp, Mapping):
+                members: list[str] = []
+                for binding in iam_resp.get("bindings") or []:
+                    if isinstance(binding, Mapping):
+                        for m in binding.get("members") or []:
+                            ms = str(m).strip()
+                            if ms and ms not in members:
+                                members.append(ms)
+                return True, members
+        except Exception:
+            return True, []
+        return True, []
+    return False, []
+
+
 def _sync_rls_cfo_policy(
     bq_client: Any,
     *,
@@ -399,21 +471,34 @@ def _sync_rls_cfo_policy(
     caller_email: str,
     governed_sa: str,
     web_runner_sa: str | None,
+    rest_client: _RestClient | None = None,
+    dataplex_sa: str | None = None,
+    restricted_sas: Sequence[str] = (),
 ) -> None:
     if not rls_table or not rls_cfo_policy:
         return
 
-    grantees: list[str] = []
+    merged: dict[str, str] = {}
+
+    def _add_grantee(principal: str) -> None:
+        cleaned = str(principal or "").strip()
+        if cleaned:
+            merged.setdefault(cleaned.lower(), cleaned)
+
     if caller_email:
         if caller_email.endswith(".gserviceaccount.com"):
-            grantees.append(f"serviceAccount:{caller_email}")
+            _add_grantee(f"serviceAccount:{caller_email}")
         else:
-            grantees.append(f"user:{caller_email}")
-    grantees.append(f"serviceAccount:{governed_sa}")
+            _add_grantee(f"user:{caller_email}")
+    _add_grantee(f"serviceAccount:{governed_sa}")
     if web_runner_sa:
-        grantees.append(f"serviceAccount:{web_runner_sa}")
+        _add_grantee(f"serviceAccount:{web_runner_sa}")
+    if dataplex_sa:
+        d_sa = dataplex_sa.strip()
+        _add_grantee(d_sa if d_sa.startswith("serviceAccount:") else f"serviceAccount:{d_sa}")
 
-    # Preserve existing non-restricted CFO grantees already attached on the policy if any.
+    policy_exists = False
+    existing_grantees: list[str] = []
     for existing_pol in list_active_row_access_policies(
         bq_client,
         project_id=project_id,
@@ -426,10 +511,41 @@ def _sync_rls_cfo_policy(
             existing_pol.get("grantees") if isinstance(existing_pol, Mapping) else getattr(existing_pol, "grantees", [])
         ) or []
         if pol_id == rls_cfo_policy:
-            for g in pol_grantees:
-                if g not in grantees and "coldchain" not in g.lower() and "denied" not in g.lower() and "blind-agent" not in g.lower():
-                    grantees.append(g)
+            policy_exists = True
+            existing_grantees.extend(str(g).strip() for g in pol_grantees if str(g).strip())
 
+    if not existing_grantees:
+        rest_exists, rest_grantees = _fetch_rls_grantees_via_rest(
+            rest_client,
+            project_id=project_id,
+            dataset_id=dataset_id,
+            rls_table=rls_table,
+            rls_cfo_policy=rls_cfo_policy,
+        )
+        if rest_exists:
+            policy_exists = True
+        existing_grantees.extend(rest_grantees)
+
+    if policy_exists and not existing_grantees:
+        raise RuntimeError(
+            f"Refusing to overwrite existing RLS policy {rls_cfo_policy}: could not read existing grantees"
+        )
+
+    restricted_set = {
+        *(sa.strip().lower() for sa in restricted_sas if sa and sa.strip()),
+        *(f"serviceaccount:{sa.strip().lower()}" for sa in restricted_sas if sa and sa.strip()),
+    }
+    for g in existing_grantees:
+        g_low = g.lower()
+        if g_low.startswith("deleted:"):
+            continue
+        if g_low in restricted_set:
+            continue
+        if "coldchain" in g_low or "denied" in g_low or "blind-agent" in g_low:
+            continue
+        _add_grantee(g)
+
+    grantees = sorted(merged.values(), key=lambda x: x.lower())
     grant_sql = ", ".join(f'"{g}"' for g in grantees)
     ddl = (
         f"CREATE OR REPLACE ROW ACCESS POLICY `{rls_cfo_policy}` "
@@ -752,6 +868,7 @@ def run_provision(
             bq.delete_table(f"{project_id}.{dataset_id}.{legacy_tbl}", not_found_ok=True)
 
     shadow_source = plan["shadow_source_table"]
+    shadow_desc = str(plan.get("shadow_table_description") or "").strip()
     if shadow_source:
         src_tbl = bq.get_table(f"{project_id}.{dataset_id}.{shadow_source}")
         expected_sig = [(f.name, f.field_type) for f in src_tbl.schema]
@@ -762,14 +879,23 @@ def run_provision(
             tname = f"{prefix}{idx:03d}"
             tid = f"{project_id}.{dataset_id}.{tname}"
             if tname in existing_comm:
+                cur = None
+                schema_matches = False
                 try:
                     cur = bq.get_table(tid)
-                    if [(f.name, f.field_type) for f in cur.schema] == expected_sig:
-                        return
+                    schema_matches = [(f.name, f.field_type) for f in cur.schema] == expected_sig
                 except Exception:
-                    pass
+                    schema_matches = False
+                if schema_matches and cur is not None:
+                    if shadow_desc and (getattr(cur, "description", None) or "").strip() != shadow_desc:
+                        cur.description = shadow_desc
+                        bq.update_table(cur, ["description"])
+                    return
                 bq.delete_table(tid, not_found_ok=True)
-            bq.create_table(bigquery.Table(tid, schema=src_tbl.schema), exists_ok=True)
+            tbl_obj = bigquery.Table(tid, schema=src_tbl.schema)
+            if shadow_desc:
+                tbl_obj.description = shadow_desc
+            bq.create_table(tbl_obj, exists_ok=True)
 
         with ThreadPoolExecutor(max_workers=20) as pool:
             for fut in as_completed([pool.submit(_heal_commerce_shadow, i) for i in range(1, count + 1)]):
@@ -784,6 +910,18 @@ def run_provision(
         scrub_sas=[blind_sa],
     )
     if plan.get("rls_table") and plan["rls_table"] in existing_comm:
+        rls_tbl_name = str(plan.get("rls_table") or "").strip()
+        all_scan_tables = {
+            str(s.get("target_table") or "").strip()
+            for k in ("data_quality_scans", "data_profile_scans", "data_documentation_scans")
+            for s in (plan.get(k) or [])
+            if isinstance(s, Mapping)
+        }
+        dataplex_sa: str | None = None
+        if rls_tbl_name and rls_tbl_name in all_scan_tables:
+            dataplex_sa = _resolve_dataplex_service_agent(project_id)
+            if not dataplex_sa and project_number and str(project_number).strip().isdigit():
+                dataplex_sa = f"service-{str(project_number).strip()}@gcp-sa-dataplex.iam.gserviceaccount.com"
         _sync_rls_cfo_policy(
             bq,
             project_id=project_id,
@@ -794,6 +932,9 @@ def run_provision(
             caller_email=active_caller,
             governed_sa=governed_sa,
             web_runner_sa=web_runner_sa if web_runner_exists else None,
+            rest_client=rest,
+            dataplex_sa=dataplex_sa,
+            restricted_sas=[blind_sa],
         )
 
     # Step (b): Materialize physical Blind dataset + 190 empty shadows + strict ACLs + assertions.
@@ -992,8 +1133,14 @@ def run_provision(
                 allow_statuses=(200,),
             )
 
-    for scan_spec in plan.get("data_quality_scans") or []:
+    def _provision_and_run_scan(
+        scan_spec: Mapping[str, Any],
+        *,
+        spec_key: str,
+        spec_payload: dict[str, Any],
+    ) -> str:
         scan_id = str(scan_spec.get("scan_id") or scan_spec["data_scan_id"])
+        quoted_scan_id = quote(scan_id)
         target_tbl = str(scan_spec["target_table"])
         scan_body = {
             "displayName": str(scan_spec.get("display_name") or scan_id),
@@ -1002,18 +1149,14 @@ def run_provision(
                 "resource": f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{target_tbl}"
             },
             "executionSpec": {"trigger": {"onDemand": {}}},
-            "dataQualitySpec": {
-                "samplingPercent": float(scan_spec.get("sampling_percent") or 100.0),
-                "catalogPublishingEnabled": bool(scan_spec.get("catalog_publishing_enabled", True)),
-                "rules": _translate_dq_rules(scan_spec.get("rules") or []),
-            },
+            spec_key: spec_payload,
         }
-        ds_create_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans?dataScanId={quote(scan_id)}"
+        ds_create_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans?dataScanId={quoted_scan_id}"
         st_ds, ds_resp = rest.request("POST", ds_create_url, payload=scan_body, allow_statuses=(200, 201, 400, 409))
         if _is_already_exists_error(st_ds, ds_resp):
             _, upd_resp = rest.request(
                 "PATCH",
-                f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{scan_id}?updateMask=displayName,description,dataQualitySpec,executionSpec",
+                f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{quoted_scan_id}?updateMask=displayName,description,{spec_key},executionSpec",
                 payload=scan_body,
                 allow_statuses=(200,),
             )
@@ -1023,29 +1166,66 @@ def run_provision(
         else:
             rest.wait_lro(ds_resp)
 
-        jobs_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{scan_id}/jobs"
+        jobs_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{quoted_scan_id}/jobs"
         _, jobs_resp = rest.request("GET", jobs_url, allow_statuses=(200,))
         existing_jobs = list(jobs_resp.get("dataScanJobs") or [])
         if not any(j.get("state") == "SUCCEEDED" for j in existing_jobs):
-            _, run_resp = rest.request(
-                "POST",
-                f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{scan_id}:run",
-                payload={},
-                allow_statuses=(200,),
+            active_job = next(
+                (j for j in existing_jobs if j.get("state") in {"PENDING", "RUNNING"}),
+                None,
             )
-            job_name = str((run_resp.get("job") or {}).get("name") or "")
+            if active_job is not None:
+                job_name = str(active_job.get("name") or "")
+            else:
+                _, run_resp = rest.request(
+                    "POST",
+                    f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{quoted_scan_id}:run",
+                    payload={},
+                    allow_statuses=(200,),
+                )
+                job_name = str((run_resp.get("job") or {}).get("name") or "")
             if job_name:
-                deadline = time.monotonic() + 120.0
+                try:
+                    timeout_s = max(1.0, float(os.environ.get("DATASCAN_POLL_TIMEOUT_S") or 120.0))
+                except ValueError:
+                    timeout_s = 120.0
+                deadline = time.monotonic() + timeout_s
+                succeeded = False
                 while time.monotonic() < deadline:
                     time.sleep(3.0)
-                    _, j_latest = rest.request("GET", f"{_DATAPLEX_BASE}/{job_name}", allow_statuses=(200,))
+                    _, j_latest = rest.request(
+                        "GET",
+                        f"{_DATAPLEX_BASE}/{job_name.lstrip('/')}",
+                        allow_statuses=(200,),
+                    )
                     state = str(j_latest.get("state") or "")
                     if state == "SUCCEEDED":
+                        succeeded = True
                         break
                     if state in {"FAILED", "CANCELLED"}:
                         raise RuntimeError(f"DataScan job {job_name} failed: {j_latest}")
+                if not succeeded:
+                    raise TimeoutError(f"DataScan job {job_name} timed out after {timeout_s}s")
+        return scan_id
+
+    for scan_spec in plan.get("data_quality_scans") or []:
+        dq_sampling = (
+            float(scan_spec["sampling_percent"])
+            if scan_spec.get("sampling_percent") is not None
+            else 100.0
+        )
+        _provision_and_run_scan(
+            scan_spec,
+            spec_key="dataQualitySpec",
+            spec_payload={
+                "samplingPercent": dq_sampling,
+                "catalogPublishingEnabled": bool(scan_spec.get("catalog_publishing_enabled", True)),
+                "rules": _translate_dq_rules(scan_spec.get("rules") or []),
+            },
+        )
 
     # Step (f): GCS contracts + BigQuery Connection + Object Table + Safe AI.GENERATE staging.
+    # Run BEFORE optional Data Profile / Data Insights scans and Data Products so core R6 is never blocked.
     unstructured = dict(plan.get("unstructured_contracts") or {})
     if unstructured:
         bucket_name = plan["bucket_name"]
@@ -1100,6 +1280,12 @@ def run_provision(
             f"OPTIONS(object_metadata='SIMPLE', uris=['gs://{bucket_name}/*.md']);"
         )
         bq.query(ext_ddl, location=bq_location).result()
+        obj_desc = str(unstructured.get("object_table_description") or "").strip()
+        if obj_desc:
+            obj_tbl_ref = bq.get_table(f"{project_id}.{dataset_id}.{obj_tbl}")
+            if getattr(obj_tbl_ref, "description", None) != obj_desc:
+                obj_tbl_ref.description = obj_desc
+                bq.update_table(obj_tbl_ref, ["description"])
 
         extracted_tbl = str(
             unstructured.get("extraction_staging_table")
@@ -1177,6 +1363,43 @@ def run_provision(
                     continue
                 raise
 
+        ext_desc = str(unstructured.get("extraction_table_description") or "").strip()
+        ext_col_descs = unstructured.get("extraction_column_descriptions") or {}
+        if ext_desc or (isinstance(ext_col_descs, Mapping) and ext_col_descs):
+            ext_tbl_ref = bq.get_table(f"{project_id}.{dataset_id}.{extracted_tbl}")
+            update_fields: list[str] = []
+            if ext_desc and getattr(ext_tbl_ref, "description", None) != ext_desc:
+                ext_tbl_ref.description = ext_desc
+                update_fields.append("description")
+            if isinstance(ext_col_descs, Mapping) and ext_col_descs and getattr(ext_tbl_ref, "schema", None):
+                new_schema = []
+                schema_changed = False
+                for field in ext_tbl_ref.schema:
+                    col_desc = str(ext_col_descs.get(field.name) or "").strip()
+                    if col_desc and getattr(field, "description", None) != col_desc:
+                        schema_changed = True
+                        if hasattr(field, "to_api_repr") and hasattr(bigquery.SchemaField, "from_api_repr"):
+                            api_repr = field.to_api_repr()
+                            api_repr["description"] = col_desc
+                            new_schema.append(bigquery.SchemaField.from_api_repr(api_repr))
+                        else:
+                            new_schema.append(
+                                bigquery.SchemaField(
+                                    field.name,
+                                    field.field_type,
+                                    mode=field.mode,
+                                    description=col_desc,
+                                    fields=field.fields,
+                                )
+                            )
+                    else:
+                        new_schema.append(field)
+                if schema_changed:
+                    ext_tbl_ref.schema = new_schema
+                    update_fields.append("schema")
+            if update_fields:
+                bq.update_table(ext_tbl_ref, update_fields)
+
         # Validate extracted invariants cleanly against expected_invariants!
         invariants = dict(unstructured.get("expected_invariants") or {})
         if invariants:
@@ -1205,6 +1428,115 @@ def run_provision(
                     raise RuntimeError(
                         f"AI.GENERATE invariant mismatch on {extracted_tbl}.{k}: expected {expected_v}, got {actual_v}"
                     )
+
+    # Step (g): Concurrent Data Profile + Data Insights DataScans and Native Knowledge Catalog Data Products.
+    concurrent_scans: list[tuple[Mapping[str, Any], str, dict[str, Any]]] = []
+    for scan_spec in plan.get("data_profile_scans") or []:
+        prof_sampling = (
+            float(scan_spec["sampling_percent"])
+            if scan_spec.get("sampling_percent") is not None
+            else 100.0
+        )
+        concurrent_scans.append(
+            (
+                scan_spec,
+                "dataProfileSpec",
+                {
+                    "samplingPercent": prof_sampling,
+                    "catalogPublishingEnabled": bool(scan_spec.get("catalog_publishing_enabled", True)),
+                },
+            )
+        )
+    for scan_spec in plan.get("data_documentation_scans") or []:
+        concurrent_scans.append(
+            (
+                scan_spec,
+                "dataDocumentationSpec",
+                {
+                    "catalogPublishingEnabled": bool(scan_spec.get("catalog_publishing_enabled", True)),
+                },
+            )
+        )
+    if concurrent_scans:
+        scan_errors: list[str] = []
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            fut_to_id = {
+                pool.submit(_provision_and_run_scan, s_spec, spec_key=s_key, spec_payload=s_payload): str(
+                    s_spec.get("scan_id") or s_spec["data_scan_id"]
+                )
+                for s_spec, s_key, s_payload in concurrent_scans
+            }
+            for fut in as_completed(fut_to_id):
+                s_id = fut_to_id[fut]
+                try:
+                    fut.result()
+                except Exception as err:
+                    scan_errors.append(f"{s_id}: {err}")
+        if scan_errors:
+            raise RuntimeError(
+                "One or more DataScan runs failed: " + "; ".join(sorted(scan_errors))
+            )
+
+    for dp_spec in plan.get("data_products") or []:
+        dp_id = str(dp_spec.get("data_product_id") or dp_spec["id"])
+        raw_owners = [str(e).strip() for e in (dp_spec.get("owner_emails") or []) if str(e).strip()]
+        if raw_owners:
+            owner_emails = raw_owners
+        elif active_caller and "@" in active_caller:
+            owner_emails = [active_caller]
+        else:
+            raise RuntimeError(
+                f"Cannot provision DataProduct {dp_id!r}: owner_emails not provided and active gcloud account unavailable."
+            )
+
+        dp_payload = {
+            "displayName": str(dp_spec.get("display_name") or dp_id),
+            "description": str(dp_spec.get("description") or ""),
+            "ownerEmails": owner_emails,
+        }
+        dp_create_url = (
+            f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}"
+            f"/dataProducts?dataProductId={quote(dp_id)}"
+        )
+        st_dp, dp_resp = rest.request("POST", dp_create_url, payload=dp_payload, allow_statuses=(200, 201, 400, 409))
+        if _is_already_exists_error(st_dp, dp_resp):
+            if raw_owners:
+                patch_mask = "displayName,description,ownerEmails"
+                patch_payload = dp_payload
+            else:
+                patch_mask = "displayName,description"
+                patch_payload = {
+                    "displayName": dp_payload["displayName"],
+                    "description": dp_payload["description"],
+                }
+            _, upd_dp = rest.request(
+                "PATCH",
+                f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataProducts/{quote(dp_id)}?updateMask={patch_mask}",
+                payload=patch_payload,
+                allow_statuses=(200,),
+            )
+            rest.wait_lro(upd_dp)
+        elif st_dp == 400:
+            raise RuntimeError(f"HTTP 400 for POST {dp_create_url}: {json.dumps(dp_resp)[:500]}")
+        else:
+            rest.wait_lro(dp_resp)
+
+        for asset in dp_spec.get("assets") or []:
+            asset_id = str(asset["asset_id"])
+            asset_tbl = str(asset["table"])
+            asset_url = (
+                f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}"
+                f"/dataProducts/{quote(dp_id)}/dataAssets?dataAssetId={quote(asset_id)}"
+            )
+            asset_payload = {
+                "resource": f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{asset_tbl}"
+            }
+            st_a, a_resp = rest.request("POST", asset_url, payload=asset_payload, allow_statuses=(200, 201, 400, 409))
+            if _is_already_exists_error(st_a, a_resp):
+                continue
+            if st_a == 400:
+                raise RuntimeError(f"HTTP 400 for POST {asset_url}: {json.dumps(a_resp)[:500]}")
+            rest.wait_lro(a_resp)
 
     return {
         "status": "provisioned",
@@ -1269,25 +1601,76 @@ def run_teardown(
             rest.wait_lro(resp)
         deleted_steps.append(f"glossary:{g_id}")
 
-    # 2. DataScans
-    for scan in plan.get("data_quality_scans") or []:
-        scan_id = str(scan.get("scan_id") or scan["data_scan_id"])
-        ds_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{scan_id}?force=true"
-        st, resp = rest.request("DELETE", ds_url, allow_statuses=(200, 202, 204, 404))
-        if st != 404 and isinstance(resp, dict):
-            rest.wait_lro(resp)
-        deleted_steps.append(f"dataScan:{scan_id}")
+    # 2. DataScans (Quality, Profile, Documentation)
+    for scan_list_key in ("data_quality_scans", "data_profile_scans", "data_documentation_scans"):
+        for scan in plan.get(scan_list_key) or []:
+            scan_id = str(scan.get("scan_id") or scan["data_scan_id"])
+            ds_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataScans/{quote(scan_id)}?force=true"
+            st, resp = rest.request("DELETE", ds_url, allow_statuses=(200, 202, 204, 404))
+            if st != 404 and isinstance(resp, dict):
+                rest.wait_lro(resp)
+            deleted_steps.append(f"dataScan:{scan_id}")
 
-    # 3. AspectTypes
-    for aspect_spec in plan.get("aspect_types") or []:
+    # 3. Detach Entry Aspects -> Delete AspectTypes
+    aspect_types = list(plan.get("aspect_types") or [])
+    proj_num_for_aspects = ""
+    if aspect_types:
+        try:
+            proj_num_for_aspects = _resolve_project_number(project_id)
+        except Exception:
+            proj_num_for_aspects = ""
+
+    for aspect_spec in aspect_types:
         at_id = str(aspect_spec["aspect_type_id"])
-        at_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/aspectTypes/{at_id}"
-        st, resp = rest.request("DELETE", at_url, allow_statuses=(200, 202, 204, 404))
-        if st != 404 and isinstance(resp, dict):
-            rest.wait_lro(resp)
-        deleted_steps.append(f"aspectType:{at_id}")
+        aspect_key = f"{proj_num_for_aspects or project_id}.{bq_location}.{at_id}"
+        for attach in (aspect_spec.get("assignments") or aspect_spec.get("attachments") or []):
+            tbl_id = str(attach.get("table") or attach["table_id"])
+            entry_name = (
+                f"projects/{project_id}/locations/{bq_location}/entryGroups/@bigquery/entries/"
+                f"bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{tbl_id}"
+            )
+            detach_url = f"{_DATAPLEX_BASE}/{entry_name}?updateMask=aspects&aspectKeys={quote(aspect_key)}"
+            try:
+                rest.request("PATCH", detach_url, payload={"aspects": {}}, allow_statuses=(200, 400, 403, 404))
+            except Exception as err:
+                print(
+                    f"WARNING: Could not detach aspect {aspect_key} from {tbl_id}: {err}",
+                    file=sys.stderr,
+                )
 
-    # 4. Object Table / Extracted SLA Overlay -> BigQuery Connection
+        at_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/aspectTypes/{quote(at_id)}"
+        st, resp = rest.request("DELETE", at_url, allow_statuses=(200, 202, 204, 400, 404, 409))
+        if st in (400, 409):
+            print(
+                f"WARNING: Could not delete aspectType {at_id} (HTTP {st}); continuing teardown: {resp}",
+                file=sys.stderr,
+            )
+        else:
+            if st != 404 and isinstance(resp, dict):
+                rest.wait_lro(resp)
+            deleted_steps.append(f"aspectType:{at_id}")
+
+    # 3b. DataProducts (delete child DataAssets BEFORE parent DataProduct)
+    for dp_spec in plan.get("data_products") or []:
+        dp_id = str(dp_spec.get("data_product_id") or dp_spec["id"])
+        for asset in dp_spec.get("assets") or []:
+            asset_id = str(asset["asset_id"])
+            asset_url = (
+                f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}"
+                f"/dataProducts/{quote(dp_id)}/dataAssets/{quote(asset_id)}"
+            )
+            st_a, resp_a = rest.request("DELETE", asset_url, allow_statuses=(200, 202, 204, 404))
+            if st_a != 404 and isinstance(resp_a, dict):
+                rest.wait_lro(resp_a)
+            deleted_steps.append(f"dataAsset:{dp_id}/{asset_id}")
+
+        dp_url = f"{_DATAPLEX_BASE}/projects/{project_id}/locations/{bq_location}/dataProducts/{quote(dp_id)}"
+        st_dp, resp_dp = rest.request("DELETE", dp_url, allow_statuses=(200, 202, 204, 404))
+        if st_dp != 404 and isinstance(resp_dp, dict):
+            rest.wait_lro(resp_dp)
+        deleted_steps.append(f"dataProduct:{dp_id}")
+
+    # 4. Object Table / Extracted SLA Overlay -> Connection SA IAM -> BigQuery Connection
     unstructured = dict(plan.get("unstructured_contracts") or {})
     seen_del_tbls: set[str] = set()
     for tbl_key in ("extraction_staging_table", "target_table", "object_table"):
@@ -1297,21 +1680,43 @@ def run_teardown(
             bq.delete_table(f"{project_id}.{dataset_id}.{tbl_name}", not_found_ok=True)
             deleted_steps.append(f"table:{dataset_id}.{tbl_name}")
 
-    conn_url = f"{_BQ_CONN_BASE}/projects/{project_id}/locations/{bq_location}/connections/{connection_id}"
+    conn_url = f"{_BQ_CONN_BASE}/projects/{project_id}/locations/{bq_location}/connections/{quote(connection_id)}"
+    st_conn_get, conn_info = rest.request("GET", conn_url, allow_statuses=(200, 404))
+    if st_conn_get == 200 and isinstance(conn_info, Mapping):
+        conn_sa = str((conn_info.get("cloudResource") or {}).get("serviceAccountId") or "").strip()
+        if conn_sa:
+            _run_cmd(
+                [
+                    "gcloud",
+                    "projects",
+                    "remove-iam-policy-binding",
+                    project_id,
+                    f"--member=serviceAccount:{conn_sa}",
+                    "--role=roles/aiplatform.user",
+                    "--all",
+                    "--quiet",
+                ],
+                check=False,
+            )
+            deleted_steps.append(f"iam:{conn_sa}:roles/aiplatform.user")
+
     rest.request("DELETE", conn_url, allow_statuses=(200, 202, 204, 404))
     deleted_steps.append(f"connection:{connection_id}")
 
     # 5. GCS objects & bucket
     bucket_name = plan.get("bucket_name")
     if bucket_name:
+        from google.api_core.exceptions import NotFound
+
         try:
             bucket = gcs.get_bucket(bucket_name)
+        except NotFound:
+            bucket = None
+        if bucket is not None:
             for blob in list(bucket.list_blobs()):
                 blob.delete()
             bucket.delete(force=True)
             deleted_steps.append(f"bucket:{bucket_name}")
-        except Exception:
-            pass
 
     # 6. Blind BigQuery dataset
     bq.delete_dataset(f"{project_id}.{blind_dataset_id}", delete_contents=True, not_found_ok=True)
@@ -1329,6 +1734,7 @@ def run_teardown(
                         project_id,
                         f"--member=serviceAccount:{sa_email}",
                         f"--role={role}",
+                        "--all",
                         "--quiet",
                     ],
                     check=False,
@@ -1373,11 +1779,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.dry_run or (not args.live_gcp and not args.teardown):
         mode = "teardown" if args.teardown else "provision"
+        dry_plan = dict(plan)
+        if dry_plan.get("data_products"):
+            dry_dps: list[dict[str, Any]] = []
+            for dp in dry_plan["data_products"]:
+                dp_copy = dict(dp)
+                if not dp_copy.get("owner_emails"):
+                    dp_copy["owner_emails"] = ["data-stewards@example.com"]
+                dry_dps.append(dp_copy)
+            dry_plan["data_products"] = dry_dps
         dry_summary = {
             "mode": mode,
             "dry_run": True,
             "delete_agent_sas": bool(args.delete_agent_sas),
-            "plan": plan,
+            "plan": dry_plan,
         }
         print(json.dumps(redact_bundle_data(dry_summary, live_project_id=plan["project_id"]), indent=2))
         return 0

@@ -15,6 +15,7 @@ blind_dataset_tables:
 
 shadow_table_prefix: "shadow_auto_tbl_"
 shadow_table_count: 190
+shadow_table_description: "Uncertified automated clone generated during Q3 ad-hoc backfills. Do NOT use for governed reporting."
 
 legacy_tables_to_drop:
   - "cold_chain_margin_gold"
@@ -35,6 +36,37 @@ glossary:
       linked_columns:
         - table: "customers"
           column: "tier_code"
+          link_type: "definition"
+    - term_id: "net-realized-revenue"
+      display_name: "Net Realized Revenue"
+      description: >-
+        Official Closed Q3 realized revenue in SGD: orders.amt_net_settled_sgd filtered to
+        order_status = 'COMPLETED' (ex-GST, net of cancellations and returns; reconciles
+        with 0.00 SGD drift to order_lines.net_line_revenue_sgd). Never use
+        amt_gross_billed_sgd or amt_item_subtotal_sgd.
+      linked_columns:
+        - table: "orders"
+          column: "amt_net_settled_sgd"
+          link_type: "definition"
+    - term_id: "certified-close-cycle"
+      display_name: "Certified Close Cycle"
+      description: >-
+        Authoritative financial close batch identifier close_batch_code = 'B26Q3_R2' on
+        mart_coldchain_q3_r2 (final settled Q3 rebates). Excludes preliminary Oct 11
+        batch B26Q3_R1 on mart_coldchain_q3_r1.
+      linked_columns:
+        - table: "mart_coldchain_q3_r2"
+          column: "close_batch_code"
+          link_type: "definition"
+    - term_id: "biologic-chilled-class"
+      display_name: "Biologic Chilled Class"
+      description: >-
+        Thermal inventory classification sku_lot_allocations.temp_sensitive_class =
+        'BIOLOGIC_CHILLED' requiring tightened cold-chain telemetry monitoring and
+        superseding carrier SLA thresholds.
+      linked_columns:
+        - table: "sku_lot_allocations"
+          column: "temp_sensitive_class"
           link_type: "definition"
 
 aspect_types:
@@ -97,16 +129,75 @@ data_quality_scans:
         dimension: "COMPLETENESS"
         non_null: true
 
+data_profile_scans:
+  - scan_id: "meridian-orders-profile"
+    display_name: "Meridian Orders Data Profile"
+    description: "Profiles column distributions, null rates, and status cardinalities on orders."
+    target_table: "orders"
+    sampling_percent: 100.0
+    catalog_publishing_enabled: true
+  - scan_id: "meridian-customers-profile"
+    display_name: "Meridian Customers Data Profile"
+    description: "Profiles tier_code, segment_label, and return_rate distributions on customers."
+    target_table: "customers"
+    sampling_percent: 100.0
+    catalog_publishing_enabled: true
+  - scan_id: "meridian-coldchain-profile"
+    display_name: "Meridian Cold-Chain Q3 Data Profile"
+    description: "Profiles certified cold-chain margin distributions across SEA markets on mart_coldchain_q3_r2."
+    target_table: "mart_coldchain_q3_r2"
+    sampling_percent: 100.0
+    catalog_publishing_enabled: true
+
+data_documentation_scans:
+  - scan_id: "meridian-orders-insights"
+    display_name: "Meridian Orders Data Insights"
+    description: "Generates BigQuery Data Insights natural-language queries and table summaries for orders."
+    target_table: "orders"
+    catalog_publishing_enabled: true
+  - scan_id: "meridian-customers-insights"
+    display_name: "Meridian Customers Data Insights"
+    description: "Generates BigQuery Data Insights natural-language queries and table summaries for customers."
+    target_table: "customers"
+    catalog_publishing_enabled: true
+  - scan_id: "meridian-coldchain-insights"
+    display_name: "Meridian Cold-Chain Q3 Data Insights"
+    description: "Generates BigQuery Data Insights natural-language queries and table summaries for mart_coldchain_q3_r2."
+    target_table: "mart_coldchain_q3_r2"
+    catalog_publishing_enabled: true
+
+data_products:
+  - data_product_id: "meridian-coldchain-q3-product"
+    display_name: "Meridian Cold-Chain Q3 Margin"
+    description: "Certified Closed Q3 Cold-Chain Gross Margin Data Product including late-Q3 settled supplier rebates (close_batch_code = 'B26Q3_R2') and BigQuery Row-Level Security."
+    assets:
+      - asset_id: "mart-coldchain-q3-r2"
+        table: "mart_coldchain_q3_r2"
+
 unstructured_contracts:
   bucket_suffix: "meridian-contracts"
   connection_id: "meridian_vertex_conn"
   object_table: "contract_docs_obj"
+  object_table_description: "BigQuery Object Table over executed vendor MSA and contract amendment documents in Cloud Storage."
   files:
     - "contracts/ArcticHaul_Amendment_2.md"
     - "contracts/ArcticHaul_MSA_2025.md"
     - "contracts/SiamFrost_Logistics_MSA_2025.md"
     - "contracts/StraitsTemp_Cargo_MSA_2025.md"
   extraction_staging_table: "sla_overlay_extracted"
+  extraction_table_description: "Structured SLA amendment overlay extracted from contract_docs_obj via BigQuery AI.GENERATE in asia-southeast1."
+  extraction_column_descriptions:
+    source_uri: "Cloud Storage object URI of the source executed contract or amendment document."
+    overlay_id: "Unique structured contract amendment overlay identifier."
+    vendor_name: "Cold-chain carrier vendor name covered by the executed amendment."
+    sku_class: "Thermal SKU class governed by the amendment (e.g., BIOLOGIC_CHILLED)."
+    effective_quarter: "Fiscal quarter in which the superseding amendment terms apply (e.g., 2026-Q3)."
+    source_document: "Executed amendment or MSA document reference extracted from contract text."
+    temp_threshold_c: "Amended excursion temperature trigger in Celsius (strict > threshold)."
+    duration_threshold_min: "Amended minimum excursion duration in minutes (>= threshold)."
+    credit_rate: "Amended SLA credit rate expressed as a decimal fraction (e.g., 0.12 for 12%)."
+    quarterly_cap_sgd: "Maximum recoverable quarterly SLA credit cap per vendor in SGD."
+    extraction_status: "BigQuery AI.GENERATE row-level extraction status returned by the model call."
   fallback_table: "sla_overlay"
   target_vendor_filter: "ArcticHaul"
   target_file_pattern: "ArcticHaul_Amendment_2.md"

@@ -28,8 +28,6 @@ from engine.pack_loader import (
     resolve_phase2_settings,
 )
 from engine.rls_impersonation import (
-    is_valid_customer_sa,
-    parse_role_sa_map,
     redact_bundle_data,
     redact_sensitive_identifiers,
     resolve_agent_sa_map,

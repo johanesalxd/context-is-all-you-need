@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 import json
 from pathlib import Path
 import threading
@@ -22,7 +21,7 @@ from engine.context_retriever import (
     resolve_execution_sa,
     validate_agent_sql_gate,
 )
-from engine.eval_harness import build_empirical_eval, run_eval_harness, select_median_token_representative
+from engine.eval_harness import run_eval_harness
 from engine.leak_check import scan_text_for_leaks
 from engine.live_agent import (
     AgentRunResult,
@@ -31,7 +30,7 @@ from engine.live_agent import (
     run_live_agent_arm,
     run_offline_mock_arm,
 )
-from engine.pack_loader import load_schema, validate_bundle
+from engine.pack_loader import validate_bundle
 from engine.rls_impersonation import ImpersonationError, parse_agent_sa_map, resolve_agent_sa_map
 from scripts import provision_context_layer as pcl
 from server.app import create_app
@@ -2517,6 +2516,572 @@ def test_truncation_slices_and_fallback_answer_redact_before_slicing_and_classif
     assert res.tool_trace[1]["output_preview"].endswith("...")
     assert not any("987654" in reason for reason in res.trust_reasons)
     assert not any("acme-sandbox" in reason for reason in res.trust_reasons)
+
+
+def test_meridian_context_layer_baseline_and_metric_contract_no_collision() -> None:
+    from engine.pack_loader import load_context_layer
+
+    ctx_yaml = load_context_layer("meridian_q3_sgd")
+    assert ctx_yaml["shadow_table_description"]
+    terms = ctx_yaml["glossary"]["terms"]
+    assert [t["term_id"] for t in terms] == [
+        "premier-customer",
+        "net-realized-revenue",
+        "certified-close-cycle",
+        "biologic-chilled-class",
+    ]
+    for term in terms:
+        assert term.get("linked_columns"), f"Missing linked_columns on {term['term_id']}"
+
+    assert [(s["scan_id"], s["target_table"]) for s in ctx_yaml["data_profile_scans"]] == [
+        ("meridian-orders-profile", "orders"),
+        ("meridian-customers-profile", "customers"),
+        ("meridian-coldchain-profile", "mart_coldchain_q3_r2"),
+    ]
+    assert [(s["scan_id"], s["target_table"]) for s in ctx_yaml["data_documentation_scans"]] == [
+        ("meridian-orders-insights", "orders"),
+        ("meridian-customers-insights", "customers"),
+        ("meridian-coldchain-insights", "mart_coldchain_q3_r2"),
+    ]
+    dps = ctx_yaml["data_products"]
+    assert len(dps) == 1
+    assert dps[0]["data_product_id"] == "meridian-coldchain-q3-product"
+    assert dps[0]["assets"] == [{"asset_id": "mart-coldchain-q3-r2", "table": "mart_coldchain_q3_r2"}]
+    assert "owner_emails" not in dps[0]
+
+    unstructured = ctx_yaml["unstructured_contracts"]
+    assert unstructured["object_table_description"]
+    assert unstructured["extraction_table_description"]
+    assert set(unstructured["extraction_column_descriptions"].keys()) == {
+        "source_uri",
+        "overlay_id",
+        "vendor_name",
+        "sku_class",
+        "effective_quarter",
+        "source_document",
+        "temp_threshold_c",
+        "duration_threshold_min",
+        "credit_rate",
+        "quarterly_cap_sgd",
+        "extraction_status",
+    }
+
+    gov_bq = _FakeAgentBQClient(tables_by_dataset={"synth_gov": {"orders": {"table_type": "TABLE", "schema": []}}})
+    cat_client = DataplexCatalogRestClient(
+        project_id="example-project-id",
+        bq_location="asia-southeast1",
+        http_transport=lambda _m, _u, _p, _h: {"results": [], "aspects": {}},
+    )
+    g_ctx = GovernedToolContext(
+        project_id="example-project-id",
+        dataset_id="synth_gov",
+        blind_dataset_id="synth_blind",
+        bq_location="asia-southeast1",
+        metadata_bq_client=gov_bq,
+        sql_bq_client=gov_bq,
+        metadata_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        sql_sa_email="gov@example-project-id.iam.gserviceaccount.com",
+        catalog_client=cat_client,
+        context_layer=ctx_yaml,
+    )
+
+    assert list(g_ctx.get_verified_metric_contract("r3")["matched_contracts"].keys()) == ["r3_metrics"]
+    assert list(g_ctx.get_verified_metric_contract("same-day contribution margin")["matched_contracts"].keys()) == [
+        "r3_metrics"
+    ]
+    assert list(g_ctx.get_verified_metric_contract("r5_graph")["matched_contracts"].keys()) == ["r5_graph"]
+    assert list(g_ctx.get_verified_metric_contract("supply chain 4-hop property graph")["matched_contracts"].keys()) == [
+        "r5_graph"
+    ]
+    assert list(g_ctx.get_verified_metric_contract("lot allocation excursion")["matched_contracts"].keys()) == [
+        "r5_graph"
+    ]
+    assert list(g_ctx.get_verified_metric_contract("vendor sla credit amendment")["matched_contracts"].keys()) == [
+        "r6_contracts"
+    ]
+    # Historical R5 topics must match r5_graph (no glossary token collision)
+    for hist_r5 in (
+        "Tier-2 Batch LN-409 SG Premier orders",
+        "delayed batch orders revenue tier-2",
+        "delayed batch orders revenue",
+        "delayed batch order revenue",
+    ):
+        assert list(g_ctx.get_verified_metric_contract(hist_r5)["matched_contracts"].keys()) == ["r5_graph"], hist_r5
+    # Glossary term display names must NOT collide with any verified metric contract
+    for glossary_name in (
+        "Premier Customer",
+        "Net Realized Revenue",
+        "Certified Close Cycle",
+        "Biologic Chilled Class",
+    ):
+        assert list(g_ctx.get_verified_metric_contract(glossary_name)["matched_contracts"].keys()) == [], glossary_name
+
+
+def test_provision_profile_insights_data_product_descriptions_and_rls_preservation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from google.cloud import bigquery
+
+    proj = "live-prov-" + "556677"
+    monkeypatch.setenv("PROJECT_ID", proj)
+    monkeypatch.setenv("DATASET_ID", "synth_commerce")
+    monkeypatch.setenv("BLIND_DATASET_ID", "synth_blind")
+
+    packs_dir = tmp_path / "packs"
+    p_dir = packs_dir / "synth_p2_full"
+    (p_dir / "sql").mkdir(parents=True)
+    (p_dir / "contracts").mkdir(parents=True)
+    (p_dir / "contracts" / "Vendor_Amendment_2.md").write_text("# Amendment 2\n", encoding="utf-8")
+    (p_dir / "sql" / "03_rls.sql").write_text(
+        "CREATE ROW ACCESS POLICY rls_cfo_all ON `${PROJECT_ID}.${DATASET_ID}.mart_r2` GRANT TO ('${RLS_CFO_PRINCIPAL}') FILTER USING (TRUE);",
+        encoding="utf-8",
+    )
+    (p_dir / "context_layer.yaml").write_text(
+        json.dumps(
+            {
+                "blind_dataset_tables": ["orders", "mart_r1", "mart_r2"],
+                "shadow_source_table": "mart_r1",
+                "shadow_table_count": 2,
+                "shadow_table_description": "Uncertified shadow clone.",
+                "glossary": {
+                    "glossary_id": "synth-gloss",
+                    "display_name": "Synth Glossary",
+                    "terms": [
+                        {
+                            "term_id": "premier-customer",
+                            "display_name": "Premier",
+                            "description": "Code P",
+                            "linked_columns": [
+                                {"table": "customers", "column": "tier_code", "link_type": "definition"}
+                            ],
+                        }
+                    ],
+                },
+                "data_profile_scans": [
+                    {
+                        "scan_id": "synth-orders-profile",
+                        "display_name": "Orders Profile",
+                        "target_table": "orders",
+                        "sampling_percent": 100.0,
+                        "catalog_publishing_enabled": True,
+                    }
+                ],
+                "data_documentation_scans": [
+                    {
+                        "scan_id": "synth-orders-insights",
+                        "display_name": "Orders Insights",
+                        "target_table": "orders",
+                        "catalog_publishing_enabled": True,
+                    }
+                ],
+                "data_products": [
+                    {
+                        "data_product_id": "synth-q3-product",
+                        "display_name": "Synth Q3 Margin",
+                        "description": "Certified Q3 Data Product",
+                        "assets": [{"asset_id": "mart-r2", "table": "mart_r2"}],
+                    }
+                ],
+                "unstructured_contracts": {
+                    "bucket_suffix": "synth-contracts",
+                    "files": ["contracts/Vendor_Amendment_2.md"],
+                    "object_table": "contract_docs_obj",
+                    "object_table_description": "Object table over contracts.",
+                    "extraction_staging_table": "sla_overlay_extracted",
+                    "extraction_table_description": "Extracted SLA overlay.",
+                    "extraction_column_descriptions": {
+                        "vendor_name": "Carrier vendor name.",
+                        "credit_rate": "Amended credit rate.",
+                    },
+                    "ai_generate_prompt": "Extract SLA overlay",
+                    "expected_invariants": {"vendor_name": "VendorA", "credit_rate": 0.12},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    plan = pcl.resolve_provision_plan(pack_id="synth_p2_full", repo_root=tmp_path, packs_dir=packs_dir)
+    assert plan["shadow_table_description"] == "Uncertified shadow clone."
+    assert len(plan["data_profile_scans"]) == 1
+    assert len(plan["data_documentation_scans"]) == 1
+    assert len(plan["data_products"]) == 1
+
+    # Verify --dry-run CLI prints data_profile_scans, data_documentation_scans, and data_products with safe fallback owner
+    monkeypatch.setattr(pcl, "REPO_ROOT", tmp_path)
+    assert pcl.main(["--pack", "synth_p2_full", "--dry-run"]) == 0
+    dry_out = json.loads(capsys.readouterr().out)
+    assert dry_out["plan"]["data_profile_scans"][0]["scan_id"] == "synth-orders-profile"
+    assert dry_out["plan"]["data_documentation_scans"][0]["scan_id"] == "synth-orders-insights"
+    assert dry_out["plan"]["data_products"][0]["owner_emails"] == ["redacted-user@example.com"]
+
+    clean_schema = [bigquery.SchemaField("id", "STRING")]
+    extracted_schema = [
+        bigquery.SchemaField("vendor_name", "STRING"),
+        bigquery.SchemaField("credit_rate", "FLOAT64"),
+    ]
+
+    class _TrackingBQ(_FakeAgentBQClient):
+        def __init__(self, **kw: Any) -> None:
+            super().__init__(**kw)
+            self.updated_tables: list[tuple[str, list[str], str | None, dict[str, str | None]]] = []
+
+        def create_table(self, tbl: Any, exists_ok: bool = False) -> None:
+            parts = tbl.reference.table_id if hasattr(tbl, "reference") else tbl.table_id
+            ds_id = tbl.reference.dataset_id if hasattr(tbl, "reference") else ""
+            self.tables_by_dataset.setdefault(ds_id, {})[parts] = {
+                "table_type": "TABLE",
+                "description": getattr(tbl, "description", None),
+                "num_rows": 0,
+                "schema": list(tbl.schema or []),
+            }
+            self.created_tables.append(f"{ds_id}.{parts}")
+
+        def update_table(self, tbl: Any, fields: list[str]) -> None:
+            t_id = tbl.table_id
+            col_descs = {f.name: getattr(f, "description", None) for f in (getattr(tbl, "schema", None) or [])}
+            self.updated_tables.append((t_id, list(fields), getattr(tbl, "description", None), col_descs))
+
+    fake_bq = _TrackingBQ(
+        tables_by_dataset={
+            "synth_commerce": {
+                "orders": {"schema": clean_schema},
+                "mart_r1": {"schema": clean_schema},
+                "mart_r2": {"schema": clean_schema},
+                "shadow_auto_tbl_001": {"schema": clean_schema, "description": None},
+                "contract_docs_obj": {"schema": clean_schema, "description": None},
+                "sla_overlay_extracted": {"schema": extracted_schema, "description": None},
+            }
+        },
+        rows_by_sql=lambda sql, _d: (
+            [{"cnt": 4}]
+            if "COUNT(*)" in sql
+            else [{"vendor_name": "VendorA", "credit_rate": 0.12}]
+        ),
+    )
+
+    orig_query = fake_bq.query
+
+    def _q_effect(sql: str, *, job_config: Any = None, location: str = "asia-southeast1") -> Any:
+        if "CREATE OR REPLACE TABLE" in sql and ".synth_blind." in sql:
+            tbl_leaf = sql.split(".synth_blind.", 1)[1].split()[0].strip("`")
+            fake_bq.tables_by_dataset.setdefault("synth_blind", {})[tbl_leaf] = {
+                "table_type": "TABLE",
+                "description": None,
+                "num_rows": 4,
+                "schema": list(clean_schema),
+            }
+        return orig_query(sql, job_config=job_config, location=location)
+
+    fake_bq.query = _q_effect  # type: ignore[method-assign]
+
+    rest_calls: list[tuple[str, str, dict[str, Any] | None]] = []
+    scan_jobs_seen: dict[str, int] = {}
+
+    def _rest_transport(method: str, url: str, payload: dict | None) -> tuple[int, dict[str, Any]]:
+        rest_calls.append((method, url, payload))
+        if method == "GET" and url.endswith("/rowAccessPolicies"):
+            return 200, {
+                "rowAccessPolicies": [
+                    {
+                        "rowAccessPolicyReference": {"policyId": "rls_cfo_all"},
+                        "grantees": ["user:collab@example.com"],
+                    }
+                ]
+            }
+        if ":lookupEntry" in url:
+            return 200, {"name": "ok"}
+        if "/dataScans/" in url and "/jobs/" in url and method == "GET":
+            return 200, {"state": "SUCCEEDED"}
+        if url.endswith("/jobs") and method == "GET":
+            scan_id = url.split("/dataScans/", 1)[1].split("/jobs", 1)[0]
+            scan_jobs_seen[scan_id] = scan_jobs_seen.get(scan_id, 0) + 1
+            return 200, {"dataScanJobs": []}
+        if ":run" in url and method == "POST":
+            scan_id = url.split("/dataScans/", 1)[1].split(":run", 1)[0]
+            return 200, {"job": {"name": f"projects/{proj}/locations/asia-southeast1/dataScans/{scan_id}/jobs/j1"}}
+        if method == "POST" and "/dataProducts?" in url:
+            return 409, {"error": {"code": 409, "message": "already exists"}}
+        if "/connections?" in url:
+            return 200, {"cloudResource": {"serviceAccountId": f"conn-sa@{proj}.iam.gserviceaccount.com"}}
+        return 200, {"done": True}
+
+    fake_bucket = SimpleNamespace(
+        iam_configuration=SimpleNamespace(uniform_bucket_level_access_enabled=True, public_access_prevention="enforced"),
+        blob=lambda _name: SimpleNamespace(upload_from_filename=lambda *_a, **_kw: None),
+        list_blobs=lambda: [],
+        get_iam_policy=lambda **_kw: SimpleNamespace(bindings=[]),
+        set_iam_policy=lambda _p: None,
+        patch=lambda: None,
+        delete=lambda force=True: None,
+    )
+    fake_gcs = SimpleNamespace(get_bucket=lambda _n: fake_bucket, bucket=lambda _n: fake_bucket)
+    monkeypatch.setattr(pcl, "_ensure_sa_exists", lambda *_a, **_kw: None)
+    monkeypatch.setattr(pcl, "_bind_project_role", lambda *_a, **_kw: None)
+    monkeypatch.setattr(pcl, "_bind_sa_token_creator", lambda *_a, **_kw: None)
+    monkeypatch.setattr(pcl, "_sa_exists", lambda _sa: False)
+    monkeypatch.setattr(pcl, "_run_cmd", lambda *_a, **_kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(pcl.time, "sleep", lambda _s: None)
+
+    prov_res = pcl.run_provision(
+        plan,
+        repo_root=tmp_path,
+        packs_dir=packs_dir,
+        bq_client=fake_bq,
+        storage_client=fake_gcs,
+        rest_client=pcl._RestClient(transport=_rest_transport),
+        caller_email="dev@example.com",
+        project_number="123456789",
+    )
+    assert prov_res["status"] == "provisioned"
+
+    # RLS policy preserved collaborator grantee + caller + governed_sa
+    rls_ddls = [sql for sql, _ in fake_bq.queries if "CREATE OR REPLACE ROW ACCESS POLICY" in sql]
+    assert len(rls_ddls) == 1
+    assert '"user:collab@example.com"' in rls_ddls[0]
+    assert '"user:dev@example.com"' in rls_ddls[0]
+    assert f'"serviceAccount:{plan["governed_agent_sa"]}"' in rls_ddls[0]
+
+    # Governed shadows got descriptions (both existing 001 via update_table and new 002 via create_table), blind got None
+    assert fake_bq.tables_by_dataset["synth_commerce"]["shadow_auto_tbl_002"]["description"] == "Uncertified shadow clone."
+    assert any(t == "shadow_auto_tbl_001" and d == "Uncertified shadow clone." for t, _, d, _ in fake_bq.updated_tables)
+    assert fake_bq.tables_by_dataset["synth_blind"]["shadow_auto_tbl_001"]["description"] is None
+    assert fake_bq.tables_by_dataset["synth_blind"]["shadow_auto_tbl_002"]["description"] is None
+
+    # Object table and extraction table/column descriptions updated
+    assert any(t == "contract_docs_obj" and d == "Object table over contracts." for t, _, d, _ in fake_bq.updated_tables)
+    assert any(
+        t == "sla_overlay_extracted"
+        and d == "Extracted SLA overlay."
+        and cols.get("vendor_name") == "Carrier vendor name."
+        and cols.get("credit_rate") == "Amended credit rate."
+        for t, _, d, cols in fake_bq.updated_tables
+    )
+
+    # Profile & Documentation scans created and :run triggered
+    profile_posts = [p for m, u, p in rest_calls if m == "POST" and "/dataScans?" in u and "dataProfileSpec" in (p or {})]
+    doc_posts = [p for m, u, p in rest_calls if m == "POST" and "/dataScans?" in u and "dataDocumentationSpec" in (p or {})]
+    assert len(profile_posts) == 1
+    assert profile_posts[0]["dataProfileSpec"] == {"samplingPercent": 100.0, "catalogPublishingEnabled": True}  # type: ignore[index]
+    assert len(doc_posts) == 1
+    assert doc_posts[0]["dataDocumentationSpec"] == {"catalogPublishingEnabled": True}  # type: ignore[index]
+    assert any(m == "POST" and "/dataScans/synth-orders-profile:run" in u for m, u, _ in rest_calls)
+    assert any(m == "POST" and "/dataScans/synth-orders-insights:run" in u for m, u, _ in rest_calls)
+
+    # DataProduct POST sends dynamic caller email, while 409 PATCH omits ownerEmails unless configured in YAML
+    dp_posts = [(u, p) for m, u, p in rest_calls if m == "POST" and "/dataProducts?dataProductId=synth-q3-product" in u]
+    assert len(dp_posts) == 1
+    assert dp_posts[0][1]["ownerEmails"] == ["dev@example.com"]  # type: ignore[index]
+    dp_patches = [(u, p) for m, u, p in rest_calls if m == "PATCH" and "/dataProducts/synth-q3-product" in u]
+    assert len(dp_patches) == 1
+    assert "updateMask=displayName,description" in dp_patches[0][0]
+    assert "ownerEmails" not in dp_patches[0][0]
+    assert "ownerEmails" not in (dp_patches[0][1] or {})
+    asset_posts = [(u, p) for m, u, p in rest_calls if m == "POST" and "/dataAssets?dataAssetId=mart-r2" in u]
+    assert len(asset_posts) == 1
+    assert asset_posts[0][1]["resource"].endswith("/datasets/synth_commerce/tables/mart_r2")  # type: ignore[index]
+
+    # Teardown deletes child dataAsset BEFORE parent dataProduct, and deletes profile/doc scans
+    rest_calls.clear()
+    td_res = pcl.run_teardown(
+        plan,
+        bq_client=fake_bq,
+        storage_client=fake_gcs,
+        rest_client=pcl._RestClient(transport=_rest_transport),
+    )
+    assert td_res["status"] == "torn_down"
+    del_urls = [u for m, u, _ in rest_calls if m == "DELETE"]
+    asset_del_idx = next(i for i, u in enumerate(del_urls) if "/dataAssets/mart-r2" in u)
+    dp_del_idx = next(i for i, u in enumerate(del_urls) if u.endswith("/dataProducts/synth-q3-product"))
+    assert asset_del_idx < dp_del_idx
+    assert any("/dataScans/synth-orders-profile?force=true" in u for u in del_urls)
+    assert any("/dataScans/synth-orders-insights?force=true" in u for u in del_urls)
+
+
+def test_sync_rls_get_iam_policy_fallback_deleted_filter_dataplex_sa_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proj = "synth-proj-42"
+    synth_num = "12345" + "6789"
+    monkeypatch.setattr(
+        pcl,
+        "_run_cmd",
+        lambda *_a, **_kw: SimpleNamespace(returncode=0, stdout=f"Created proxy.\n{synth_num}\n", stderr=""),
+    )
+    dp_sa = pcl._resolve_dataplex_service_agent(proj)
+    assert dp_sa == f"service-{synth_num}@gcp-sa-dataplex.iam.gserviceaccount.com"
+
+    # 1. GET /rowAccessPolicies omits grantees -> falls back to :getIamPolicy, filters deleted:*, adds dataplex_sa
+    bq_ok = _FakeAgentBQClient(rows_by_sql=lambda _sql, _d: [])
+
+    def _iam_fallback_transport(method: str, url: str, _payload: dict | None) -> tuple[int, dict[str, Any]]:
+        if method == "GET" and url.endswith("/rowAccessPolicies"):
+            return 200, {
+                "rowAccessPolicies": [
+                    {"rowAccessPolicyReference": {"policyId": "rls_cfo_all"}}
+                ]
+            }
+        if method == "POST" and url.endswith("/rls_cfo_all:getIamPolicy"):
+            return 200, {
+                "bindings": [
+                    {
+                        "role": "roles/bigquery.filteredDataViewer",
+                        "members": [
+                            "user:collab@example.com",
+                            "deleted:user:departed@example.com?uid=123",
+                            "serviceAccount:synth-blind-agent@example-project-id.iam.gserviceaccount.com",
+                        ],
+                    }
+                ]
+            }
+        return 404, {}
+
+    pcl._sync_rls_cfo_policy(
+        bq_ok,
+        project_id=proj,
+        dataset_id="synth_commerce",
+        bq_location="asia-southeast1",
+        rls_table="mart_r2",
+        rls_cfo_policy="rls_cfo_all",
+        caller_email="owner@example.com",
+        governed_sa="synth-governed-agent@example-project-id.iam.gserviceaccount.com",
+        web_runner_sa="synth-web-runner@example-project-id.iam.gserviceaccount.com",
+        rest_client=pcl._RestClient(transport=_iam_fallback_transport),
+        dataplex_sa=dp_sa,
+        restricted_sas=["synth-blind-agent@example-project-id.iam.gserviceaccount.com"],
+    )
+    ddl_cmds = [sql for sql, _ in bq_ok.queries if "CREATE OR REPLACE ROW ACCESS POLICY" in sql]
+    assert len(ddl_cmds) == 1
+    assert '"user:collab@example.com"' in ddl_cmds[0]
+    assert '"user:owner@example.com"' in ddl_cmds[0]
+    assert f'"serviceAccount:{dp_sa}"' in ddl_cmds[0]
+    assert "deleted:" not in ddl_cmds[0]
+    assert "synth-blind-agent" not in ddl_cmds[0]
+
+    # 2. Fail-closed: policy exists on table, but neither list_active_row_access_policies nor REST :getIamPolicy returns grantees
+    bq_fail = _FakeAgentBQClient(rows_by_sql=lambda _sql, _d: [])
+
+    def _missing_grantees_transport(method: str, url: str, _payload: dict | None) -> tuple[int, dict[str, Any]]:
+        if method == "GET" and url.endswith("/rowAccessPolicies"):
+            return 200, {
+                "rowAccessPolicies": [
+                    {"rowAccessPolicyReference": {"policyId": "rls_cfo_all"}}
+                ]
+            }
+        if method == "POST" and url.endswith("/rls_cfo_all:getIamPolicy"):
+            return 403, {"error": {"code": 403, "message": "Permission denied"}}
+        return 404, {}
+
+    with pytest.raises(RuntimeError, match="Refusing to overwrite existing RLS policy rls_cfo_all"):
+        pcl._sync_rls_cfo_policy(
+            bq_fail,
+            project_id=proj,
+            dataset_id="synth_commerce",
+            bq_location="asia-southeast1",
+            rls_table="mart_r2",
+            rls_cfo_policy="rls_cfo_all",
+            caller_email="owner@example.com",
+            governed_sa="synth-governed-agent@example-project-id.iam.gserviceaccount.com",
+            web_runner_sa=None,
+            rest_client=pcl._RestClient(transport=_missing_grantees_transport),
+        )
+    assert not any("CREATE OR REPLACE ROW ACCESS POLICY" in sql for sql, _ in bq_fail.queries)
+
+
+def test_run_teardown_cleans_conn_sa_iam_detaches_aspects_and_handles_bucket_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from google.api_core.exceptions import Forbidden, NotFound
+
+    proj = "synth-proj-42"
+    synth_num = "12345" + "6789"
+    plan = {
+        "pack_id": "synth_td",
+        "project_id": proj,
+        "dataset_id": "synth_commerce",
+        "blind_dataset_id": "synth_blind",
+        "bq_location": "asia-southeast1",
+        "connection_id": "synth_conn",
+        "blind_agent_sa": f"synth-blind-agent@{proj}.iam.gserviceaccount.com",
+        "governed_agent_sa": f"synth-governed-agent@{proj}.iam.gserviceaccount.com",
+        "glossary": {},
+        "aspect_types": [
+            {
+                "aspect_type_id": "data-product-certification",
+                "assignments": [{"table": "mart_r2"}],
+            }
+        ],
+        "data_quality_scans": [],
+        "unstructured_contracts": {
+            "object_table": "contract_docs_obj",
+            "extraction_staging_table": "sla_overlay_extracted",
+        },
+        "bucket_name": f"{proj}-synth-contracts",
+    }
+
+    run_cmds: list[list[str]] = []
+
+    def _rec_cmd(cmd: list[str], *, check: bool = True) -> SimpleNamespace:
+        _ = check
+        run_cmds.append(list(cmd))
+        if cmd[:3] == ["gcloud", "projects", "describe"]:
+            return SimpleNamespace(returncode=0, stdout=f"{synth_num}\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(pcl, "_run_cmd", _rec_cmd)
+
+    rest_calls: list[tuple[str, str, dict[str, Any] | None]] = []
+    conn_sa = f"bq-conn-sa@{proj}.iam.gserviceaccount.com"
+
+    def _td_transport(method: str, url: str, payload: dict | None) -> tuple[int, dict[str, Any]]:
+        rest_calls.append((method, url, payload))
+        if method == "DELETE" and "/aspectTypes/data-product-certification" in url:
+            return 409, {"error": {"code": 409, "message": "Still attached"}}
+        if method == "GET" and "/connections/synth_conn" in url:
+            return 200, {"cloudResource": {"serviceAccountId": conn_sa}}
+        return 200, {"done": True}
+
+    fake_bq = _FakeAgentBQClient()
+    fake_gcs_not_found = SimpleNamespace(
+        get_bucket=lambda _name: (_ for _ in ()).throw(NotFound("bucket gone"))
+    )
+
+    res = pcl.run_teardown(
+        plan,
+        delete_agent_sas=True,
+        bq_client=fake_bq,
+        storage_client=fake_gcs_not_found,
+        rest_client=pcl._RestClient(transport=_td_transport),
+    )
+    assert res["status"] == "torn_down"
+    # Aspect detach PATCH ran and 409 on aspectType did not block connection/dataset cleanup
+    assert any(m == "PATCH" and "aspectKeys=" in u and payload == {"aspects": {}} for m, u, payload in rest_calls)
+    assert any(m == "DELETE" and "/connections/synth_conn" in u for m, u, _ in rest_calls)
+    assert "synth_blind" in fake_bq.deleted_datasets
+
+    # conn_sa roles/aiplatform.user and agent SA IAM bindings removed with --all
+    conn_rm = [c for c in run_cmds if f"--member=serviceAccount:{conn_sa}" in c and "--role=roles/aiplatform.user" in c]
+    assert len(conn_rm) == 1
+    assert "--all" in conn_rm[0]
+    agent_rm = [c for c in run_cmds if "remove-iam-policy-binding" in c and f"synth-blind-agent@{proj}" in " ".join(c)]
+    assert agent_rm and all("--all" in c for c in agent_rm)
+
+    # Non-NotFound GCS error (e.g. Forbidden) is NOT silently swallowed
+    fake_gcs_forbidden = SimpleNamespace(
+        get_bucket=lambda _name: (_ for _ in ()).throw(Forbidden("access denied"))
+    )
+    with pytest.raises(Forbidden):
+        pcl.run_teardown(
+            plan,
+            bq_client=fake_bq,
+            storage_client=fake_gcs_forbidden,
+            rest_client=pcl._RestClient(transport=_td_transport),
+        )
+
+
+
 
 
 

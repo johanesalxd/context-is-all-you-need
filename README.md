@@ -65,8 +65,8 @@ Open `web/index.html` directly over `file://` (no build step, no ES module CORS 
 
 Designed for live executive presentations using `10% / 80% / 10%` Quiet Stage V2 proportions:
 
-- **Top `10%` Bar:** Pack header, `hero_tagline`, explicit **Regional Honesty Badge** (`Data, Graph, Catalog & RLS in asia-southeast1 · Gemini PayGo Inference via global Endpoint`), Rung stepper (`Overview` + `R1`–`R6` + `Act IV Horizon`), `Q | Blind | Compare | Governed` beat controls, `? Guide` plain-English drawer, `Stage | Workbench` switch, `Paper | Dark` theme switch, `Poll [P]` trigger, and live Context Token & Retry delta pill.
-- **Center `80%` Hero Canvas:** Business question, `pyramid_layer` and explicit `GA` / `Preview` / `Reference Architecture` badges, side-by-side `Blind Agent Trap` vs `Governed Enterprise Context` comparison, `Empirical N=5` alongside `Target:` badges when `empirical_eval` is present, interactive **`Beat 4b · Switch Identity`** toggle on Rung 4, and the decoupled **`Act IV Horizon`** showcase.
+- **Top `10%` Bar:** Pack header, `hero_tagline`, explicit **Regional Honesty Badge** (`Data, Graph, Catalog & RLS in asia-southeast1 · Gemini PayGo Inference via global Endpoint`), Rung stepper (`Overview` briefing tab + `R1`–`R6` + `What's Next` / `Act IV Horizon` tab), `Q | Blind | Compare | Governed` beat controls, `? Guide` plain-English help drawer, `Stage | Workbench` switch, `Paper | Dark` theme switch, `Poll [P]` trigger, and live Context Token & Retry delta pill.
+- **Center `80%` Hero Canvas:** `Overview` executive briefing tab, business question, `pyramid_layer` and explicit `GA` / `Preview` / `Reference Architecture` badges, side-by-side `Blind Agent Trap` vs `Governed Enterprise Context` comparison, `Empirical N=5` alongside `Target:` badges when `empirical_eval` is present, interactive **`Beat 4b · Switch Identity`** toggle on Rung 4, and the decoupled **`What's Next` (`Act IV Horizon`)** showcase.
 - **Slide-Up Stage X-Ray Drawer (`[X]`):** Press `X` (`KeyX`) or click `[X] X-Ray` in the Stage footer to reveal injected Knowledge Catalog & Governance context (`context_mechanism`, `context_payload`, `xray_summary`, `gcp_primitives`), side-by-side compiled `Blind` vs `Governed` SQL/ISO GQL, and empirical `N=5` telemetry without leaving Stage Mode (`Escape` closes).
 - **Live QR Audience Poll (`[P]` & `/vote`):** Press `P` (`KeyP`) to open the 2-column CDO Myth-Busting Poll modal with a server-rendered SVG QR code (`/api/poll/qr.svg`), live animated vote bars (`2000ms` diff-guarded polling), automatic presenter stage-sync (`POST /api/poll/sync-stage`), optional `poll.external_poll_url`, and presenter-gated `Clear Room Votes` (`POST /api/poll/reset` via `X-Demo-Key`). Executives scan the QR code to open `/vote`—a zero-login, dim-ballroom dark-mode mobile UI backed by Firestore Native (`FIRESTORE_DATABASE_ID`, default `meridian-polls` in `asia-southeast1`) with an in-memory fallback offline.
 - **Bottom `10%` Bar:** `k / N` Golden Eval Pass Rate + `Empirical N=5` telemetry indicator, `TrustTier` progression, exploratory query comparison, `[X] X-Ray` drawer button, and navigation controls (no slow live-agent runner on the main Stage bar so transitions stay `0ms`).
@@ -133,7 +133,7 @@ Then open `web/index.html` directly via `file://` or serve it locally with FastA
 uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
 ```
 
-### 3. Live BigQuery `asia-southeast1` Provisioning & Capture
+### 3. Live BigQuery `asia-southeast1` Spin-Up, Deployment & Spin-Down
 
 Copy `.env.example` to `.env` (gitignored) and configure your non-production sandbox target:
 
@@ -142,33 +142,65 @@ cp .env.example .env
 # Edit .env with your sandbox PROJECT_ID, BQ_LOCATION="asia-southeast1", DATASET_ID
 ```
 
-Provision tables, 190 shadow clones, row-level security policies, and the BigQuery Property Graph:
+#### One-Command Full Spin-Up & Full Spin-Down
+
+Provision BigQuery tables, 190 shadow clones, RLS, Property Graph, Knowledge Catalog, Object Table extraction, Cloud Run, and the Firestore poll database in one command:
 
 ```bash
-bash scripts/provision_pack.sh
+bash scripts/spin_up.sh --dry-run
+bash scripts/spin_up.sh --project example-project-id --region asia-southeast1
 ```
 
-Validate query syntax and byte estimates (`--dry-run`), then execute live queries and negative governance controls (`--live-gcp`):
+And tear down everything cleanly (dataset, Knowledge Catalog assets, Cloud Run service, Artifact Registry package, Firestore poll DB, and dedicated SAs) with one command:
+
+```bash
+bash scripts/spin_down.sh --dry-run
+bash scripts/spin_down.sh --yes
+```
+
+#### Step-by-Step Commands (Individual Stages)
+
+1. Provision tables, 190 shadow clones, row-level security policies, and the BigQuery Property Graph:
+
+```bash
+bash scripts/provision_pack.sh --provision-rls-sas
+```
+
+2. Provision the physical `meridian_blind` dataset, Knowledge Catalog metadata, and `AI.GENERATE` contract extraction:
+
+```bash
+uv run python scripts/provision_context_layer.py --pack meridian_q3_sgd --live-gcp
+```
+
+3. Validate query syntax and byte estimates (`--dry-run`), then execute live queries and negative governance controls (`--live-gcp`):
 
 ```bash
 uv run python -m engine.capture_rungs --pack meridian_q3_sgd --dry-run
 uv run python -m engine.capture_rungs --pack meridian_q3_sgd --live-gcp
 ```
 
+4. Deploy Cloud Run + Firestore Poll DB (or run `--app-only` for collaborator code/pack redeploys):
+
+```bash
+bash scripts/deploy_cloud_run.sh --project example-project-id --region asia-southeast1
+bash scripts/deploy_cloud_run.sh --app-only
+```
+
 #### Phase 2 Live Knowledge Catalog, Zero-Trust Agent & `N=5` Eval Architecture
 
 - **Physical Blind Trap vs. Governed Marts (`meridian_blind`):** `scripts/provision_pack.sh` creates an unannotated `meridian_blind` CTAS copy alongside governed marts in `asia-southeast1`. Unannotated ERP `orders` columns (`amt_gross_billed_sgd`, `amt_item_subtotal_sgd`, `amt_gst_sgd`, `amt_net_settled_sgd`) and unranked lookalike cold-chain tables (`mart_coldchain_q3_r1`, `mart_coldchain_q3_r2`) cause blind agents to over-query schemas or pick the wrong metric without Knowledge Catalog context.
-- **Knowledge Catalog Metadata & Unstructured Contract Layer (`scripts/provision_context_layer.py`):** Provisions Knowledge Catalog Glossary terms, `EntryLink` synonym/ownership relationships, `AspectType` governance metadata, and Auto DQ (`DataScan`) validation, plus the GCS Object Table `contract_docs_obj` feeding BigQuery `AI.GENERATE` into staging table `sla_overlay_extracted`.
+- **Knowledge Catalog Metadata & Unstructured Contract Layer (`scripts/provision_context_layer.py`):** Syncs the `rls_cfo_regional_all_markets` CFO RLS policy (preserving existing collaborator grantees and granting the Knowledge Catalog service agent) and provisions the complete `asia-southeast1` governance and blind layer on top of the tables, BigQuery Property Graph, and Row-Level Security created by `scripts/provision_pack.sh`: 4 Knowledge Catalog Business Glossary terms (`premier-customer`, `net-realized-revenue`, `certified-close-cycle`, `biologic-chilled-class`) with column `EntryLink` bindings, 3 Data Profiling scans + 3 BigQuery Data Insights scans, the native Knowledge Catalog Data Product (`meridian-coldchain-q3-product`), `AspectType` certification tags, Auto DQ (`DataScan`), governed shadow-table descriptions, and the GCS Object Table `contract_docs_obj` feeding BigQuery `AI.GENERATE` into annotated staging table `sla_overlay_extracted`.
+  - *RLS + Catalog Publishing Trade-off:* Granting the Knowledge Catalog service agent `FILTER USING (TRUE)` on `mart_coldchain_q3_r2` alongside `catalogPublishingEnabled: true` is a synthetic-demo trade-off so DQ and Profile scans see full row counts; disable catalog publishing on RLS-protected tables in production.
 - **Zero-Trust Live Agent SAs & AST `dry_run` Gate:** `POST /api/run-agent` enforces least-privilege service account boundaries (`meridian-blind-agent` scoped strictly to `meridian_blind`, `meridian-governed-agent` on curated views/catalog, and `meridian-sg-coldchain` for regional RLS verification), parses and validates generated SQL/ISO GQL via a `dry_run` AST gate before query execution, and enforces `X-Demo-Key` authentication when enabled.
 - **Empirical `N=5` Eval Harness (`engine/eval_harness.py`):** Executes repeated blind and governed Gemini runs via the `global` PayGo inference endpoint against `asia-southeast1` BigQuery resources, records structured per-run telemetry in `results/live_eval_runs.jsonl`, and embeds `empirical_eval` summaries into `web/data/rungs_bundle.js`.
-- **Cloud Run Deployment (`scripts/deploy_cloud_run.sh`):** Deploys the hardened FastAPI Stage + Workbench + `/vote` service and zero-trust runtime configuration to a target GCP project (for example `--project example-project-id`) in `asia-southeast1` with `X-Demo-Key` token protection for live-agent and presenter poll-admin endpoints, and provisions the named Firestore Native database (`meridian-polls`) with `roles/datastore.user` scoped strictly to `meridian-web-runner`.
+- **Cloud Run Deployment (`scripts/deploy_cloud_run.sh`):** Deploys the hardened FastAPI Stage + Workbench + `/vote` service and zero-trust runtime configuration to a target GCP project (`--project example-project-id`) in `asia-southeast1` with `X-Demo-Key` token protection for live-agent and presenter poll-admin endpoints, and provisions the named Firestore Native database (`meridian-polls`) with `roles/datastore.user` scoped strictly to `meridian-web-runner`. Collaborators redeploying app/UI/pack changes to an already-bootstrapped service can run `./scripts/deploy_cloud_run.sh --app-only` to skip IAM/API/Firestore/BQ-ACL/RLS bootstrap and preserve existing service env vars and `.env` tokens (minimum collaborator IAM roles for `--app-only`: `roles/run.developer`, `roles/iam.serviceAccountUser` scoped to `<pack>-web-runner`, `roles/cloudbuild.builds.editor`, `roles/artifactregistry.writer`, and `roles/storage.objectAdmin`, plus `roles/bigquery.jobUser`, dataset access, and an `rls_cfo_regional_all_markets` grant if querying BigQuery directly; `gcloud run deploy --source` may also require `roles/iam.serviceAccountUser` on the project's default Cloud Build / Compute Engine build service account depending on project IAM setup).
 - **Live Poll Guardrails (Zero-Spoiler & Shared Hotel-NAT Safe):** `GET /api/poll/state` strictly omits `correct_key` and `reveal_takeaway` so mobile voters never see the answer before Stage reveal. `POST /api/poll/vote` enforces a shared-NAT-friendly IP ceiling (`POLL_VOTE_RPM_LIMIT=240` per minute) paired with a `15/min` per-voter limit (`SHA-256` hashed `voter_token`, zero PII stored) and `MAX_VOTERS_PER_EPOCH = 300` while allowing existing voters to switch choices (`A -> B`) idempotently.
 
-To tear down the sandbox dataset cleanly (pass `--delete-cloud-run` and `--delete-poll-db` to also remove the Cloud Run service and Firestore poll database):
+To tear down the sandbox dataset and all provisioned resources cleanly (`--all` deletes RLS SAs, Cloud Run service, Artifact Registry package, and Firestore poll database):
 
 ```bash
-bash scripts/teardown_pack.sh --dry-run
-bash scripts/teardown_pack.sh --yes
+bash scripts/teardown_pack.sh --dry-run --all
+bash scripts/teardown_pack.sh --yes --all
 ```
 
 ---

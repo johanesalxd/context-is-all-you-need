@@ -52,6 +52,7 @@ DATASET_ID="${DATASET_ID:-}"
 PACK_ID="${PACK_ID:-}"
 PACKS_DIR="${PACKS_DIR:-${REPO_ROOT}/packs}"
 PROVISION_RLS_SAS="${PROVISION_RLS_SAS:-0}"
+DRY_RUN=0
 
 if [[ $# -ge 1 && -n "${1:-}" && "${1:-}" != --* ]]; then
   PACK_ID="$1"
@@ -60,13 +61,29 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --pack)
       PACK_ID="${2:?--pack requires an argument}"
+      shift 2
+      ;;
+    --project)
+      PROJECT_ID="${2:?--project requires an argument}"
+      shift 2
+      ;;
+    --region)
+      BQ_LOCATION="${2:?--region requires an argument}"
       shift 2
       ;;
     --provision-rls-sas)
       PROVISION_RLS_SAS=1
       shift
+      ;;
+    --help|-h)
+      echo "Usage: $0 [--dry-run] [--pack PACK_ID] [--project PROJECT_ID] [--region REGION] [--provision-rls-sas]"
+      exit 0
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -76,8 +93,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "example-project-id" ]]; then
-  echo "ERROR: PROJECT_ID must be set to a real sandbox GCP project (not example-project-id)." >&2
-  exit 1
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    PROJECT_ID="example-project-id"
+  else
+    echo "ERROR: PROJECT_ID must be set to a real sandbox GCP project (not example-project-id)." >&2
+    exit 1
+  fi
 fi
 if [[ -z "${DATASET_ID}" ]]; then
   echo "ERROR: DATASET_ID must not be empty." >&2
@@ -104,6 +125,16 @@ done
 if [[ -z "${SEED_SCRIPT}" ]]; then
   echo "ERROR: No seed*.py script found in ${PACK_DIR}" >&2
   exit 1
+fi
+
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  echo "[DRY-RUN] ScenarioPack BigQuery foundation plan:"
+  echo "  Project:            ${PROJECT_ID}"
+  echo "  Dataset:            ${DATASET_ID} (${BQ_LOCATION})"
+  echo "  Pack:               ${PACK_ID}"
+  echo "  Seed script:        ${SEED_SCRIPT##*/}"
+  echo "  Provision RLS SAs:  ${PROVISION_RLS_SAS}"
+  exit 0
 fi
 
 ACTIVE_GCLOUD_ACCOUNT="$(

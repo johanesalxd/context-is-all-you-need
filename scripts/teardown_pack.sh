@@ -49,6 +49,7 @@ PROJECT_ID="${PROJECT_ID:-}"
 DATASET_ID="${DATASET_ID:-}"
 PACK_ID="${PACK_ID:-meridian_q3_sgd}"
 BQ_LOCATION="${BQ_LOCATION:-asia-southeast1}"
+CLOUD_RUN_REGION="${CLOUD_RUN_REGION:-${BQ_LOCATION}}"
 DRY_RUN=0
 CONFIRM_YES=0
 DELETE_RLS_SAS=0
@@ -81,6 +82,19 @@ while [[ $# -gt 0 ]]; do
       PACK_ID="$2"
       shift 2
       ;;
+    --project)
+      PROJECT_ID="$2"
+      shift 2
+      ;;
+    --service-name)
+      SERVICE_NAME="$2"
+      shift 2
+      ;;
+    --region)
+      CLOUD_RUN_REGION="$2"
+      BQ_LOCATION="$2"
+      shift 2
+      ;;
     --teardown-context-layer)
       TEARDOWN_CONTEXT_LAYER=1
       shift
@@ -101,8 +115,14 @@ while [[ $# -gt 0 ]]; do
       DELETE_POLL_DB=1
       shift
       ;;
+    --all)
+      DELETE_RLS_SAS=1
+      DELETE_CLOUD_RUN=1
+      DELETE_POLL_DB=1
+      shift
+      ;;
     --help|-h)
-      echo "Usage: $0 [--pack PACK_ID] [--dry-run] [--yes] [--teardown-context-layer] [--delete-rls-sas] [--delete-cloud-run] [--delete-poll-db]"
+      echo "Usage: $0 [--pack PACK_ID] [--project PROJECT_ID] [--service-name NAME] [--region REGION] [--dry-run] [--yes] [--teardown-context-layer] [--skip-context-layer] [--delete-rls-sas] [--delete-cloud-run] [--delete-poll-db] [--all]"
       exit 0
       ;;
     *)
@@ -135,12 +155,16 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
       if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
         ctx_args+=(--delete-agent-sas)
       fi
-      PROJECT_ID="example-project-id" run_repo_python "${REPO_ROOT}/scripts/provision_context_layer.py" "${ctx_args[@]}" >/dev/null 2>&1 || true
+      if command -v uv >/dev/null 2>&1 || [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+        PROJECT_ID="example-project-id" run_repo_python "${REPO_ROOT}/scripts/provision_context_layer.py" "${ctx_args[@]}"
+      else
+        echo "[DRY-RUN] (Skipping detailed context-layer JSON preview; uv/.venv python not on PATH.)"
+      fi
     fi
   fi
   echo "[DRY-RUN] Would delete BigQuery dataset ${PROJECT_ID}.${DATASET_ID} (location=${BQ_LOCATION}) and all its contents."
   if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
-    echo "[DRY-RUN] Would delete Cloud Run service ${SERVICE_NAME} (${BQ_LOCATION}), remove project IAM bindings (jobUser, aiplatform.user, datastore.user), and delete ${PACK_PREFIX}-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+    echo "[DRY-RUN] Would delete Cloud Run service ${SERVICE_NAME} (${CLOUD_RUN_REGION}), Artifact Registry package cloud-run-source-deploy/${SERVICE_NAME} (${CLOUD_RUN_REGION}), remove project IAM bindings (jobUser, aiplatform.user, datastore.user), and delete ${PACK_PREFIX}-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
   fi
   if [[ "${DELETE_POLL_DB}" -eq 1 ]]; then
     echo "[DRY-RUN] Would delete Firestore Native poll database '${FIRESTORE_DATABASE_ID}' in project ${PROJECT_ID}."
@@ -194,7 +218,12 @@ if [[ "${DELETE_RLS_SAS}" -eq 1 ]]; then
 fi
 
 if [[ "${DELETE_CLOUD_RUN}" -eq 1 ]]; then
-  gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${BQ_LOCATION}" --quiet >/dev/null 2>&1 || true
+  gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" --quiet >/dev/null 2>&1 || true
+  gcloud artifacts packages delete "${SERVICE_NAME}" \
+    --project="${PROJECT_ID}" \
+    --location="${CLOUD_RUN_REGION}" \
+    --repository="cloud-run-source-deploy" \
+    --quiet >/dev/null 2>&1 || true
   runner_sa="${PACK_PREFIX}-web-runner@${PROJECT_ID}.iam.gserviceaccount.com"
   for runner_role in roles/bigquery.jobUser roles/aiplatform.user roles/datastore.user; do
     gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \

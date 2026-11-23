@@ -68,6 +68,8 @@ POLL_VOTE_RPM_LIMIT="${POLL_VOTE_RPM_LIMIT:-240}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
 DEMO_SHARE_TOKEN="${DEMO_SHARE_TOKEN:-}"
 DRY_RUN=0
+APP_ONLY=0
+PACK_EXPLICIT=0
 ENABLE_SHARE_TOKEN=0
 ROTATE_TOKEN=0
 
@@ -87,8 +89,17 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
+    --app-only)
+      APP_ONLY=1
+      shift
+      ;;
     --pack)
       PACK_ID="$2"
+      PACK_EXPLICIT=1
+      shift 2
+      ;;
+    --project)
+      PROJECT_ID="$2"
       shift 2
       ;;
     --service-name)
@@ -109,7 +120,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--pack PACK_ID] [--service-name NAME] [--region REGION] [--enable-share-token] [--rotate-token]"
+      echo "Usage: $0 [--dry-run] [--app-only] [--project PROJECT_ID] [--pack PACK_ID] [--service-name NAME] [--region REGION] [--enable-share-token] [--rotate-token]"
       exit 0
       ;;
     *)
@@ -182,7 +193,26 @@ SG_RLS_SA_EMAIL="${PACK_PREFIX}-sg-coldchain@${PROJECT_ID}.iam.gserviceaccount.c
 BLIND_AGENT_SA_EMAIL="${PACK_PREFIX}-blind-agent@${PROJECT_ID}.iam.gserviceaccount.com"
 GOVERNED_AGENT_SA_EMAIL="${PACK_PREFIX}-governed-agent@${PROJECT_ID}.iam.gserviceaccount.com"
 
+if [[ "${APP_ONLY}" -eq 1 && "${PACK_EXPLICIT}" -eq 1 ]]; then
+  echo "ERROR: --app-only cannot be combined with --pack (--app-only preserves the live service's existing PACK_ID and env vars; run a full deploy to switch packs)." >&2
+  exit 2
+fi
+
+if [[ "${APP_ONLY}" -eq 1 && ( "${ENABLE_SHARE_TOKEN}" -eq 1 || "${ROTATE_TOKEN}" -eq 1 ) ]]; then
+  echo "ERROR: --app-only cannot be combined with --enable-share-token or --rotate-token (use full deploy to mutate service env vars)." >&2
+  exit 2
+fi
+
 if [[ "${DRY_RUN}" -eq 1 ]]; then
+  if [[ "${APP_ONLY}" -eq 1 ]]; then
+    echo "[DRY RUN] --app-only Cloud Run redeploy plan:"
+    echo "  Project:          ${PROJECT_ID}"
+    echo "  Region:           ${CLOUD_RUN_REGION}"
+    echo "  Service:          ${SERVICE_NAME}"
+    echo "  Skipped:          API enablement, SA/IAM bootstrap, Firestore creation, BQ dataset ACL updates, RLS policy recreation, and .env/env-var overwrite"
+    echo "  Deploy:           gcloud run deploy ${SERVICE_NAME} --project=${PROJECT_ID} --source=${REPO_ROOT} --region=${CLOUD_RUN_REGION} --quiet (preserves existing env vars, SA, and IAM policy)"
+    exit 0
+  fi
   echo "[DRY-RUN] Cloud Run foundation deployment plan:"
   echo "  Project:          ${PROJECT_ID}"
   echo "  Region:           ${CLOUD_RUN_REGION}"
@@ -192,6 +222,39 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "  RLS Policy Sync:  Grant ${RLS_CFO_POLICY} on ${DATASET_ID}.${RLS_TABLE} to ${GOVERNED_AGENT_SA_EMAIL} and ${RUNNER_SA_EMAIL}"
   echo "  Live Agent Config: model=${AGENT_MODEL_ID}@${AGENT_MODEL_LOCATION}, blind_dataset=${BLIND_DATASET_ID}, enable_live_agent=${ENABLE_LIVE_AGENT}, require_token_live=${REQUIRE_TOKEN_FOR_LIVE_AGENT}, daily_limit=${DAILY_AGENT_CALL_LIMIT}"
   echo "  Guardrails:       min-instances=0, max-instances=2, BQ_MAX_BYTES_BILLED=${BQ_MAX_BYTES_BILLED}, RUN_RUNG_RPM_LIMIT=${RUN_RUNG_RPM_LIMIT}, ENABLE_LIVE_POLL=${ENABLE_LIVE_POLL}, POLL_READ_RPM_LIMIT=${POLL_READ_RPM_LIMIT}, POLL_VOTE_RPM_LIMIT=${POLL_VOTE_RPM_LIMIT}, DEMO_SHARE_TOKEN enabled"
+  exit 0
+fi
+
+if [[ "${APP_ONLY}" -eq 1 ]]; then
+  DESCRIBE_ERR_FILE="$(mktemp)"
+  if DESCRIBE_RAW="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" --format='value(status.url)' 2>"${DESCRIBE_ERR_FILE}")"; then
+    rm -f "${DESCRIBE_ERR_FILE}"
+    EXISTING_URL="$(printf '%s\n' "${DESCRIBE_RAW}" | { grep -v '^Created ' || true; } | tail -n 1)"
+    if [[ -z "${EXISTING_URL}" ]]; then
+      echo "ERROR: Cloud Run service '${SERVICE_NAME}' returned an empty status.url." >&2
+      exit 1
+    fi
+  else
+    DESCRIBE_ERR="$(cat "${DESCRIBE_ERR_FILE}" 2>/dev/null || true)"
+    rm -f "${DESCRIBE_ERR_FILE}"
+    if printf '%s' "${DESCRIBE_ERR}" | grep -qiE 'NOT_FOUND|could not be found|Cannot find service'; then
+      echo "ERROR: Cloud Run service '${SERVICE_NAME}' was not found in ${PROJECT_ID} (${CLOUD_RUN_REGION})." >&2
+      echo "Run a full deploy first without --app-only to provision IAM, Firestore, BigQuery ACLs, RLS, and service env vars." >&2
+    else
+      echo "ERROR: Failed to inspect Cloud Run service '${SERVICE_NAME}' in ${PROJECT_ID} (${CLOUD_RUN_REGION}):" >&2
+      printf '%s\n' "${DESCRIBE_ERR}" >&2
+    fi
+    exit 1
+  fi
+
+  CLOUDSDK_CORE_INTERACTIVE_UX_STYLE=OFF gcloud run deploy "${SERVICE_NAME}" \
+    --project="${PROJECT_ID}" \
+    --source="${REPO_ROOT}" \
+    --region="${CLOUD_RUN_REGION}" \
+    --quiet
+
+  SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" --format='value(status.url)' | grep -v '^Created ' | tail -n 1)"
+  echo "Deployed Cloud Run Service (--app-only): ${SERVICE_URL}"
   exit 0
 fi
 
@@ -256,7 +319,7 @@ for target_sa in "${SG_RLS_SA_EMAIL}" "${BLIND_AGENT_SA_EMAIL}" "${GOVERNED_AGEN
   fi
 done
 
-export PROJECT_ID DATASET_ID BLIND_DATASET_ID BQ_LOCATION RUNNER_SA_EMAIL GOVERNED_AGENT_SA_EMAIL RLS_TABLE RLS_CFO_POLICY
+export REPO_ROOT PROJECT_ID DATASET_ID BLIND_DATASET_ID BQ_LOCATION RUNNER_SA_EMAIL GOVERNED_AGENT_SA_EMAIL SG_RLS_SA_EMAIL BLIND_AGENT_SA_EMAIL RLS_TABLE RLS_CFO_POLICY
 bq add-iam-policy-binding \
   --member="serviceAccount:${RUNNER_SA_EMAIL}" \
   --role="roles/bigquery.dataOwner" \
@@ -264,8 +327,15 @@ bq add-iam-policy-binding \
 
 run_repo_python - <<'PY'
 import os
+import sys
 from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
+
+repo_root = os.environ["REPO_ROOT"]
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
+from engine.capture_rungs import list_active_row_access_policies
 
 project_id = os.environ["PROJECT_ID"]
 dataset_id = os.environ["DATASET_ID"]
@@ -301,14 +371,60 @@ try:
 except NotFound:
     pass
 
-# Ensure governed_agent_sa and runner_sa are included in rls_cfo_regional_all_markets so cfo_regional sees all rows.
+# Ensure governed_agent_sa and runner_sa are included in rls_cfo_regional_all_markets while preserving existing collaborator grantees.
 active_user_rows = list(client.query("SELECT SESSION_USER() AS u", location=bq_location).result())
 caller_email = str(active_user_rows[0]["u"]).strip()
 caller_member = f"serviceAccount:{caller_email}" if caller_email.endswith(".gserviceaccount.com") else f"user:{caller_email}"
+
+merged_grantees: dict[str, str] = {}
+
+def _add_grantee(principal: str) -> None:
+    cleaned = str(principal or "").strip()
+    if cleaned:
+        merged_grantees.setdefault(cleaned.lower(), cleaned)
+
+_add_grantee(caller_member)
+_add_grantee(f"serviceAccount:{governed_sa}")
+_add_grantee(f"serviceAccount:{runner_sa}")
+
+sg_rls_sa = os.environ.get("SG_RLS_SA_EMAIL", "").strip().lower()
+blind_sa = os.environ.get("BLIND_AGENT_SA_EMAIL", "").strip().lower()
+excluded_principals = {
+    f"serviceaccount:{sa}" for sa in (sg_rls_sa, blind_sa) if sa
+}
+
+policy_exists = False
+existing_grantees: list[str] = []
+for pol in list_active_row_access_policies(
+    client,
+    project_id=project_id,
+    dataset_id=dataset_id,
+    table_id=rls_table,
+    location=bq_location,
+):
+    if pol.get("policy_id") == rls_cfo_policy:
+        policy_exists = True
+        existing_grantees.extend(str(g or "").strip() for g in (pol.get("grantees") or []) if str(g or "").strip())
+
+if policy_exists and not existing_grantees:
+    raise RuntimeError(
+        f"Refusing to overwrite existing RLS policy {rls_cfo_policy}: could not read existing grantees"
+    )
+
+for g_str in existing_grantees:
+    g_low = g_str.lower()
+    if g_low.startswith("deleted:"):
+        continue
+    if g_low in excluded_principals or "coldchain" in g_low or "denied" in g_low or "blind-agent" in g_low:
+        continue
+    _add_grantee(g_str)
+
+grantee_list = sorted(merged_grantees.values(), key=lambda x: x.lower())
+grant_sql = ", ".join(f'"{g}"' for g in grantee_list)
 rls_sql = f"""
 CREATE OR REPLACE ROW ACCESS POLICY `{rls_cfo_policy}`
 ON `{project_id}.{dataset_id}.{rls_table}`
-GRANT TO ("{caller_member}", "serviceAccount:{governed_sa}", "serviceAccount:{runner_sa}")
+GRANT TO ({grant_sql})
 FILTER USING (TRUE)
 """
 client.query(rls_sql, location=bq_location).result()

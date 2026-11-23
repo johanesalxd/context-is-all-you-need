@@ -18,7 +18,6 @@ from urllib.request import Request, urlopen
 
 from engine.pack_loader import _strip_sql_comments
 from engine.rls_impersonation import (
-    ImpersonationError,
     build_impersonated_credentials,
     is_valid_customer_sa,
     parse_role_sa_map,

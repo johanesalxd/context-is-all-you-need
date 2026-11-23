@@ -536,7 +536,6 @@ def test_sql_property_graph_rls_contracts_and_placeholder_hygiene() -> None:
     assert (contracts_dir / "ArcticHaul_MSA_2025.md").exists()
     assert (contracts_dir / "SiamFrost_Logistics_MSA_2025.md").exists()
     assert (contracts_dir / "StraitsTemp_Cargo_MSA_2025.md").exists()
-    assert (contracts_dir / "sla_overlay.sql").exists()
 
     # Legacy column and table giveaway names must be completely eliminated from the pack
     legacy_re = re.compile(

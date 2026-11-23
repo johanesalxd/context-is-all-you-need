@@ -9,7 +9,7 @@ WORKDIR /app
 RUN groupadd --gid 10001 appgroup && \
     useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
 
-COPY pyproject.toml README.md LICENSE SPEC.md ./
+COPY pyproject.toml README.md LICENSE ./
 RUN pip install --no-cache-dir \
     "fastapi>=0.115.0" \
     "google-auth>=2.35.0" \
