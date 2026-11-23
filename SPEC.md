@@ -96,18 +96,26 @@ Concurrent builders MUST modify ONLY their assigned paths:
 
 Single zero-build vanilla HTML5/CSS3/ES6 app (`web/index.html`) that works **100% offline via `file:///.../web/index.html`** (loading `<script src="data/rungs_bundle.js"></script>` -> `window.CONTEXT_PACK_BUNDLE`, zero `fetch()` CORS failure on `file://`) AND seamlessly enables `[▶ Run Live Query]` when served via `server/app.py`:
 
+- **5-Layer Enterprise Context Pyramid (`L1 → L5`, Executive Storytelling Alignment):**
+  - **Layer 1 · Technical Metadata** (`R1`, `R4`) — Table schemas, PK/FK constraints, certified Data Products, and automated data quality freshness.
+  - **Layer 2 · Intent-Driven Enrichment** (`R1`) — Automated schema insights and runtime context retrieval (`BigQuery Data Insights` & `Knowledge Catalog lookupContext (Preview)`).
+  - **Layer 3 · Institutional Knowledge** (`R6`) — Policies, contracts, and amendments living in unstructured documents outside SQL tables.
+  - **Layer 4 · Semantic Knowledge** (`R2`, `R3`, `R5`) — Shared business glossaries, grain-locked metrics (`MEASURE()`), and multi-hop relationship graphs (`ISO GQL`).
+  - **Layer 5 · Personalization & Access Governance** (`R4 · Beat 4b`) — Identity-scoped Row-Level Security and access boundaries so answers adapt to who is asking.
+
 1. **Mode 1 — `Stage Mode` (Default on open / `?mode=stage`, Nov 26 Ballroom Presentation):**
    - **10% / 80% / 10% Quiet Stage V2 Proportions:**
-     - Top `10%`: Event header, Rung pill stepper (`R1`..`R6` + `Act IV Horizon`), **`Blind` vs `Governed` beat toggle (`[B]`)**, **`Stage | Workbench` switch (`[W]`)**, theme switch (`Theme 01 Paper` default / `Theme 04 Dark Stage` via `[T]`), and live Token / Retry meter.
-     - Center `80%` Hero Canvas: Question card, crisp side-by-side or progressive `Blind LLM` vs `Governed Context` outcome card, `Beat 4b · Switch Identity` (`cfo_regional` ↔ `sg_coldchain`) interactive toggle on Rung 4, and clean `GA` / `Preview` capability pills.
-     - Bottom `10%` Eval & Trust Bar: **`k / N` Golden Eval Pass Rate** (`0/5` -> `5/5`), **`TrustTier` badge** (`TIER_3_REVIEW_REQUIRED` -> `TIER_2_GROUNDED` -> `TIER_1_VERIFIED_OR_COMPILED`), and Context Token delta (replacing invented scalar `"Trust %"`).
+     - Top `10%`: Event header, Rung pill stepper (`Overview` + `R1`..`R6` + `Act IV Horizon`, with Stage defaulting to `Overview` / `?rung=overview` when the pack defines optional `overview` in `schemas/rung_v2.schema.json`), **`Blind` vs `Governed` beat toggle (`[B]`)**, **`? Guide` plain-English drawer (`?` / `H`)**, **`Stage | Workbench` switch (`[W]`)**, theme switch (`Theme 01 Paper` default / `Theme 04 Dark Stage` via `[T]`), and live Token / Retry meter.
+     - Center `80%` Hero Canvas: Executive Briefing `Overview` landing screen (spoiler-free customer profile, data estate stats, fixed-control experiment design, and 6 clickable `R1`–`R6` roadmap cards jumping to `question` beat), Question card, crisp side-by-side or progressive `Blind LLM` vs `Governed Context` outcome card, `Beat 4b · Switch Identity` (`cfo_regional` ↔ `sg_coldchain`) interactive toggle on Rung 4, and clean `GA` / `Preview` capability pills.
+     - Bottom `10%` Eval & Trust Bar: **`k / N` Golden Eval Pass Rate** (`0/5` -> `5/5`), **`TrustTier` badge** (`TIER_3_REVIEW_REQUIRED` -> `TIER_2_GROUNDED` -> `TIER_1_VERIFIED_OR_COMPILED`), and Context Token delta (replacing invented scalar `"Trust %"`). (On `Overview`, eval/score badges and `[X]` / `[P]` triggers remain hidden/disabled to preserve zero spoilers.)
    - **Working Ballroom Keyboard Controls:**
-     - `Space` or `ArrowRight`: Advance beat (`Question -> Blind Trap -> Governed Fix -> Next Rung`).
-     - `ArrowLeft`: Previous beat / rung.
-     - `KeyP`: Open/close `A/B/C/D` CDO Myth-Busting Poll overlay with answer reveal.
-     - `KeyB`: Toggle `Blind` vs `Governed` comparison focus.
-     - `KeyW`: Toggle `Stage Mode` ↔ `Workbench Mode`.
+     - `Space` or `ArrowRight`: Advance beat (`Overview -> R1 Question -> Blind Trap -> Governed Fix -> Next Rung`).
+     - `ArrowLeft`: Previous beat / rung (returning from `R1` Question/Compare to `Overview` when `overview` is present).
+     - `KeyP`: Open/close `A/B/C/D` CDO Myth-Busting Poll overlay with answer reveal (no-op on `Overview`).
+     - `KeyB`: Toggle `Blind` vs `Governed` vs `Compare` focus (`blind -> governed -> compare -> blind`).
+     - `KeyW`: Toggle `Stage Mode` ↔ `Workbench Mode` (Workbench opens on `R1`, never `Overview`).
      - `KeyT`: Toggle `Paper` (`Theme 01`) ↔ `Dark Stage` (`Theme 04`).
+     - `?` or `KeyH`: Toggle the plain-English `? Guide` slide-over drawer (`Escape` closes).
 2. **Mode 2 — `Workbench Mode` (`?mode=workbench` or `[W]` toggle, SEA DA CE Reusable Asset):**
    - **Accuracy & Token Progression Bar:** Visualizes cumulative Golden Eval Pass Rate (`0% -> 80% -> 100%`) alongside exploratory retry elimination across Rungs 1–6.
    - **3-Tab Engineering X-Ray Inspector:**

@@ -87,3 +87,29 @@ eval_methodology:
   llm_inference_endpoint: "global"
   deterministic_seed: 20261126
   note: "BigQuery tables, Property Graph, Knowledge Catalog glossary/aspects/DQ, BigQuery RLS, and Cloud Storage contracts are co-located in asia-southeast1; Gemini PayGo model inference routes through the global endpoint."
+
+overview:
+  eyebrow: "Executive Briefing · Live Benchmark Setup"
+  headline: "Same Frontier Model. Two Completely Different Realities."
+  subheadline: "Why raw schemas produce confident errors—and how 5 layers of governed enterprise context fix 6 live traps."
+  company_name: "Meridian Commerce"
+  company_profile: "A Singapore-headquartered ASEAN omnichannel retailer, cold-chain grocery operator, and loyalty platform closing Q3 (2026-07-01 to 2026-09-30) in SGD across 4 regional markets."
+  problem_statement: "Pointing a frontier model straight at raw tables scales plausible-sounding SQL mistakes at machine speed—inflating revenue, misclassifying customer tiers, hitting 1:N join fan-traps, trusting stale clones, and missing contract amendments."
+  estate_stats:
+    - value: "~200 Tables"
+      label: "Real Enterprise Sprawl"
+      detail: "Core ERP marts + 190 shadow clones & stale snapshots"
+    - value: "5 Context Layers"
+      label: "6 Live Rungs · SG"
+      detail: "Schemas, Insights, Glossary, Graph MEASURE(), RLS & Contracts"
+    - value: "3 MSAs + Amend #2"
+      label: "Unstructured Policy"
+      detail: "Cloud Storage contracts parsed via BigQuery Object Tables"
+    - value: "1 Frontier Model"
+      label: "Held Constant"
+      detail: "The same Gemini model across Blind vs. Governed arms"
+  experiment:
+    fixed_control: "Held constant: the same Gemini model, identical 6 Q3 boardroom questions, and identical BigQuery data seed."
+    blind_arm: "Raw physical schema only (meridian_blind): ~200 unannotated tables, cryptic ERP columns, zero glossary, zero certification tags, and zero contract overlay."
+    governed_arm: "Progressive context in asia-southeast1: Knowledge Catalog Glossary, Certification Aspects & Auto DQ, Property Graph MEASURE() & ISO GQL, BigQuery RLS, and Object Table contracts."
+  cta_label: "Start Simulation · R1 →"

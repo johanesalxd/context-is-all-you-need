@@ -22,6 +22,42 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
       "timeout_s": 25,
       "note": "Offline generic fallback sample demonstrating Step-0 baselines and Empirical N=5 telemetry structure."
     },
+    "overview": {
+      "eyebrow": "Executive Briefing · Sample Context Pack",
+      "headline": "Same Frontier Model. Two Completely Different Realities.",
+      "subheadline": "Why raw warehouse schemas produce confident errors—and how 5 layers of governed enterprise context fix 6 sample traps.",
+      "company_name": "Sample Global Commerce",
+      "company_profile": "A multi-region retail and logistics enterprise closing Q4 in USD across domestic and international fulfillment tiers.",
+      "problem_statement": "Pointing a frontier model straight at raw warehouse tables scales plausible-sounding SQL errors—inflating gross revenue, misreading promo tags, hitting 1:N join fan-traps, and missing policy overlays.",
+      "estate_stats": [
+        {
+          "value": "~200 Tables",
+          "label": "Sample Data Sprawl",
+          "detail": "Core analytics marts + 190 shadow clones & snapshots"
+        },
+        {
+          "value": "5 Context Layers",
+          "label": "6 Sample Rungs",
+          "detail": "Schemas, Insights, Glossary, Graph MEASURE(), RLS & Contracts"
+        },
+        {
+          "value": "Sample Policy Docs",
+          "label": "Unstructured Policy",
+          "detail": "Object Table SLA overlays extracted into structured rules"
+        },
+        {
+          "value": "1 Frontier Model",
+          "label": "Held Constant",
+          "detail": "The same Gemini model across Blind vs. Governed arms"
+        }
+      ],
+      "experiment": {
+        "fixed_control": "Held constant: the same Gemini model, identical 6 Q4 benchmark questions, and identical dataset seed.",
+        "blind_arm": "Raw physical schema only (sample_blind): unannotated ERP columns, zero business glossary, zero certification tags, and zero contract overlay.",
+        "governed_arm": "Progressive enterprise context: Knowledge Catalog Glossary, Certification Aspects & Auto DQ, Property Graph MEASURE() & ISO GQL, BigQuery RLS, and Object Table contracts."
+      },
+      "cta_label": "Start Simulation · R1 →"
+    },
     "personas": [
       {
         "id": "analyst_global",

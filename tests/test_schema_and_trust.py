@@ -1174,3 +1174,113 @@ def test_phase2_pack_loader_helpers_and_rls_discovery(
     tbl, pol = discover_rls_target("acme_test", packs_dir=packs_dir)
     assert tbl == "mart_test_r2"
     assert pol == "rls_cfo_all"
+
+
+def test_overview_schema_optional_maxlength_and_no_spoilers(tmp_path: Path) -> None:
+    import re
+    from engine.pack_loader import load_schema, validate_bundle
+
+    # 1) Backward compatibility: pack without overview validates cleanly
+    packs_dir = tmp_path / "packs"
+    _write_synthetic_pack(packs_dir, pack_id="no_overview_pack")
+    no_ov_bundle = load_pack("no_overview_pack", packs_dir=packs_dir)
+    assert "overview" not in no_ov_bundle
+    validate_bundle(no_ov_bundle)
+
+    # 2) maxLength enforcement on overview fields
+    valid_ov = {
+        "eyebrow": "Executive Briefing",
+        "headline": "Same Model. Two Different Realities.",
+        "subheadline": "How governed enterprise context eliminates raw schema hallucinations.",
+        "company_name": "Acme Sample",
+        "company_profile": "A regional retail operator closing Q1 across multiple markets.",
+        "problem_statement": "Raw schemas scale plausible SQL errors across ambiguous columns and joins.",
+        "estate_stats": [
+            {"value": "50 Tables", "label": "Sample Estate", "detail": "Core marts + legacy snapshots"},
+            {"value": "5 Layers", "label": "Context Stack", "detail": "Schemas, Glossary, Graph, RLS, Contracts"},
+        ],
+        "experiment": {
+            "fixed_control": "Held constant: the same Gemini model and 6 benchmark questions.",
+            "blind_arm": "Raw physical schema only with zero glossary or contract overlays.",
+            "governed_arm": "Progressive enterprise context via Knowledge Catalog and Property Graph.",
+        },
+        "cta_label": "Start Simulation · R1 →",
+    }
+    with_ov = dict(no_ov_bundle, overview=valid_ov)
+    validate_bundle(with_ov)
+
+    for bad_field, bad_val in (
+        ("headline", "X" * 71),
+        ("subheadline", "Y" * 141),
+        ("cta_label", "Z" * 49),
+        ("company_profile", "P" * 281),
+    ):
+        bad_ov = dict(valid_ov, **{bad_field: bad_val})
+        with pytest.raises(ValidationError):
+            validate_bundle(dict(no_ov_bundle, overview=bad_ov))
+
+    # 3) Meridian pack & exported bundle: schema valid, Knowledge Catalog wording, zero spoilers, empirical preserved
+    meridian_bundle = load_pack(
+        "meridian_q3_sgd",
+        project_id="example-project-id",
+        dataset_id="meridian_commerce",
+        bq_location="asia-southeast1",
+    )
+    assert "overview" in meridian_bundle
+    validate_bundle(meridian_bundle, schema_path=DEFAULT_REPO_ROOT / "schemas" / "rung_v2.schema.json")
+
+    bundle_js_path = DEFAULT_REPO_ROOT / "web" / "data" / "rungs_bundle.js"
+    raw_js = bundle_js_path.read_text(encoding="utf-8")
+    match = re.search(r"window\.CONTEXT_PACK_BUNDLE\s*=\s*(\{.*\})\s*;", raw_js, re.DOTALL)
+    assert match is not None
+    exported = json.loads(match.group(1))
+    jsonschema_schema = load_schema(DEFAULT_REPO_ROOT / "schemas" / "rung_v2.schema.json")
+    assert "overview" in jsonschema_schema["properties"]
+    assert exported.get("generated_mode") == "live_agent_verified"
+    assert isinstance(exported.get("overview"), dict)
+
+    ov_blob = json.dumps(exported["overview"], ensure_ascii=False)
+    assert "dataplex" not in ov_blob.lower()
+    assert "Knowledge Catalog" in ov_blob
+
+    forbidden_spoilers = {
+        "28/30",
+        "0/30",
+        "1,312,450",
+        "612.50",
+        "31.8%",
+        "18,960",
+        "28.4%",
+        "19,380",
+        "93.3%",
+    }
+    total_blind_emp = 0
+    total_gov_emp = 0
+    total_runs_emp = 0
+    for rung in exported["rungs"]:
+        for arm in ("blind", "governed"):
+            outcome = rung[arm]
+            assert isinstance(outcome.get("empirical_eval"), dict), f"Missing empirical_eval on {rung['id']}.{arm}"
+            emp = outcome["empirical_eval"]
+            if arm == "blind":
+                total_blind_emp += int(emp["pass_count"])
+            else:
+                total_gov_emp += int(emp["pass_count"])
+                total_runs_emp += int(emp["runs"])
+            forbidden_spoilers.add(str(outcome["answer_headline"]))
+            val = float(outcome["numeric_value"])
+            if abs(val) >= 100:
+                forbidden_spoilers.add(f"{val:,.2f}")
+                forbidden_spoilers.add(f"{int(round(val)):,}")
+                forbidden_spoilers.add(str(int(round(val))))
+            else:
+                forbidden_spoilers.add(f"{val:.1f}%")
+            forbidden_spoilers.add(f"{outcome['eval_pass_count']}/{outcome['eval_total_runs']}")
+            forbidden_spoilers.add(f"{emp['pass_count']}/{emp['runs']}")
+    if total_runs_emp > 0:
+        forbidden_spoilers.add(f"{total_blind_emp}/{total_runs_emp}")
+        forbidden_spoilers.add(f"{total_gov_emp}/{total_runs_emp}")
+
+    for token in sorted(forbidden_spoilers):
+        if token:
+            assert token not in ov_blob, f"Spoiler token {token!r} leaked into bundle.overview"

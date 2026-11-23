@@ -166,6 +166,115 @@
     "eval_methodology": {
       "type": "object",
       "additionalProperties": true
+    },
+    "overview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eyebrow",
+        "headline",
+        "subheadline",
+        "company_name",
+        "company_profile",
+        "problem_statement",
+        "estate_stats",
+        "experiment",
+        "cta_label"
+      ],
+      "properties": {
+        "eyebrow": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80
+        },
+        "headline": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70
+        },
+        "subheadline": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 140
+        },
+        "company_name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "company_profile": {
+          "type": "string",
+          "minLength": 15,
+          "maxLength": 280
+        },
+        "problem_statement": {
+          "type": "string",
+          "minLength": 15,
+          "maxLength": 280
+        },
+        "estate_stats": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "label",
+              "detail"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 24
+              },
+              "label": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 40
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 90
+              }
+            }
+          }
+        },
+        "experiment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fixed_control",
+            "blind_arm",
+            "governed_arm"
+          ],
+          "properties": {
+            "fixed_control": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 160
+            },
+            "blind_arm": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 200
+            },
+            "governed_arm": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 200
+            }
+          }
+        },
+        "cta_label": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 48
+        }
+      }
     }
   },
   "$defs": {

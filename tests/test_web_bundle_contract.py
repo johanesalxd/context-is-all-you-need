@@ -310,3 +310,86 @@ console.log(JSON.stringify({{ globalOut, apacOut, synthetic420k, plain420k, pctV
     assert "%" not in outputs["plain420k"]
     assert outputs["pctVariant"] == "28.4%"
 
+
+def test_overview_and_help_drawer_contracts_and_routing() -> None:
+    fallback_bundle = _extract_bundle_json(WEB_DIR / "js" / "fallback_bundle.js")
+    assert isinstance(fallback_bundle.get("overview"), dict)
+    ov_text = json.dumps(fallback_bundle["overview"], ensure_ascii=False)
+    assert "meridian" not in ov_text.lower()
+    assert "singapore" not in ov_text.lower()
+    assert "sgd" not in ov_text.lower()
+
+    app_js = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
+    for marker in (
+        "function isNonRung()",
+        "buildOverviewShowcase",
+        "buildHelpDrawer",
+        "helpOpen",
+        "? Guide",
+        'id: "overview-start-btn"',
+        'id: "help-guide-btn"',
+        'id: "help-guide-drawer"',
+        'id: "help-drawer-close"',
+        'BEAT_CYCLE_B = ["blind", "governed", "compare"]',
+        'e.key === "?" || e.code === "KeyH"',
+        "What are Layers 1–5? Open ? Guide",
+        "The 5-Layer Enterprise Context Pyramid (L1 → L5)",
+    ):
+        assert marker in app_js
+
+    assert "Live query target mode" not in app_js
+    assert "6 Context Layers" not in json.dumps(fallback_bundle["overview"])
+
+    # KeyP must strictly no-op on Overview
+    keyp_match = re.search(r"function togglePoll\(\)\s*\{.*?\n    \}", app_js, re.DOTALL)
+    assert keyp_match is not None
+    assert "if (state.isOverview)" in keyp_match.group(0)
+
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return
+
+    sel_match = re.search(
+        r"(function resolveRungSelection\(rungs,\s*rawParam,\s*options\)\s*\{.*?\n  \})",
+        app_js,
+        re.DOTALL,
+    )
+    assert sel_match is not None, "Could not extract resolveRungSelection from web/js/app.js"
+
+    script = f"""
+{sel_match.group(1)}
+const rungs = [
+  {{ id: "r1_schema", rung_num: 1 }},
+  {{ id: "r2_glossary", rung_num: 2 }},
+  {{ id: "r3_metrics", rung_num: 3 }},
+  {{ id: "r4_trust_access", rung_num: 4 }},
+  {{ id: "r5_graph", rung_num: 5 }},
+  {{ id: "r6_contracts", rung_num: 6 }}
+];
+console.log(JSON.stringify({{
+  stageOmittedWithOverview: resolveRungSelection(rungs, null, {{ hasOverview: true, mode: "stage" }}),
+  stageOmittedNoOverview: resolveRungSelection(rungs, null, {{ hasOverview: false, mode: "stage" }}),
+  workbenchOmittedWithOverview: resolveRungSelection(rungs, null, {{ hasOverview: true, mode: "workbench" }}),
+  workbenchOverviewParam: resolveRungSelection(rungs, "overview", {{ hasOverview: true, mode: "workbench" }}),
+  stageOverviewParam: resolveRungSelection(rungs, "overview", {{ hasOverview: true, mode: "stage" }}),
+  stageOverviewMissing: resolveRungSelection(rungs, "overview", {{ hasOverview: false, mode: "stage" }}),
+  stageHorizon: resolveRungSelection(rungs, "horizon", {{ hasOverview: true, mode: "stage" }}),
+  stageRung3: resolveRungSelection(rungs, "3", {{ hasOverview: true, mode: "stage" }})
+}}));
+"""
+    res = subprocess.run(
+        [node_bin, "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    out = json.loads(res.stdout.strip())
+    assert out["stageOmittedWithOverview"] == {"isOverview": True, "isHorizon": False, "rungIndex": 0}
+    assert out["stageOmittedNoOverview"] == {"isOverview": False, "isHorizon": False, "rungIndex": 0}
+    assert out["workbenchOmittedWithOverview"] == {"isOverview": False, "isHorizon": False, "rungIndex": 0}
+    assert out["workbenchOverviewParam"] == {"isOverview": False, "isHorizon": False, "rungIndex": 0}
+    assert out["stageOverviewParam"] == {"isOverview": True, "isHorizon": False, "rungIndex": 0}
+    assert out["stageOverviewMissing"] == {"isOverview": False, "isHorizon": False, "rungIndex": 0}
+    assert out["stageHorizon"] == {"isOverview": False, "isHorizon": True, "rungIndex": 0}
+    assert out["stageRung3"] == {"isOverview": False, "isHorizon": False, "rungIndex": 2}
+

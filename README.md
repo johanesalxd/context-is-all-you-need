@@ -65,7 +65,7 @@ Open `web/index.html` directly over `file://` (no build step, no ES module CORS 
 
 Designed for live executive presentations using `10% / 80% / 10%` Quiet Stage V2 proportions:
 
-- **Top `10%` Bar:** Pack header, `hero_tagline`, explicit **Regional Honesty Badge** (`Data, Graph, Catalog & RLS in asia-southeast1 · Gemini PayGo Inference via global Endpoint`), Rung stepper (`R1`–`R6` + `Act IV Horizon`), `Q | Blind | Compare | Governed` beat controls, `Stage | Workbench` switch, `Paper | Dark` theme switch, `Poll [P]` trigger, and live Context Token & Retry delta pill.
+- **Top `10%` Bar:** Pack header, `hero_tagline`, explicit **Regional Honesty Badge** (`Data, Graph, Catalog & RLS in asia-southeast1 · Gemini PayGo Inference via global Endpoint`), Rung stepper (`Overview` + `R1`–`R6` + `Act IV Horizon`), `Q | Blind | Compare | Governed` beat controls, `? Guide` plain-English drawer, `Stage | Workbench` switch, `Paper | Dark` theme switch, `Poll [P]` trigger, and live Context Token & Retry delta pill.
 - **Center `80%` Hero Canvas:** Business question, `pyramid_layer` and explicit `GA` / `Preview` / `Reference Architecture` badges, side-by-side `Blind Agent Trap` vs `Governed Enterprise Context` comparison, `Empirical N=5` alongside `Target:` badges when `empirical_eval` is present, interactive **`Beat 4b · Switch Identity`** toggle on Rung 4, and the decoupled **`Act IV Horizon`** showcase.
 - **Slide-Up Stage X-Ray Drawer (`[X]`):** Press `X` (`KeyX`) or click `[X] X-Ray` in the Stage footer to reveal injected Knowledge Catalog & Governance context (`context_mechanism`, `context_payload`, `xray_summary`, `gcp_primitives`), side-by-side compiled `Blind` vs `Governed` SQL/ISO GQL, and empirical `N=5` telemetry without leaving Stage Mode (`Escape` closes).
 - **Live QR Audience Poll (`[P]` & `/vote`):** Press `P` (`KeyP`) to open the 2-column CDO Myth-Busting Poll modal with a server-rendered SVG QR code (`/api/poll/qr.svg`), live animated vote bars (`2000ms` diff-guarded polling), automatic presenter stage-sync (`POST /api/poll/sync-stage`), optional `poll.external_poll_url`, and presenter-gated `Clear Room Votes` (`POST /api/poll/reset` via `X-Demo-Key`). Executives scan the QR code to open `/vote`—a zero-login, dim-ballroom dark-mode mobile UI backed by Firestore Native (`FIRESTORE_DATABASE_ID`, default `meridian-polls` in `asia-southeast1`) with an in-memory fallback offline.
@@ -82,6 +82,7 @@ Designed for live executive presentations using `10% / 80% / 10%` Quiet Stage V2
 | `B` (`KeyB`) | Cycle focus between `Compare`, `Blind`, and `Governed` |
 | `W` (`KeyW`) | Toggle `Stage Mode` ↔ `Workbench Mode` |
 | `T` (`KeyT`) | Toggle `Theme 01 Paper` ↔ `Theme 04 Dark Stage` |
+| `?` / `H` | Open / close the plain-English `? Guide` drawer (`Escape` closes) |
 
 ### Mode 2 — Workbench Mode (`?mode=workbench`)
 
@@ -100,13 +101,13 @@ Reusable Customer Engineering inspection console:
 | Parameter | Values | Default |
 | :--- | :--- | :--- |
 | `mode` | `stage`, `workbench` | `stage` |
-| `rung` | `1`..`6`, `<rung_id>`, `horizon` | First rung |
-| `beat` | `compare`, `question`, `blind`, `governed` | `compare` |
+| `rung` | `overview`, `1`..`6`, `<rung_id>`, `horizon` | `overview` in Stage (when pack defines `overview`), else first rung; first rung in Workbench |
+| `beat` | `compare`, `question`, `blind`, `governed` | `compare` (stepping from `Overview` starts on `question`) |
 | `theme` | `paper`, `dark` | `paper` |
 | `persona` | Persona ID from active rung's `identity_variants` | First persona on rung |
 | `tab` | `context`, `sql`, `arch` | `context` |
 
-Example: `web/index.html?mode=stage&rung=4&theme=dark`
+Example: `web/index.html?mode=stage&rung=overview&theme=dark` or `web/index.html?mode=stage&rung=4&theme=dark` (Stage defaults to `Overview` when `rung` is omitted and `overview` is present; Workbench opens on `R1`).
 
 ---
 

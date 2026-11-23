@@ -6,7 +6,7 @@
   const VALID_THEMES = new Set(["paper", "dark"]);
   const VALID_TABS = new Set(["context", "sql", "arch"]);
   const VALID_AGENT_ARMS = new Set(["both", "blind", "governed"]);
-  const BEAT_CYCLE_B = ["compare", "blind", "governed"];
+  const BEAT_CYCLE_B = ["blind", "governed", "compare"];
   const DEMO_KEY_STORAGE = "context_demo_key";
 
   const SQL_KEYWORDS = new Set([
@@ -276,33 +276,40 @@
       rungs,
       personas,
       personaMap,
+      overview: raw.overview && typeof raw.overview === "object" ? raw.overview : null,
       horizon_cards: Array.isArray(raw.horizon_cards) ? raw.horizon_cards : []
     };
   }
 
-  function resolveRungSelection(rungs, rawParam) {
+  function resolveRungSelection(rungs, rawParam, options) {
+    const hasOverview = Boolean(options && options.hasOverview);
+    const mode = (options && options.mode) || "stage";
     if (!rawParam) {
-      return { isHorizon: false, rungIndex: 0 };
+      return { isOverview: hasOverview && mode === "stage", isHorizon: false, rungIndex: 0 };
     }
     const trimmed = String(rawParam).trim();
-    if (trimmed.toLowerCase() === "horizon") {
-      return { isHorizon: true, rungIndex: 0 };
+    const lowered = trimmed.toLowerCase();
+    if (lowered === "overview") {
+      return { isOverview: hasOverview && mode === "stage", isHorizon: false, rungIndex: 0 };
+    }
+    if (lowered === "horizon") {
+      return { isOverview: false, isHorizon: true, rungIndex: 0 };
     }
     const byId = rungs.findIndex((r) => r.id === trimmed);
     if (byId >= 0) {
-      return { isHorizon: false, rungIndex: byId };
+      return { isOverview: false, isHorizon: false, rungIndex: byId };
     }
     const num = Number.parseInt(trimmed, 10);
     if (Number.isFinite(num)) {
       const byNum = rungs.findIndex((r) => Number(r.rung_num) === num);
       if (byNum >= 0) {
-        return { isHorizon: false, rungIndex: byNum };
+        return { isOverview: false, isHorizon: false, rungIndex: byNum };
       }
       if (num >= 1 && num <= rungs.length) {
-        return { isHorizon: false, rungIndex: num - 1 };
+        return { isOverview: false, isHorizon: false, rungIndex: num - 1 };
       }
     }
-    return { isHorizon: false, rungIndex: 0 };
+    return { isOverview: false, isHorizon: false, rungIndex: 0 };
   }
 
   function resolvePersonaForRung(rung, preferredPersonaId, bundle) {
@@ -399,20 +406,23 @@
       return;
     }
 
+    const hasOverview = Boolean(bundle.overview);
     const initMode = VALID_MODES.has(params.get("mode")) ? params.get("mode") : "stage";
     const initTheme = VALID_THEMES.has(params.get("theme")) ? params.get("theme") : "paper";
     const initBeat = VALID_BEATS.has(params.get("beat")) ? params.get("beat") : "compare";
     const initTab = VALID_TABS.has(params.get("tab")) ? params.get("tab") : "context";
-    const initRungSel = resolveRungSelection(bundle.rungs, params.get("rung"));
+    const initRungSel = resolveRungSelection(bundle.rungs, params.get("rung"), { hasOverview, mode: initMode });
 
     const state = {
       mode: initMode,
       theme: initTheme,
       beat: initBeat,
       tab: initTab,
+      isOverview: initRungSel.isOverview,
       isHorizon: initRungSel.isHorizon,
       rungIndex: initRungSel.rungIndex,
       preferredPersona: params.get("persona") || null,
+      helpOpen: false,
       pollOpen: false,
       pollSelectedKey: null,
       pollRevealed: false,
@@ -444,6 +454,11 @@
 
     let pollIntervalId = null;
     let pollResetConfirmTimerId = null;
+    let prevHelpOpen = false;
+
+    function isNonRung() {
+      return state.isOverview || state.isHorizon;
+    }
 
     function cancelPollResetConfirm() {
       if (pollResetConfirmTimerId !== null) {
@@ -496,7 +511,7 @@
     }
 
     async function fetchPollState() {
-      if (window.location.protocol === "file:" || !state.pollOpen || state.isHorizon || state.authDialogOpen) {
+      if (window.location.protocol === "file:" || !state.pollOpen || isNonRung() || state.authDialogOpen) {
         return;
       }
       const rung = activeRung();
@@ -510,7 +525,7 @@
         if (!data || typeof data !== "object") {
           return;
         }
-        if (!state.pollOpen || state.isHorizon || state.authDialogOpen || activeRung().id !== rung.id) {
+        if (!state.pollOpen || isNonRung() || state.authDialogOpen || activeRung().id !== rung.id) {
           return;
         }
         const rawCounts = data.counts && typeof data.counts === "object" ? data.counts : {};
@@ -547,7 +562,7 @@
     }
 
     function syncStageIfAuthorized() {
-      if (window.location.protocol === "file:" || state.isHorizon) {
+      if (window.location.protocol === "file:" || isNonRung()) {
         return;
       }
       const savedKey = getSavedDemoKey();
@@ -570,20 +585,20 @@
 
     function startPollTimer() {
       stopPollTimer();
-      if (!state.pollOpen || state.isHorizon || window.location.protocol === "file:") {
+      if (!state.pollOpen || isNonRung() || window.location.protocol === "file:") {
         return;
       }
       fetchPollState();
       syncStageIfAuthorized();
       pollIntervalId = window.setInterval(() => {
-        if (state.pollOpen && !state.isHorizon && document.visibilityState === "visible") {
+        if (state.pollOpen && !isNonRung() && document.visibilityState === "visible") {
           fetchPollState();
         }
       }, 2000);
     }
 
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && state.pollOpen && !state.isHorizon && window.location.protocol !== "file:") {
+      if (document.visibilityState === "visible" && state.pollOpen && !isNonRung() && window.location.protocol !== "file:") {
         fetchPollState();
       }
     });
@@ -593,7 +608,7 @@
     }
 
     function activePersonaId() {
-      if (state.isHorizon) {
+      if (isNonRung()) {
         return null;
       }
       return resolvePersonaForRung(activeRung(), state.preferredPersona, bundle);
@@ -617,8 +632,8 @@
 
       const nextParams = new URLSearchParams();
       nextParams.set("mode", state.mode);
-      nextParams.set("rung", state.isHorizon ? "horizon" : String(activeRung().rung_num));
-      if (state.mode === "stage" && !state.isHorizon) {
+      nextParams.set("rung", state.isOverview ? "overview" : (state.isHorizon ? "horizon" : String(activeRung().rung_num)));
+      if (state.mode === "stage" && !isNonRung()) {
         nextParams.set("beat", state.beat);
       }
       if (state.mode === "workbench") {
@@ -643,11 +658,20 @@
       render();
     }
 
-    function selectRung(index) {
+    function selectRung(index, opts = {}) {
+      const nextBeat = opts && VALID_BEATS.has(opts.beat)
+        ? opts.beat
+        : (state.isOverview ? "question" : "compare");
+      stopPollTimer();
+      cancelPollResetConfirm();
       setState({
+        isOverview: false,
         isHorizon: false,
         rungIndex: Math.max(0, Math.min(bundle.rungs.length - 1, index)),
-        beat: "compare",
+        beat: nextBeat,
+        pollOpen: false,
+        stageXrayOpen: false,
+        helpOpen: false,
         pollSelectedKey: null,
         pollRevealed: false,
         pollLiveCounts: { A: 0, B: 0, C: 0, D: 0 },
@@ -659,17 +683,36 @@
         agentError: null,
         agentResult: null
       });
-      if (state.pollOpen) {
-        startPollTimer();
+    }
+
+    function selectOverview() {
+      if (!hasOverview) {
+        return;
       }
+      stopPollTimer();
+      cancelPollResetConfirm();
+      setState({
+        mode: "stage",
+        isOverview: true,
+        isHorizon: false,
+        pollOpen: false,
+        stageXrayOpen: false,
+        helpOpen: false,
+        liveResult: null,
+        agentError: null,
+        agentResult: null
+      });
     }
 
     function selectHorizon() {
       stopPollTimer();
+      cancelPollResetConfirm();
       setState({
+        isOverview: false,
         isHorizon: true,
         pollOpen: false,
         stageXrayOpen: false,
+        helpOpen: false,
         liveResult: null,
         agentError: null,
         agentResult: null
@@ -678,6 +721,10 @@
 
     function stepForward() {
       if (state.isHorizon) {
+        return;
+      }
+      if (state.isOverview) {
+        selectRung(0, { beat: "question" });
         return;
       }
       if (state.beat === "question") {
@@ -709,8 +756,12 @@
     }
 
     function stepBackward() {
+      if (state.isOverview) {
+        return;
+      }
       if (state.isHorizon) {
         setState({
+          isOverview: false,
           isHorizon: false,
           rungIndex: bundle.rungs.length - 1,
           beat: "governed",
@@ -743,11 +794,13 @@
           agentError: null,
           agentResult: null
         });
+      } else if (hasOverview && (state.beat === "question" || state.beat === "compare")) {
+        selectOverview();
       }
     }
 
     function cycleBeatB() {
-      if (state.isHorizon) {
+      if (isNonRung()) {
         return;
       }
       if (state.beat === "question") {
@@ -761,10 +814,14 @@
 
     function toggleMode() {
       stopPollTimer();
+      cancelPollResetConfirm();
+      const nextMode = state.mode === "stage" ? "workbench" : "stage";
       setState({
-        mode: state.mode === "stage" ? "workbench" : "stage",
+        mode: nextMode,
+        isOverview: nextMode === "workbench" ? false : state.isOverview,
         pollOpen: false,
-        stageXrayOpen: false
+        stageXrayOpen: false,
+        helpOpen: false
       });
     }
 
@@ -774,13 +831,33 @@
       });
     }
 
+    function toggleHelp() {
+      if (state.authDialogOpen) {
+        return;
+      }
+      const nextOpen = !state.helpOpen;
+      if (nextOpen) {
+        stopPollTimer();
+        cancelPollResetConfirm();
+      }
+      setState({
+        helpOpen: nextOpen,
+        pollOpen: false,
+        stageXrayOpen: false
+      });
+    }
+
     function togglePoll() {
+      if (state.isOverview) {
+        return;
+      }
       if (state.isHorizon && !state.pollOpen) {
         setState({
           isHorizon: false,
           pollOpen: true,
           pollStatusMsg: null,
-          stageXrayOpen: false
+          stageXrayOpen: false,
+          helpOpen: false
         });
         startPollTimer();
         return;
@@ -792,7 +869,8 @@
       setState({
         pollOpen: nextOpen,
         pollStatusMsg: nextOpen ? null : state.pollStatusMsg,
-        stageXrayOpen: false
+        stageXrayOpen: false,
+        helpOpen: false
       });
       if (nextOpen) {
         startPollTimer();
@@ -800,7 +878,7 @@
     }
 
     function toggleStageXray() {
-      if (state.mode !== "stage" || state.isHorizon || state.pollOpen) {
+      if (state.mode !== "stage" || isNonRung() || state.pollOpen || state.helpOpen) {
         return;
       }
       setState({ stageXrayOpen: !state.stageXrayOpen });
@@ -829,7 +907,7 @@
     }
 
     async function handleRunLiveQuery() {
-      if (state.isHorizon) {
+      if (isNonRung()) {
         return;
       }
       const rung = activeRung();
@@ -926,7 +1004,7 @@
     }
 
     async function handleClearRoomVotes() {
-      if (window.location.protocol === "file:" || state.pollResetBusy || state.isHorizon) {
+      if (window.location.protocol === "file:" || state.pollResetBusy || isNonRung()) {
         return;
       }
       const savedKey = getSavedDemoKey();
@@ -992,7 +1070,7 @@
     }
 
     async function handleRunLiveAgent() {
-      if (state.isHorizon) {
+      if (isNonRung()) {
         return;
       }
       if (window.location.protocol === "file:") {
@@ -1123,8 +1201,25 @@
         attrs: { "aria-label": "Rung progression" }
       });
 
+      if (hasOverview && state.mode === "stage") {
+        group.appendChild(
+          el("button", {
+            className: `seg-btn is-overview${state.isOverview ? " is-active" : ""}`,
+            text: "Overview",
+            attrs: {
+              type: "button",
+              title: "Executive Briefing Overview",
+              "aria-label": "Overview: Executive Briefing",
+              "aria-current": state.isOverview ? "step" : null,
+              "data-rung-id": "overview"
+            },
+            onClick: () => selectOverview()
+          })
+        );
+      }
+
       bundle.rungs.forEach((rung, idx) => {
-        const isActive = !state.isHorizon && state.rungIndex === idx;
+        const isActive = !isNonRung() && state.rungIndex === idx;
         group.appendChild(
           el("button", {
             className: `seg-btn${isActive ? " is-active" : ""}`,
@@ -1136,7 +1231,7 @@
               "aria-current": isActive ? "step" : null,
               "data-rung-id": rung.id
             },
-            onClick: () => selectRung(idx)
+            onClick: () => selectRung(idx, state.isOverview ? { beat: "question" } : {})
           })
         );
       });
@@ -1165,12 +1260,20 @@
         el("button", {
           className: `seg-btn${state.mode === "stage" ? " is-active" : ""}`,
           attrs: { type: "button", "aria-pressed": state.mode === "stage" ? "true" : "false" },
-          onClick: () => setState({ mode: "stage", pollOpen: false, stageXrayOpen: false })
+          onClick: () => {
+            stopPollTimer();
+            cancelPollResetConfirm();
+            setState({ mode: "stage", pollOpen: false, stageXrayOpen: false, helpOpen: false });
+          }
         }, "Stage ", el("span", { className: "kbd-hint", text: "W" })),
         el("button", {
           className: `seg-btn${state.mode === "workbench" ? " is-active" : ""}`,
           attrs: { type: "button", "aria-pressed": state.mode === "workbench" ? "true" : "false" },
-          onClick: () => setState({ mode: "workbench", pollOpen: false, stageXrayOpen: false })
+          onClick: () => {
+            stopPollTimer();
+            cancelPollResetConfirm();
+            setState({ mode: "workbench", isOverview: false, pollOpen: false, stageXrayOpen: false, helpOpen: false });
+          }
         }, "Workbench")
       );
 
@@ -1266,6 +1369,142 @@
               )
             )
           : null
+      );
+    }
+
+    function extractLayerTag(pyramidLayer) {
+      const raw = String(pyramidLayer || "").trim();
+      if (!raw) {
+        return "";
+      }
+      const sepIdx = raw.indexOf("·");
+      return sepIdx >= 0 ? raw.slice(0, sepIdx).trim() : raw;
+    }
+
+    function buildOverviewShowcase() {
+      const ov = bundle.overview;
+      if (!ov) {
+        return null;
+      }
+
+      const hero = el("section", {
+        className: "overview-hero",
+        attrs: { "aria-label": "Executive briefing headline" }
+      },
+        el("div", { className: "overview-hero-meta" },
+          el("span", { className: "overview-eyebrow", text: ov.eyebrow }),
+          el("span", { className: "badge badge-mono", text: `${bundle.closed_period_label} · ${bundle.currency}` })
+        ),
+        el("h1", { className: "overview-headline", text: ov.headline }),
+        el("p", { className: "overview-subheadline", text: ov.subheadline })
+      );
+
+      const statsGrid = el("div", { className: "overview-stats-grid" },
+        ...(Array.isArray(ov.estate_stats) ? ov.estate_stats : []).map((stat) =>
+          el("div", { className: "overview-stat-tile" },
+            el("div", { className: "overview-stat-value", text: stat.value }),
+            el("div", { className: "overview-stat-label", text: stat.label }),
+            el("div", { className: "overview-stat-detail", text: stat.detail })
+          )
+        )
+      );
+
+      const leftCard = el("article", {
+        className: "overview-card",
+        attrs: { "aria-label": `Customer profile: ${ov.company_name}` }
+      },
+        el("div", { className: "overview-card-head" },
+          el("h2", { className: "overview-card-title", text: `Meet ${ov.company_name}` }),
+          el("span", { className: "badge badge-mono", text: bundle.region })
+        ),
+        el("p", { className: "overview-body-copy", text: ov.company_profile }),
+        statsGrid,
+        el("div", { className: "overview-problem-box" },
+          el("span", { className: "overview-problem-label", text: "Why Raw Schemas Fail" }),
+          el("p", { className: "overview-problem-copy", text: ov.problem_statement })
+        )
+      );
+
+      const exp = ov.experiment || {};
+      const rightCard = el("article", {
+        className: "overview-card",
+        attrs: { "aria-label": "Live experiment design" }
+      },
+        el("div", { className: "overview-card-head" },
+          el("h2", { className: "overview-card-title", text: "The Live Experiment" }),
+          el("span", { className: "badge badge-ga", text: "Zero Spoilers" })
+        ),
+        el("div", { className: "overview-control-box" },
+          el("span", { className: "overview-control-label", text: "Fixed Control" }),
+          el("p", { className: "overview-body-copy", text: exp.fixed_control || "" })
+        ),
+        el("div", { className: "overview-arms-stack" },
+          el("div", { className: "overview-arm-card is-blind" },
+            el("div", { className: "overview-arm-head" },
+              el("span", { className: "overview-arm-badge is-blind", text: "Blind Arm" }),
+              el("span", { className: "badge badge-tier-3", text: "Raw Schema Only" })
+            ),
+            el("p", { className: "overview-arm-copy", text: exp.blind_arm || "" })
+          ),
+          el("div", { className: "overview-arm-card is-governed" },
+            el("div", { className: "overview-arm-head" },
+              el("span", { className: "overview-arm-badge is-governed", text: "Governed Arm" }),
+              el("span", { className: "badge badge-ga", text: "Progressive Context" })
+            ),
+            el("p", { className: "overview-arm-copy", text: exp.governed_arm || "" })
+          )
+        )
+      );
+
+      const roadmapGrid = el("div", { className: "overview-roadmap-grid" },
+        ...bundle.rungs.map((rung, idx) => {
+          const layerTag = extractLayerTag(rung.pyramid_layer);
+          return el("button", {
+            className: "overview-roadmap-card",
+            attrs: {
+              type: "button",
+              "data-overview-rung": rung.id,
+              "aria-label": `R${rung.rung_num}: ${rung.question}`
+            },
+            onClick: () => selectRung(idx, { beat: "question" })
+          },
+            el("div", { className: "overview-roadmap-top" },
+              el("span", { className: "overview-roadmap-label", text: rung.short_label }),
+              layerTag
+                ? el("span", { className: "badge badge-mono overview-layer-tag", text: layerTag })
+                : null
+            ),
+            el("span", { className: "overview-roadmap-question", text: rung.question })
+          );
+        })
+      );
+
+      const roadmapSection = el("section", {
+        className: "overview-roadmap",
+        attrs: { "aria-label": "Boardroom simulation roadmap" }
+      },
+        el("div", { className: "overview-roadmap-header" },
+          el("div", { className: "overview-roadmap-title-row" },
+            el("h2", { className: "overview-roadmap-title", text: `${bundle.rungs.length} Live Boardroom Questions` }),
+            el("button", {
+              className: "overview-guide-link",
+              text: "What are Layers 1–5? Open ? Guide",
+              attrs: { type: "button" },
+              onClick: () => toggleHelp()
+            })
+          ),
+          el("span", { className: "overview-roadmap-hint", text: "Select any card to jump to its question" })
+        ),
+        roadmapGrid
+      );
+
+      return el("section", {
+        className: "overview-showcase",
+        attrs: { "aria-label": "Executive Briefing Overview" }
+      },
+        hero,
+        el("div", { className: "overview-grid" }, leftCard, rightCard),
+        roadmapSection
       );
     }
 
@@ -1419,7 +1658,7 @@
     }
 
     function buildStageXrayDrawer() {
-      if (state.mode !== "stage" || state.isHorizon || !state.stageXrayOpen) {
+      if (state.mode !== "stage" || isNonRung() || !state.stageXrayOpen) {
         return null;
       }
       const rung = activeRung();
@@ -1562,26 +1801,26 @@
         el("button", {
           className: `seg-btn${state.beat === "question" ? " is-active" : ""}`,
           text: "Q",
-          attrs: { type: "button", title: "Step 1: Business Question", disabled: state.isHorizon ? true : null },
+          attrs: { type: "button", title: "Step 1: Business Question", disabled: isNonRung() ? true : null },
           onClick: () => setState({ beat: "question" })
         }),
         el("button", {
           className: `seg-btn${state.beat === "blind" ? " is-active" : ""}`,
           text: "Blind",
-          attrs: { type: "button", disabled: state.isHorizon ? true : null },
+          attrs: { type: "button", disabled: isNonRung() ? true : null },
           onClick: () => setState({ beat: "blind" })
-        }),
-        el("button", {
-          className: `seg-btn${state.beat === "compare" ? " is-active" : ""}`,
-          text: "Compare",
-          attrs: { type: "button", disabled: state.isHorizon ? true : null },
-          onClick: () => setState({ beat: "compare" })
         }),
         el("button", {
           className: `seg-btn${state.beat === "governed" ? " is-active" : ""}`,
           text: "Governed",
-          attrs: { type: "button", disabled: state.isHorizon ? true : null },
+          attrs: { type: "button", disabled: isNonRung() ? true : null },
           onClick: () => setState({ beat: "governed" })
+        }),
+        el("button", {
+          className: `seg-btn${state.beat === "compare" ? " is-active" : ""}`,
+          text: "Compare",
+          attrs: { type: "button", disabled: isNonRung() ? true : null },
+          onClick: () => setState({ beat: "compare" })
         })
       );
 
@@ -1589,14 +1828,16 @@
         className: "token-retry-pill",
         attrs: { "aria-label": "Context tokens and retries delta" }
       },
-        state.isHorizon
-          ? el("span", { text: "Act IV · Roadmap Scope" })
-          : [
-              el("span", { text: `Tokens ${formatNumber(rung.blind.tokens_used)} → ` }),
-              el("span", { className: "delta-good", text: formatNumber(rung.governed.tokens_used) }),
-              el("span", { text: ` · Retries ${rung.blind.error_retries} → ` }),
-              el("span", { className: "delta-good", text: String(rung.governed.error_retries) })
-            ]
+        state.isOverview
+          ? el("span", { text: `Briefing · ${bundle.rungs.length} Live Rungs` })
+          : (state.isHorizon
+              ? el("span", { text: "Act IV · Roadmap Scope" })
+              : [
+                  el("span", { text: `Tokens ${formatNumber(rung.blind.tokens_used)} → ` }),
+                  el("span", { className: "delta-good", text: formatNumber(rung.governed.tokens_used) }),
+                  el("span", { text: ` · Retries ${rung.blind.error_retries} → ` }),
+                  el("span", { className: "delta-good", text: String(rung.governed.error_retries) })
+                ])
       );
 
       const topbar = el("header", { className: "stage-topbar" },
@@ -1611,8 +1852,25 @@
           ),
           el("div", { className: "stage-actions" },
             el("button", {
+              className: `btn${state.helpOpen ? " btn-primary" : ""}`,
+              attrs: {
+                type: "button",
+                id: "help-guide-btn",
+                title: "Explain what is on screen (? or H)",
+                "aria-expanded": state.helpOpen ? "true" : "false",
+                "aria-controls": "help-guide-drawer"
+              },
+              onClick: () => toggleHelp()
+            }, "? Guide"),
+            el("button", {
               className: "btn btn-accent",
-              attrs: { type: "button", title: "Open CDO Myth-Busting Poll (Key P)" },
+              attrs: {
+                type: "button",
+                disabled: state.isOverview ? true : null,
+                title: state.isOverview
+                  ? "Audience Poll activates once R1 starts"
+                  : "Open CDO Myth-Busting Poll (Key P)"
+              },
               onClick: () => togglePoll()
             }, "Poll ", el("span", { className: "kbd-hint", text: "P" })),
             modeGroup,
@@ -1622,24 +1880,25 @@
         el("div", { className: "stage-topbar-row stage-topbar-nav" },
           buildRungStepper(),
           el("div", { className: "stage-actions" },
-            beatToggle,
-            el("button", {
-              className: "btn",
-              attrs: { type: "button", title: "Cycle Beat Focus (Key B)", disabled: state.isHorizon ? true : null },
-              onClick: () => cycleBeatB()
-            }, "Focus ", el("span", { className: "kbd-hint", text: "B" })),
-            window.location.protocol !== "file:" && !state.isHorizon
+            !state.isOverview ? beatToggle : null,
+            !state.isOverview
+              ? el("button", {
+                  className: "btn",
+                  attrs: { type: "button", title: "Cycle Beat Focus (Key B)", disabled: isNonRung() ? true : null },
+                  onClick: () => cycleBeatB()
+                }, "Focus ", el("span", { className: "kbd-hint", text: "B" }))
+              : null,
+            window.location.protocol !== "file:" && !isNonRung()
               ? el("button", {
                   className: "btn btn-primary",
                   text: state.liveLoading ? "Running..." : "▶ Verify Live BQ",
                   attrs: {
                     type: "button",
                     disabled: state.liveLoading ? true : null,
-                    title: "Execute live BigQuery / Property Graph / RLS query via /api/run-rung"
+                    title: "Execute governed BigQuery / Property Graph / RLS query via /api/run-rung"
                   },
                   onClick: () => {
-                    const targetMode = state.beat === "blind" ? "blind" : "governed";
-                    state.liveTargetMode = targetMode;
+                    state.liveTargetMode = "governed";
                     handleRunLiveQuery();
                   }
                 })
@@ -1650,7 +1909,9 @@
       );
 
       let canvasChildren;
-      if (state.isHorizon) {
+      if (state.isOverview) {
+        canvasChildren = [buildOverviewShowcase()];
+      } else if (state.isHorizon) {
         canvasChildren = [buildHorizonShowcase()];
       } else {
         const questionHero = el("section", {
@@ -1661,14 +1922,6 @@
             el("div", { className: "question-eyebrow" },
               el("span", { className: "badge badge-mono", text: rung.short_label }),
               el("span", { className: "badge", text: rung.pyramid_layer })
-            ),
-            el("div", { className: "release-badges-row" },
-              ...rung.release_badges.map((rb) =>
-                el("span", {
-                  className: stageBadgeClass(rb.stage),
-                  text: `${rb.capability} · ${rb.stage} (${rb.region_scope})`
-                })
-              )
             )
           ),
           el("h1", { className: "question-headline", text: rung.question })
@@ -1787,64 +2040,86 @@
 
       // Bottom 10% Eval & Trust Bar
       const evalDots = el("span", { className: "eval-dots", attrs: { "aria-hidden": "true" } });
-      if (!state.isHorizon) {
+      if (!isNonRung()) {
         for (let i = 0; i < rung.governed.eval_total_runs; i += 1) {
           const pass = i < rung.governed.eval_pass_count;
           evalDots.appendChild(el("span", { className: `eval-dot ${pass ? "is-pass" : "is-fail"}` }));
         }
       }
 
-      const empiricalBadgeText = state.isHorizon ? null : formatEmpiricalHeadline(rung);
-      const targetRateText = state.isHorizon
+      const empiricalBadgeText = isNonRung() ? null : formatEmpiricalHeadline(rung);
+      const targetRateText = isNonRung()
         ? ""
         : `${empiricalBadgeText ? "Target: " : ""}${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}`;
 
-      const footer = el("footer", { className: "stage-footer" },
-        state.isHorizon
-          ? el("div", { className: "eval-trust-group" },
-              el("span", { className: "badge", text: `Act IV Horizon · ${bundle.horizon_cards.length} Architectural Cards` }),
-              el("span", { className: "eval-label", text: `Live Scope: ${bundle.region}` })
-            )
-          : el("div", { className: "eval-trust-group" },
-              el("div", { className: "eval-block" },
-                el("span", { className: "eval-label", text: "Golden Eval Pass Rate" }),
-                evalDots,
-                el("span", {
-                  className: "badge badge-mono",
-                  text: targetRateText
-                }),
-                empiricalBadgeText
-                  ? el("span", {
-                      className: "badge badge-empirical badge-mono",
-                      attrs: { "data-empirical-badge": "true" },
-                      text: empiricalBadgeText
-                    })
-                  : null
-              ),
-              el("div", { className: "eval-block" },
-                el("span", { className: "eval-label", text: "TrustTier" }),
-                el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier }),
-                el("span", { text: "→" }),
-                el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
-              ),
-              el("div", { className: "eval-block" },
-                el("span", { className: "eval-label", text: "Exploratory Queries" }),
-                el("span", {
-                  className: "badge badge-mono",
-                  text: `${rung.blind.exploratory_queries} → ${rung.governed.exploratory_queries}`
+      let footerLeft;
+      if (state.isOverview) {
+        footerLeft = el("div", { className: "eval-trust-group" },
+          el("span", { className: "badge badge-mono", text: `Briefing · ${bundle.rungs.length}-Rung Live Simulation` }),
+          el("span", { className: "eval-label", text: `Region: ${bundle.region}` })
+        );
+      } else if (state.isHorizon) {
+        footerLeft = el("div", { className: "eval-trust-group" },
+          el("span", { className: "badge", text: `Act IV Horizon · ${bundle.horizon_cards.length} Architectural Cards` }),
+          el("span", { className: "eval-label", text: `Live Scope: ${bundle.region}` })
+        );
+      } else {
+        footerLeft = el("div", { className: "eval-trust-group" },
+          el("div", { className: "eval-block" },
+            el("span", { className: "eval-label", text: "Golden Eval Pass Rate" }),
+            evalDots,
+            el("span", {
+              className: "badge badge-mono",
+              text: targetRateText
+            }),
+            empiricalBadgeText
+              ? el("span", {
+                  className: "badge badge-empirical badge-mono",
+                  attrs: { "data-empirical-badge": "true" },
+                  text: empiricalBadgeText
                 })
-              )
-            ),
-        el("div", { className: "nav-controls-group" },
-          el("div", { className: "shortcut-legend", attrs: { "aria-label": "Keyboard shortcuts" } },
+              : null
+          ),
+          el("div", { className: "eval-block" },
+            el("span", { className: "eval-label", text: "TrustTier" }),
+            el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier }),
+            el("span", { text: "→" }),
+            el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
+          ),
+          el("div", { className: "eval-block" },
+            el("span", { className: "eval-label", text: "Exploratory Queries" }),
+            el("span", {
+              className: "badge badge-mono",
+              text: `${rung.blind.exploratory_queries} → ${rung.governed.exploratory_queries}`
+            })
+          )
+        );
+      }
+
+      const shortcutItems = state.isOverview
+        ? [
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Start R1"),
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
+          ]
+        : [
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Advance"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "P" }), "Poll"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "X" }), "X-Ray"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "B" }), "Focus"),
             el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme")
-          ),
-          !state.isHorizon
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
+            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
+          ];
+
+      const prevDisabled = state.isOverview || (!hasOverview && !state.isHorizon && state.rungIndex === 0 && state.beat === "question");
+
+      const footer = el("footer", { className: "stage-footer" },
+        footerLeft,
+        el("div", { className: "nav-controls-group" },
+          el("div", { className: "shortcut-legend", attrs: { "aria-label": "Keyboard shortcuts" } }, ...shortcutItems),
+          !isNonRung()
             ? el("button", {
                 className: `btn ${state.stageXrayOpen ? "btn-primary" : "btn-accent"}`,
                 attrs: {
@@ -1862,20 +2137,27 @@
             text: "← Prev",
             attrs: {
               type: "button",
-              disabled: !state.isHorizon && state.rungIndex === 0 && state.beat === "question" ? true : null
+              disabled: prevDisabled ? true : null
             },
             onClick: () => stepBackward()
           }),
-          el("button", {
-            className: "btn btn-primary",
-            text: state.isHorizon ? "End · Act IV" : "Next →",
-            attrs: { type: "button", disabled: state.isHorizon ? true : null },
-            onClick: () => stepForward()
-          })
+          state.isOverview && bundle.overview
+            ? el("button", {
+                className: "btn btn-primary",
+                text: bundle.overview.cta_label,
+                attrs: { type: "button", id: "overview-start-btn" },
+                onClick: () => stepForward()
+              })
+            : el("button", {
+                className: "btn btn-primary",
+                text: state.isHorizon ? "End · Act IV" : "Next →",
+                attrs: { type: "button", disabled: state.isHorizon ? true : null },
+                onClick: () => stepForward()
+              })
         )
       );
 
-      return el("div", { className: "stage-shell" }, topbar, canvas, footer);
+      return el("div", { className: `stage-shell${state.isOverview ? " is-overview-mode" : ""}` }, topbar, canvas, footer);
     }
 
     /* ----------------------------------------------------------------------
@@ -1910,7 +2192,7 @@
 
       const cardsWrap = el("div", { className: "progression-cards" });
       bundle.rungs.forEach((rung, idx) => {
-        const isActive = !state.isHorizon && state.rungIndex === idx;
+        const isActive = !isNonRung() && state.rungIndex === idx;
         const pct = Math.round((rung.governed.eval_pass_count / Math.max(1, rung.governed.eval_total_runs)) * 100);
         const empLine = formatEmpiricalHeadline(rung);
         cardsWrap.appendChild(
@@ -2341,7 +2623,7 @@
     function buildLiveAgentPanel(rung, personaId) {
       const isFileProtocol = window.location.protocol === "file:";
       const disabledByServer = Boolean(state.health && state.health.live_agent_enabled === false);
-      const isDisabled = isFileProtocol || disabledByServer || state.agentLoading || state.isHorizon;
+      const isDisabled = isFileProtocol || disabledByServer || state.agentLoading || isNonRung();
       const savedKey = getSavedDemoKey();
       const modelId = (state.agentResult && state.agentResult.data && state.agentResult.data.model_id)
         || (state.health && state.health.agent_model_id)
@@ -2691,6 +2973,17 @@
         buildRungStepper(),
         el("div", { className: "stage-actions" },
           el("button", {
+            className: `btn${state.helpOpen ? " btn-primary" : ""}`,
+            attrs: {
+              type: "button",
+              id: "help-guide-btn",
+              title: "Explain what is on screen (? or H)",
+              "aria-expanded": state.helpOpen ? "true" : "false",
+              "aria-controls": "help-guide-drawer"
+            },
+            onClick: () => toggleHelp()
+          }, "? Guide"),
+          el("button", {
             className: "btn btn-accent",
             attrs: { type: "button", title: "Open Poll Modal (Key P)" },
             onClick: () => togglePoll()
@@ -2698,24 +2991,6 @@
           modeGroup,
           themeGroup
         )
-      );
-
-      const runnerTargetGroup = el("div", {
-        className: "segmented-group",
-        attrs: { role: "group", "aria-label": "Live query target mode" }
-      },
-        el("button", {
-          className: `seg-btn${state.liveTargetMode === "governed" ? " is-active" : ""}`,
-          text: "Governed",
-          attrs: { type: "button" },
-          onClick: () => setState({ liveTargetMode: "governed" })
-        }),
-        el("button", {
-          className: `seg-btn${state.liveTargetMode === "blind" ? " is-active" : ""}`,
-          text: "Blind",
-          attrs: { type: "button" },
-          onClick: () => setState({ liveTargetMode: "blind" })
-        })
       );
 
       const isLiveVerified = bundle.generated_mode === "live_gcp_verified" || bundle.generated_mode === "live_agent_verified";
@@ -2734,18 +3009,20 @@
           personaId ? el("span", { className: "badge badge-mono", text: `Persona: ${personaId}` }) : null
         ),
         el("div", { className: "live-runner-controls" },
-          runnerTargetGroup,
           el("button", {
             className: "btn btn-primary",
             text: state.liveLoading ? "Running..." : "▶ Run Live Query",
             attrs: {
               type: "button",
-              disabled: state.liveLoading || state.isHorizon ? true : null,
+              disabled: state.liveLoading || isNonRung() ? true : null,
               title: window.location.protocol === "file:"
                 ? "Offline file:// mode: displaying recorded verified run. Serve via uvicorn server.app:app to run live queries."
-                : "Execute allowlisted pack query via POST /api/run-rung"
+                : "Execute governed allowlisted pack query via POST /api/run-rung"
             },
-            onClick: () => handleRunLiveQuery()
+            onClick: () => {
+              state.liveTargetMode = "governed";
+              handleRunLiveQuery();
+            }
           })
         )
       );
@@ -3062,14 +3339,235 @@
     }
 
     /* ----------------------------------------------------------------------
+       Plain-English Help Drawer (? Guide)
+       ---------------------------------------------------------------------- */
+
+    function deriveLayerRungs(layerDigit, includeIdentityNote) {
+      const matches = [];
+      for (const r of bundle.rungs) {
+        const tag = extractLayerTag(r.pyramid_layer);
+        const hasRange12 = layerDigit === "1" || layerDigit === "2" ? /1[–-]2/.test(tag) : false;
+        const hasDigit = new RegExp(`\\b${layerDigit}\\b`).test(tag);
+        if (hasRange12 || hasDigit) {
+          let label = `R${r.rung_num}`;
+          if (includeIdentityNote && r.identity_variants && Object.keys(r.identity_variants).length > 0) {
+            label += " · Beat 4b";
+          }
+          matches.push(label);
+        }
+      }
+      return matches.length > 0 ? matches.join(", ") : "—";
+    }
+
+    function buildHelpDrawer() {
+      if (!state.helpOpen) {
+        return null;
+      }
+
+      const closeHelp = () => setState({ helpOpen: false });
+      const dataRegion = (state.health && state.health.bq_location) || bundle.region || "asia-southeast1";
+
+      const pyramidRows = [
+        {
+          layer: "Layer 1 · Technical Metadata",
+          rungs: deriveLayerRungs("1", false),
+          desc: "Table schemas, PK/FK constraints, certified Data Products, and automated data quality freshness."
+        },
+        {
+          layer: "Layer 2 · Intent-Driven Enrichment",
+          rungs: deriveLayerRungs("2", false),
+          desc: "Automated schema insights and runtime context retrieval (BigQuery Data Insights & Knowledge Catalog lookupContext (Preview))."
+        },
+        {
+          layer: "Layer 3 · Institutional Knowledge",
+          rungs: deriveLayerRungs("3", false),
+          desc: "Policies, contracts, and amendments living in unstructured documents outside SQL tables."
+        },
+        {
+          layer: "Layer 4 · Semantic Knowledge",
+          rungs: deriveLayerRungs("4", false),
+          desc: "Shared business glossaries, grain-locked metrics (MEASURE()), and multi-hop relationship graphs (ISO GQL)."
+        },
+        {
+          layer: "Layer 5 · Personalization & Access Governance",
+          rungs: deriveLayerRungs("5", true),
+          desc: "Identity-scoped Row-Level Security and access boundaries so answers adapt to who is asking."
+        }
+      ];
+
+      const glossaryItems = [
+        {
+          term: "Target Eval (k/N)",
+          desc: "Expected consistency across 5 repeated runs of the same business question."
+        },
+        {
+          term: "Empirical N=5",
+          desc: "Actual measured pass rate from running the live Gemini agent 5 separate times per arm (proving results aren't a lucky one-off)."
+        },
+        {
+          term: "Trust Tier (TIER_3 → TIER_2 → TIER_1)",
+          desc: "Automated safety grade from Review Required (unverified SQL / math drift) to Grounded (schema/glossary) up to Verified / Compiled (certified metrics, graphs, RLS, or contracts)."
+        },
+        {
+          term: "Tokens",
+          desc: "Total prompt, schema lookup, and response text processed by the AI—lower wasted exploration means faster, cheaper answers."
+        },
+        {
+          term: "Exploratory Queries & Retries",
+          desc: "How many trial-and-error SQL queries the agent ran (and fixed after errors) while guessing what tables/columns mean; governed context reduces retries."
+        },
+        {
+          term: "Verify Live BQ (▶)",
+          desc: `Runs the active rung's real SQL or ISO GQL directly against BigQuery (${dataRegion}), including live Row-Level Security identity switching when available.`
+        },
+        {
+          term: "Stage X-Ray ([X]) & Live QR Poll ([P])",
+          desc: "Behind-the-scenes Knowledge Catalog payload / SQL drawer (X) and audience mobile QR voting modal (P → /vote)."
+        }
+      ];
+
+      const shortcutRows = [
+        ["Space / →", "Advance from Overview to R1, step through beats, or advance rungs"],
+        ["←", "Step back to the previous beat, rung, or Overview"],
+        ["P", "Open / close the CDO Myth-Busting QR Poll modal (active on R1–R6)"],
+        ["X", "Open / close the Slide-Up Stage X-Ray drawer (Stage R1–R6)"],
+        ["B", "Cycle card focus between Compare, Blind, and Governed"],
+        ["W", "Switch between Stage presentation mode and Engineering Workbench"],
+        ["T", "Toggle Paper (light) and Dark Stage themes"],
+        ["? / H", "Open or close this plain-English Guide drawer (Esc closes)"]
+      ];
+
+      const backdrop = el("div", {
+        className: "help-drawer-backdrop",
+        attrs: { role: "presentation" },
+        onClick: (e) => {
+          if (e.target === backdrop) {
+            closeHelp();
+          }
+        }
+      },
+        el("aside", {
+          className: "help-drawer",
+          attrs: {
+            id: "help-guide-drawer",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "help-drawer-title"
+          }
+        },
+          el("header", { className: "help-drawer-head" },
+            el("div", { className: "help-drawer-title-block" },
+              el("span", { className: "badge badge-mono", text: "Plain-English Field Guide" }),
+              el("h2", {
+                className: "help-drawer-title",
+                attrs: { id: "help-drawer-title" },
+                text: "How to Read This Screen"
+              })
+            ),
+            el("button", {
+              className: "btn btn-primary",
+              text: "Close [Esc]",
+              attrs: {
+                type: "button",
+                id: "help-drawer-close",
+                "aria-label": "Close Guide drawer"
+              },
+              onClick: () => closeHelp()
+            })
+          ),
+          el("div", { className: "help-drawer-body" },
+            el("section", { className: "help-section", attrs: { "aria-label": "How This Screen Works" } },
+              el("h3", { className: "help-section-title", text: "1. How This Screen Works" }),
+              el("div", { className: "help-callout-grid" },
+                el("div", { className: "help-callout is-blind" },
+                  el("strong", { className: "help-callout-head", text: "Blind Agent Trap" }),
+                  el("p", {
+                    className: "help-copy",
+                    text: "Same AI model, raw schemas only—it guesses cryptic columns, hits join fan-traps, and misses amendments, producing confident-sounding mistakes."
+                  })
+                ),
+                el("div", { className: "help-callout is-governed" },
+                  el("strong", { className: "help-callout-head", text: "Governed Enterprise Context" }),
+                  el("p", {
+                    className: "help-copy",
+                    text: "The exact same AI model paired with live Knowledge Catalog, Property Graph, Row-Level Security, and extracted contracts produces verified answers."
+                  })
+                )
+              ),
+              el("p", {
+                className: "help-copy",
+                text: "Use Stage Mode for clean executive storytelling (Overview → R1–R6 → Act IV Horizon), or switch to Workbench [W] for the 3-tab X-Ray inspector, SQL diffs, and live Gemini agent execution."
+              })
+            ),
+            el("section", { className: "help-section", attrs: { "aria-label": "The 5-Layer Enterprise Context Pyramid" } },
+              el("h3", { className: "help-section-title", text: "2. The 5-Layer Enterprise Context Pyramid (L1 → L5)" }),
+              el("p", {
+                className: "help-copy",
+                text: "Rungs R1–R6 follow the executive investigation story rather than strict L1→L5 order. Here is how each pyramid layer maps to the live rungs:"
+              }),
+              el("div", { className: "help-pyramid-list" },
+                ...pyramidRows.map((row) =>
+                  el("div", { className: "help-pyramid-item" },
+                    el("div", { className: "help-pyramid-head" },
+                      el("strong", { className: "help-item-term", text: row.layer }),
+                      el("span", { className: "badge badge-mono", text: row.rungs })
+                    ),
+                    el("p", { className: "help-copy", text: row.desc })
+                  )
+                )
+              )
+            ),
+            el("section", { className: "help-section", attrs: { "aria-label": "What Every Badge and Metric Means" } },
+              el("h3", { className: "help-section-title", text: "3. What Every Badge & Metric Means" }),
+              el("dl", { className: "help-glossary" },
+                ...glossaryItems.map((item) =>
+                  el("div", { className: "help-glossary-item" },
+                    el("dt", { className: "help-item-term", text: item.term }),
+                    el("dd", { className: "help-copy", text: item.desc })
+                  )
+                )
+              )
+            ),
+            el("section", { className: "help-section", attrs: { "aria-label": "Quick Keyboard Shortcuts" } },
+              el("h3", { className: "help-section-title", text: "4. Quick Keyboard Shortcuts" }),
+              el("div", { className: "rls-table-wrap" },
+                el("table", { className: "rls-table help-shortcut-table" },
+                  el("thead", null,
+                    el("tr", null,
+                      el("th", { text: "Key" }),
+                      el("th", { text: "Action" })
+                    )
+                  ),
+                  el("tbody", null,
+                    ...shortcutRows.map(([k, action]) =>
+                      el("tr", null,
+                        el("td", null, el("span", { className: "kbd-hint", text: k })),
+                        el("td", { text: action })
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+
+      return backdrop;
+    }
+
+    /* ----------------------------------------------------------------------
        Main Render & Global Keyboard Controls
        ---------------------------------------------------------------------- */
 
     function render() {
+      const wasHelpOpen = prevHelpOpen;
+      prevHelpOpen = state.helpOpen;
       syncUrlAndDocument();
       const mainShell = state.mode === "workbench" ? buildWorkbenchView() : buildStageView();
       const pollModal = buildPollModal();
       const xrayDrawer = buildStageXrayDrawer();
+      const helpDrawer = buildHelpDrawer();
       const nodes = [mainShell];
       if (xrayDrawer) {
         nodes.push(xrayDrawer);
@@ -3077,7 +3575,21 @@
       if (pollModal) {
         nodes.push(pollModal);
       }
+      if (helpDrawer) {
+        nodes.push(helpDrawer);
+      }
       root.replaceChildren(...nodes);
+      if (!wasHelpOpen && state.helpOpen) {
+        const closeBtn = document.getElementById("help-drawer-close");
+        if (closeBtn) {
+          closeBtn.focus();
+        }
+      } else if (wasHelpOpen && !state.helpOpen) {
+        const guideBtn = document.getElementById("help-guide-btn");
+        if (guideBtn) {
+          guideBtn.focus();
+        }
+      }
     }
 
     function isEditableTarget(target) {
@@ -3100,6 +3612,11 @@
           });
           return;
         }
+        if (state.helpOpen) {
+          e.preventDefault();
+          setState({ helpOpen: false });
+          return;
+        }
         if (state.pollOpen) {
           e.preventDefault();
           stopPollTimer();
@@ -3113,10 +3630,41 @@
         }
         return;
       }
+      if (state.helpOpen && e.key === "Tab") {
+        const drawer = document.getElementById("help-guide-drawer");
+        if (drawer) {
+          const focusables = Array.from(
+            drawer.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+          );
+          if (focusables.length > 0) {
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (e.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey || isEditableTarget(e.target)) {
         return;
       }
+      if (e.key === "?" || e.code === "KeyH") {
+        e.preventDefault();
+        toggleHelp();
+        return;
+      }
+      if (state.helpOpen) {
+        return;
+      }
       if (e.code === "KeyP") {
+        if (state.isOverview) {
+          return;
+        }
         e.preventDefault();
         togglePoll();
         return;
@@ -3125,7 +3673,7 @@
         return;
       }
       if (e.code === "KeyX") {
-        if (state.mode === "stage" && !state.isHorizon) {
+        if (state.mode === "stage" && !isNonRung()) {
           e.preventDefault();
           toggleStageXray();
         }
@@ -3161,6 +3709,12 @@
     });
 
     render();
+    if (state.isOverview) {
+      const startBtn = document.getElementById("overview-start-btn");
+      if (startBtn) {
+        startBtn.focus();
+      }
+    }
     fetchHealth();
   }
 
