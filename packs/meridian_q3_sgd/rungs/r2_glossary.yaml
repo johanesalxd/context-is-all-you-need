@@ -3,6 +3,7 @@ rung_num: 2
 short_label: "R2 · Glossary"
 title: "Knowledge Catalog Business Glossary"
 pyramid_layer: "Layer 4 · Knowledge Catalog Business Glossary (GA)"
+difficulty_tier: "Easy"
 release_badges:
   - capability: "Knowledge Catalog Business Glossary"
     stage: "GA"
@@ -30,6 +31,8 @@ poll:
 blind:
   answer_headline: "Mobile App (SGD 284.10)"
   answer_detail: "Wrong channel and -53.6% understated AOV: filtering segment_label LIKE '%Premier%' swept in 260 low-value 'Premier_Promo_Trial' mobile/web coupon orders while excluding Enterprise_Corporate B2B Premier accounts."
+  stage_delta_pill: "Wrong Channel · -53.6% AOV"
+  stage_summary: "Wrong winning channel (-53.6% AOV). Mixed promotional trial signups into the Premier VIP segment."
   numeric_value: 284.1
   unit: "SGD"
   query_language: "SQL"
@@ -64,6 +67,8 @@ blind:
 governed:
   answer_headline: "B2B Corporate Portal (SGD 612.50)"
   answer_detail: "B2B Corporate Portal led with SGD 612.50 AOV across 240 orders (SGD 147,000.00), within the 640 total SG PRM_HV completed orders averaging SGD 495.63 (SGD 317,203.20 total)."
+  stage_delta_pill: "Governed VIP Definition"
+  stage_summary: "B2B Corporate Portal leads using Finance's official Premier customer definition (640 qualified orders)."
   numeric_value: 612.5
   unit: "SGD"
   query_language: "SQL"

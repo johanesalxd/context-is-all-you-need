@@ -372,6 +372,31 @@ button, input, select {
   border-color: var(--horizon-border);
 }
 
+.badge-difficulty {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge-difficulty.is-easy {
+  background: var(--gov-badge-bg);
+  color: var(--gov-fg-strong);
+  border-color: var(--gov-border);
+}
+
+.badge-difficulty.is-medium {
+  background: var(--preview-bg);
+  color: var(--preview-fg);
+  border-color: var(--preview-border);
+}
+
+.badge-difficulty.is-hard {
+  background: var(--ref-bg);
+  color: var(--ref-fg);
+  border-color: var(--ref-border);
+}
+
 /* ==========================================================================
    STAGE MODE — Quiet Stage V2 (10% / 80% / 10% Ballroom Proportions)
    ========================================================================== */
@@ -651,6 +676,38 @@ button, input, select {
   font-size: 0.98rem;
   line-height: 1.5;
   color: var(--text-primary);
+}
+
+.stage-delta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+
+.stage-delta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.stage-delta-pill.is-blind {
+  background: var(--blind-badge-bg);
+  color: var(--blind-fg-strong);
+  border-color: var(--blind-border);
+}
+
+.stage-delta-pill.is-governed {
+  background: var(--gov-badge-bg);
+  color: var(--gov-fg-strong);
+  border-color: var(--gov-border);
 }
 
 .scoped-metric-row {
@@ -1147,6 +1204,14 @@ button, input, select {
   color: var(--accent-primary);
 }
 
+.overview-roadmap-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.overview-difficulty-tag,
 .overview-layer-tag {
   font-size: 0.66rem;
   padding: 1px 6px;
@@ -1775,6 +1840,62 @@ button, input, select {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.xray-bridge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.xray-bridge-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-alt);
+  min-width: 0;
+}
+
+.xray-bridge-card.is-blind {
+  border-color: var(--blind-border);
+  background: var(--blind-bg);
+}
+
+.xray-bridge-card.is-governed {
+  border-color: var(--gov-border);
+  background: var(--gov-bg);
+}
+
+.xray-bridge-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.xray-bridge-card-head .stage-delta-pill {
+  margin: 0;
+}
+
+.xray-bridge-summary {
+  margin: 0;
+  font-size: 0.94rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.xray-bridge-detail {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 .empirical-cards-grid {
@@ -2589,6 +2710,7 @@ button, input, select {
   .code-diff-grid,
   .workbench-outcomes-mini,
   .empirical-cards-grid,
+  .xray-bridge-grid,
   .agent-cards-grid {
     grid-template-columns: 1fr;
   }

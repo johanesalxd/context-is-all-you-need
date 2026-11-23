@@ -3,6 +3,7 @@ rung_num: 6
 short_label: "R6 · Contracts"
 title: "Unstructured Contract Overlays & SLA Recovery"
 pyramid_layer: "Layer 3 · Gemini Enterprise Drive Connector + Object Tables + AI.GENERATE / DocAI (GA)"
+difficulty_tier: "Hard"
 release_badges:
   - capability: "Gemini Enterprise Drive Connector"
     stage: "GA"
@@ -33,6 +34,8 @@ poll:
 blind:
   answer_headline: "SGD 1,420.00 (3 breaches)"
   answer_detail: "Missed SGD 17,540.00 in recoverable credits because base vendor_sla_ledger applies legacy > 4.0 C for >= 90 min (5% credit), overlooking executed ArcticHaul Amendment #2."
+  stage_delta_pill: "SGD 17.5K Left Unclaimed"
+  stage_summary: "Left SGD 17.5K on the table. Used old 2025 contract terms and missed the signed June amendment."
   numeric_value: 1420.0
   unit: "SGD"
   query_language: "SQL"
@@ -59,6 +62,8 @@ blind:
 governed:
   answer_headline: "SGD 18,960.00 (14 qualifying chilled shipments)"
   answer_detail: "Joining structured 480-token sla_overlay extracted from ArcticHaul_Amendment_2.md (> 2.0 C for >= 45 min -> 12% credit, cap SGD 35,000.00) recovers SGD 18,960.00 across 14 shipments."
+  stage_delta_pill: "13.4x SLA Recovery"
+  stage_summary: "13.4x higher SLA recovery (14 shipments) by applying the signed Amendment #2 rules automatically."
   numeric_value: 18960.0
   unit: "SGD"
   query_language: "SQL"

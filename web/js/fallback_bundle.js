@@ -91,6 +91,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "short_label": "R1 · Schema",
         "title": "Schema & Tax/Status Predicate Grounding",
         "pyramid_layer": "Layers 1–2 · BigQuery Schema & Data Insights",
+        "difficulty_tier": "Easy",
         "release_badges": [
           {
             "capability": "BigQuery Schema & Data Insights",
@@ -130,6 +131,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "blind": {
           "answer_headline": "USD 124,500.00",
           "answer_detail": "Sums ambiguous amt_gross_billed_usd across all domestic records, sweeping in indirect tax and cancelled/returned transactions.",
+          "stage_delta_pill": "+26.8% Overstated",
+          "stage_summary": "Inflated by +USD 26.3K (+26.8%). Counted indirect tax plus cancelled and returned orders as revenue.",
           "numeric_value": 124500.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  ROUND(SUM(amt_gross_billed_usd), 2) AS revenue_usd\nFROM `example-project-id.sample_blind.fact_orders`\nWHERE market_code = 'DOM';",
@@ -161,6 +164,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "governed": {
           "answer_headline": "USD 98,200.00",
           "answer_detail": "Filters status = 'COMPLETED' and sums amt_net_settled_usd ex-tax as defined in Knowledge Catalog metadata.",
+          "stage_delta_pill": "Board-Ready · Ex-Tax",
+          "stage_summary": "Board-ready Q4 domestic net revenue across completed orders — excluding indirect tax and cancellations.",
           "numeric_value": 98200.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  ROUND(SUM(amt_net_settled_usd), 2) AS net_realized_revenue_usd\nFROM `example-project-id.sample_analytics.fact_orders`\nWHERE market_code = 'DOM'\n  AND status = 'COMPLETED';",
@@ -207,6 +212,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "short_label": "R2 · Glossary",
         "title": "Governed Business Glossary Term Resolution",
         "pyramid_layer": "Layer 4 · Knowledge Catalog Business Glossary",
+        "difficulty_tier": "Easy",
         "release_badges": [
           {
             "capability": "Knowledge Catalog Business Glossary",
@@ -241,6 +247,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "blind": {
           "answer_headline": "Self-Serve Portal (USD 195.00)",
           "answer_detail": "Matches marketing_tag LIKE '%Priority%', pulling in low-spend promotional trial campaigns.",
+          "stage_delta_pill": "Wrong Channel · -53.6% AOV",
+          "stage_summary": "Wrong winning channel (-53.6% AOV). Mixed promotional trial signups into the Priority Tier segment.",
           "numeric_value": 195.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  channel,\n  ROUND(AVG(o.amt_net_settled_usd), 2) AS aov_usd\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.dim_accounts` a USING (account_id)\nWHERE a.marketing_tag LIKE '%Priority%'\nGROUP BY channel\nORDER BY aov_usd DESC\nLIMIT 1;",
@@ -271,6 +279,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "governed": {
           "answer_headline": "Enterprise Direct (USD 420.00)",
           "answer_detail": "Resolves Business Glossary term 'Priority Tier' via EntryLink to tier_code = 'TIER_A_EXEC', surfacing Enterprise Direct leadership.",
+          "stage_delta_pill": "Governed VIP Definition",
+          "stage_summary": "Enterprise Direct leads using Finance's official Priority Tier customer definition.",
           "numeric_value": 420.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  o.channel,\n  ROUND(AVG(o.amt_net_settled_usd), 2) AS aov_usd\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN `example-project-id.sample_analytics.dim_accounts` a USING (account_id)\nWHERE a.tier_code = 'TIER_A_EXEC'\n  AND o.status = 'COMPLETED'\nGROUP BY o.channel\nORDER BY aov_usd DESC\nLIMIT 1;",
@@ -317,6 +327,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "short_label": "R3 · Metrics",
         "title": "Grain-Locked Semantic Metrics Against 1:N Fan-Out",
         "pyramid_layer": "Layer 4 · BigQuery Graph MEASURE() & Verified Query",
+        "difficulty_tier": "Medium",
         "release_badges": [
           {
             "capability": "BigQuery Graph MEASURE()",
@@ -361,6 +372,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "blind": {
           "answer_headline": "11.4% Contribution Margin",
           "answer_detail": "Un-aggregated 3-way JOIN multiplies order header cost and revenue across 2–4 shipment hops per order.",
+          "stage_delta_pill": "-18.2 pts Margin Distortion",
+          "stage_summary": "Margin understated by -18.2 pts. Double-counted line and transit costs across multi-hop shipments.",
           "numeric_value": 11.4,
           "unit": "PCT",
           "sql_or_gql": "SELECT\n  ROUND(100.0 * SUM(o.amt_net_settled_usd - l.line_cogs_usd - h.hop_cost_usd) / SUM(o.amt_net_settled_usd), 1) AS margin_pct\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.fact_order_lines` l USING (order_id)\nJOIN `example-project-id.sample_blind.fact_transit_hops` h USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS';",
@@ -391,6 +404,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "governed": {
           "answer_headline": "29.6% Contribution Margin",
           "answer_detail": "Grain-locked CTE / Property Graph MEASURE() pre-aggregates transit hops to order grain before margin calculation.",
+          "stage_delta_pill": "Zero Double-Counting",
+          "stage_summary": "True Express fulfillment profitability (29.6% margin) — every order, item, and transit cost counted once.",
           "numeric_value": 29.6,
           "unit": "PCT",
           "sql_or_gql": "WITH hop_costs AS (\n  SELECT order_id, SUM(hop_cost_usd) AS total_hop_cost_usd\n  FROM `example-project-id.sample_analytics.fact_transit_hops`\n  GROUP BY order_id\n)\nSELECT\n  ROUND(100.0 * SUM(o.amt_net_settled_usd - o.total_cogs_usd - hc.total_hop_cost_usd) / SUM(o.amt_net_settled_usd), 1) AS margin_pct\nFROM `example-project-id.sample_analytics.fact_orders` o\nJOIN hop_costs hc USING (order_id)\nWHERE o.fulfillment_mode = 'EXPRESS'\n  AND o.status = 'COMPLETED';",
@@ -437,6 +452,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "short_label": "R4 · Trust & RLS",
         "title": "Data Product Certification & Row-Level Access",
         "pyramid_layer": "Layers 1 & 5 · KC Data Products, Auto DQ & BigQuery RLS",
+        "difficulty_tier": "Medium",
         "release_badges": [
           {
             "capability": "Knowledge Catalog Data Products",
@@ -476,6 +492,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "blind": {
           "answer_headline": "False Drop: 21.8% (-320 bps)",
           "answer_detail": "Scans uncertified mart_temp_margin_q4_r1 (close_batch_code = 'B26Q4_R1') amid 190 shadow tables, missing late-quarter supplier settlements.",
+          "stage_delta_pill": "False -320 bps Alarm",
+          "stage_summary": "False boardroom panic (-320 bps). Pulled an uncertified preliminary snapshot missing late-Q4 rebates.",
           "numeric_value": 21.8,
           "unit": "PCT",
           "sql_or_gql": "SELECT\n  ROUND(100.0 * SUM(gross_margin_usd) / SUM(net_revenue_usd), 1) AS margin_pct\nFROM `example-project-id.sample_blind.mart_temp_margin_q4_r1`;",
@@ -506,6 +524,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "governed": {
           "answer_headline": "25.0% Margin (-30 bps YoY)",
           "answer_detail": "Routes exclusively to Knowledge Catalog CERTIFIED Data Product mart_temp_margin_q4_r2 (no false drop) and enforces caller Row-Level Security policy.",
+          "stage_delta_pill": "Certified Close + Role-Scoped",
+          "stage_summary": "Steady 25.0% margin (-30 bps YoY) from the certified Q4 close — automatically scoped to the viewer's role.",
           "numeric_value": 25.0,
           "unit": "PCT",
           "sql_or_gql": "SELECT\n  SUM(gross_margin_usd) AS visible_gross_margin_usd,\n  COUNT(*) AS rows_visible\nFROM `example-project-id.sample_analytics.mart_temp_margin_q4_r2`\nWHERE quarter = 'Q4';",
@@ -573,6 +593,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "short_label": "R5 · Graph",
         "title": "4-Hop Multi-Entity Supply Lineage via ISO GQL",
         "pyramid_layer": "Layer 4 · BigQuery Property Graph & ISO GQL",
+        "difficulty_tier": "Hard",
         "release_badges": [
           {
             "capability": "BigQuery Property Graph",
@@ -612,6 +633,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "blind": {
           "answer_headline": "USD 2,950.00 (Incomplete Join)",
           "answer_detail": "Drops the intermediate lot-allocation bridge table and misses multi-SKU orders tied to Lot #LOT-804.",
+          "stage_delta_pill": "76% Exposure Missed",
+          "stage_summary": "Missed 76% of customer exposure. Direct join dropped the multi-lot allocation bridge table.",
           "numeric_value": 2950.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  ROUND(SUM(o.amt_net_settled_usd), 2) AS exposed_usd\nFROM `example-project-id.sample_blind.fact_orders` o\nJOIN `example-project-id.sample_blind.dim_batches` b\n  ON o.order_id = b.primary_order_id\nWHERE b.batch_code = '#LOT-804';",
@@ -642,6 +665,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "governed": {
           "answer_headline": "USD 12,400.00 across 24 Priority Orders",
           "answer_detail": "Executes 4-hop GRAPH_TABLE ISO GQL traversal from SupplyLot '#LOT-804' through Allocations, Lines, and Orders to TIER_A_EXEC Accounts.",
+          "stage_delta_pill": "4-Hop Supply Lineage",
+          "stage_summary": "Full 4-hop supply-chain blast radius — traces Lot #LOT-804 to all 24 exposed Priority accounts.",
           "numeric_value": 12400.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  COUNT(DISTINCT order_id) AS exposed_orders,\n  ROUND(SUM(amt_net_settled_usd), 2) AS exposed_revenue_usd\nFROM GRAPH_TABLE(\n  `example-project-id.sample_analytics.sample_supply_graph`\n  MATCH (b:SupplyBatch {batch_code: '#LOT-804'})-[:ALLOCATED_TO]->(a:LotAllocation)-[:FULFILLED_BY]->(l:OrderLine)-[:PART_OF]->(o:Order)-[:PLACED_BY]->(c:Account {tier_code: 'TIER_A_EXEC'})\n  RETURN o.order_id, o.amt_net_settled_usd\n);",
@@ -687,6 +712,7 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "short_label": "R6 · Contracts",
         "title": "Unstructured Contract Amendments Joined to Warehouse Events",
         "pyramid_layer": "Layer 3 · Gemini Enterprise, Object Tables & AI.GENERATE",
+        "difficulty_tier": "Hard",
         "release_badges": [
           {
             "capability": "BigQuery Object Tables & AI.GENERATE",
@@ -726,6 +752,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "blind": {
           "answer_headline": "USD 1,250.00 (Base Ledger Only)",
           "answer_detail": "Queries legacy base_sla_ledger (> 5.0C for 90m -> 5% credit) and misses executed Amendment #2 terms.",
+          "stage_delta_pill": "USD 8.35K Left Unclaimed",
+          "stage_summary": "Left USD 8.35K on the table. Used legacy base SLA rules and missed the signed Amendment #2.",
           "numeric_value": 1250.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  ROUND(SUM(shipment_fee_usd * 0.05), 2) AS recoverable_credit_usd\nFROM `example-project-id.sample_blind.base_sla_ledger`\nWHERE peak_temp_c > 5.0\n  AND duration_min >= 90;",
@@ -756,6 +784,8 @@ if (typeof window.CONTEXT_PACK_BUNDLE === "undefined") {
         "governed": {
           "answer_headline": "USD 9,600.00 across 12 Qualifying Shipments",
           "answer_detail": "Joins structured contract_sla_overlay extracted from Vendor_Amendment_2.md (> 2.5C for 45m -> 12% credit, capped at USD 25,000).",
+          "stage_delta_pill": "7.7x SLA Recovery",
+          "stage_summary": "7.7x higher SLA recovery (12 shipments) by applying the signed Amendment #2 rules automatically.",
           "numeric_value": 9600.0,
           "unit": "USD",
           "sql_or_gql": "SELECT\n  COUNT(*) AS qualifying_shipments,\n  ROUND(LEAST(SUM(l.shipment_fee_usd * o.credit_rate), ANY_VALUE(o.quarterly_cap_usd)), 2) AS recoverable_credit_usd\nFROM `example-project-id.sample_analytics.base_sla_ledger` l\nJOIN `example-project-id.sample_analytics.contract_sla_overlay` o\n  ON l.cargo_class = o.cargo_class\nWHERE l.peak_temp_c > o.temp_threshold_c\n  AND l.duration_min >= o.min_duration_min;",

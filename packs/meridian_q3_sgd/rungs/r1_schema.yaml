@@ -3,6 +3,7 @@ rung_num: 1
 short_label: "R1 · Schema"
 title: "Schema Enrichment & Data Insights"
 pyramid_layer: "Layers 1–2 · Physical Schema, Column Descriptions & Data Insights"
+difficulty_tier: "Easy"
 release_badges:
   - capability: "BigQuery Schema + Data Insights"
     stage: "GA"
@@ -33,6 +34,8 @@ poll:
 blind:
   answer_headline: "SGD 1,684,200.00"
   answer_detail: "Overstated by SGD 371,750.00 (+28.3%) because the blind agent summed amt_gross_billed_sgd (including 9% Singapore GST) across all SG rows including CANCELLED and RETURNED orders."
+  stage_delta_pill: "+28.3% Overstated"
+  stage_summary: "Inflated by +SGD 371.8K (+28.3%). Counted 9% GST plus cancelled and returned orders as real revenue."
   numeric_value: 1684200.0
   unit: "SGD"
   query_language: "SQL"
@@ -62,6 +65,8 @@ blind:
 governed:
   answer_headline: "SGD 1,312,450.00"
   answer_detail: "Exact Singapore Closed Q3 Net Realized Revenue across 3,400 COMPLETED orders (ex-GST, net of returns), reconciled to 0.00 SGD drift against order_lines.net_line_revenue_sgd."
+  stage_delta_pill: "Board-Ready · Ex-GST"
+  stage_summary: "Board-ready Q3 revenue across 3,400 completed orders — excluding GST, cancellations, and returns."
   numeric_value: 1312450.0
   unit: "SGD"
   query_language: "SQL"

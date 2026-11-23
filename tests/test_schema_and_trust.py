@@ -1284,3 +1284,41 @@ def test_overview_schema_optional_maxlength_and_no_spoilers(tmp_path: Path) -> N
     for token in sorted(forbidden_spoilers):
         if token:
             assert token not in ov_blob, f"Spoiler token {token!r} leaked into bundle.overview"
+
+
+def test_stage_readability_schema_enum_and_maxlength_bounds(tmp_path: Path) -> None:
+    from copy import deepcopy
+    from engine.pack_loader import validate_bundle
+
+    packs_dir = tmp_path / "packs"
+    _write_synthetic_pack(packs_dir, pack_id="stage_schema_pack")
+    base_bundle = load_pack("stage_schema_pack", packs_dir=packs_dir)
+    validate_bundle(base_bundle)
+
+    # Valid optional Stage readability fields
+    valid_bundle = deepcopy(base_bundle)
+    valid_bundle["rungs"][0]["difficulty_tier"] = "Easy"
+    valid_bundle["rungs"][0]["blind"]["stage_delta_pill"] = "+25.0% Overstated"
+    valid_bundle["rungs"][0]["blind"]["stage_summary"] = "Concise human summary without SQL identifiers."
+    valid_bundle["rungs"][0]["governed"]["stage_delta_pill"] = "Board-Ready"
+    valid_bundle["rungs"][0]["governed"]["stage_summary"] = "Verified executive answer."
+    validate_bundle(valid_bundle)
+
+    # Invalid difficulty_tier enum
+    bad_tier = deepcopy(valid_bundle)
+    bad_tier["rungs"][0]["difficulty_tier"] = "Expert"
+    with pytest.raises(ValidationError):
+        validate_bundle(bad_tier)
+
+    # Exceeding stage_summary maxLength (220)
+    bad_summary = deepcopy(valid_bundle)
+    bad_summary["rungs"][0]["blind"]["stage_summary"] = "S" * 221
+    with pytest.raises(ValidationError):
+        validate_bundle(bad_summary)
+
+    # Exceeding stage_delta_pill maxLength (48)
+    bad_pill = deepcopy(valid_bundle)
+    bad_pill["rungs"][0]["governed"]["stage_delta_pill"] = "P" * 49
+    with pytest.raises(ValidationError):
+        validate_bundle(bad_pill)
+

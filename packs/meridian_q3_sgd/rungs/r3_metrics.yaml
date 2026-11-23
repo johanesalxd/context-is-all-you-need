@@ -3,6 +3,7 @@ rung_num: 3
 short_label: "R3 · Metrics"
 title: "Grain-Locked Measures & Fan-Trap Elimination"
 pyramid_layer: "Layer 4 · BigQuery Graph MEASURE() + Verified Query + Semantic Contract"
+difficulty_tier: "Medium"
 release_badges:
   - capability: "BigQuery Graph MEASURE()"
     stage: "GA"
@@ -36,6 +37,8 @@ poll:
 blind:
   answer_headline: "14.2%"
   answer_detail: "Severely distorted by a 1:N Cartesian chasm trap: joining orders -> order_lines (3 lines) -> parcel_legs (2–4 legs) multiplied fulfillment_fee_sgd up to 12x and leg_cost_sgd 3x."
+  stage_delta_pill: "-17.6 pts Margin Distortion"
+  stage_summary: "Margin understated by -17.6 pts. Double-counted delivery and warehouse fees across multi-leg shipments."
   numeric_value: 14.2
   unit: "%"
   query_language: "SQL"
@@ -74,6 +77,8 @@ blind:
 governed:
   answer_headline: "31.8% (SGD 131,016.00)"
   answer_detail: "Exact Same-Day Contribution Margin of SGD 131,016.00 on SGD 412,000.00 net revenue (31.8%), computed via grain-locked BigQuery Graph MEASURE() definitions and AGG()."
+  stage_delta_pill: "Zero Double-Counting"
+  stage_summary: "True Same-Day profitability (SGD 131K margin) — every order, item, and parcel cost counted exactly once."
   numeric_value: 31.8
   unit: "%"
   query_language: "SQL+GQL"

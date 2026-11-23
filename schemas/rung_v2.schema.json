@@ -313,6 +313,14 @@
           "type": "string",
           "minLength": 5
         },
+        "stage_summary": {
+          "type": "string",
+          "maxLength": 220
+        },
+        "stage_delta_pill": {
+          "type": "string",
+          "maxLength": 48
+        },
         "numeric_value": {
           "type": "number"
         },
@@ -395,6 +403,14 @@
           "type": "string",
           "minLength": 5
         },
+        "stage_summary": {
+          "type": "string",
+          "maxLength": 220
+        },
+        "stage_delta_pill": {
+          "type": "string",
+          "maxLength": 48
+        },
         "numeric_value": {
           "type": "number"
         },
@@ -448,6 +464,14 @@
         "pyramid_layer": {
           "type": "string",
           "minLength": 5
+        },
+        "difficulty_tier": {
+          "type": "string",
+          "enum": [
+            "Easy",
+            "Medium",
+            "Hard"
+          ]
         },
         "release_badges": {
           "type": "array",

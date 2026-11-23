@@ -393,3 +393,73 @@ console.log(JSON.stringify({{
     assert out["stageHorizon"] == {"isOverview": False, "isHorizon": True, "rungIndex": 0}
     assert out["stageRung3"] == {"isOverview": False, "isHorizon": False, "rungIndex": 2}
 
+
+def test_stage_executive_readability_xray_bridge_and_bundle_contracts() -> None:
+    bundle_path = WEB_DIR / "data" / "rungs_bundle.js"
+    bundle = _extract_bundle_json(bundle_path)
+    assert bundle.get("generated_mode") == "live_agent_verified"
+
+    rungs = bundle["rungs"]
+    assert [r.get("difficulty_tier") for r in rungs] == [
+        "Easy",
+        "Easy",
+        "Medium",
+        "Medium",
+        "Hard",
+        "Hard",
+    ]
+
+    forbidden_bq_tokens = (
+        "amt_",
+        "order_lines",
+        "mart_coldchain",
+        "segment_label",
+        "lot_id",
+        "vendor_sla_ledger",
+        "sla_overlay",
+        "close_batch_code",
+    )
+    for rung in rungs:
+        for arm_name in ("blind", "governed"):
+            arm = rung[arm_name]
+            assert isinstance(arm.get("empirical_eval"), dict), f"Missing empirical_eval on {rung['id']}.{arm_name}"
+            pill = arm.get("stage_delta_pill")
+            summary = arm.get("stage_summary")
+            assert isinstance(pill, str) and 0 < len(pill) <= 48
+            assert isinstance(summary, str) and 0 < len(summary) <= 220
+            lowered = summary.lower()
+            for tok in forbidden_bq_tokens:
+                assert tok not in lowered, f"BigQuery identifier {tok!r} leaked into {rung['id']}.{arm_name}.stage_summary"
+            assert not re.search(r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[A-Z]{2,}_[A-Z_]+\b", summary), (
+                f"snake_case identifier leaked into {rung['id']}.{arm_name}.stage_summary: {summary!r}"
+            )
+            assert not re.search(r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[A-Z]{2,}_[A-Z_]+\b", pill), (
+                f"snake_case identifier leaked into {rung['id']}.{arm_name}.stage_delta_pill: {pill!r}"
+            )
+
+    app_js = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
+    for marker in (
+        "difficultyBadgeClass",
+        "rung.difficulty_tier",
+        "stage_delta_pill",
+        "rung.blind.stage_summary || rung.blind.answer_detail",
+        "rung.governed.stage_summary || rung.governed.answer_detail",
+        "Business Context → Technical Proof",
+        "Open Full Workbench [W] →",
+        "Technical Root Cause:",
+        "Technical Mechanism:",
+        "Rungs R1–R6 progress by difficulty—Easy (R1–R2) → Medium (R3–R4) → Hard (R5–R6)—across the 5-layer context pyramid (not strict L1→L5 order):",
+        "Cycle card focus between Blind, Governed, and Compare",
+    ):
+        assert marker in app_js, f"Missing expected Stage/X-Ray/Guide marker {marker!r} in web/js/app.js"
+
+    styles_css = (WEB_DIR / "css" / "styles.css").read_text(encoding="utf-8")
+    for css_sel in (
+        ".badge-difficulty",
+        ".stage-delta-pill",
+        ".xray-bridge-grid",
+        ".xray-bridge-card",
+    ):
+        assert css_sel in styles_css
+
+

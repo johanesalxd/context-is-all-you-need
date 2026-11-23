@@ -141,6 +141,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "short_label": "R1 · Schema",
       "title": "Schema Enrichment & Data Insights",
       "pyramid_layer": "Layers 1–2 · Physical Schema, Column Descriptions & Data Insights",
+      "difficulty_tier": "Easy",
       "release_badges": [
         {
           "capability": "BigQuery Schema + Data Insights",
@@ -185,6 +186,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "SGD 1,684,200.00",
         "answer_detail": "Overstated by SGD 371,750.00 (+28.3%) because the blind agent summed amt_gross_billed_sgd (including 9% Singapore GST) across all SG rows including CANCELLED and RETURNED orders.",
+        "stage_delta_pill": "+28.3% Overstated",
+        "stage_summary": "Inflated by +SGD 371.8K (+28.3%). Counted 9% GST plus cancelled and returned orders as real revenue.",
         "numeric_value": 1684200.0,
         "unit": "SGD",
         "query_language": "SQL",
@@ -219,6 +222,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "governed": {
         "answer_headline": "SGD 1,312,450.00",
         "answer_detail": "Exact Singapore Closed Q3 Net Realized Revenue across 3,400 COMPLETED orders (ex-GST, net of returns), reconciled to 0.00 SGD drift against order_lines.net_line_revenue_sgd.",
+        "stage_delta_pill": "Board-Ready · Ex-GST",
+        "stage_summary": "Board-ready Q3 revenue across 3,400 completed orders — excluding GST, cancellations, and returns.",
         "numeric_value": 1312450.0,
         "unit": "SGD",
         "query_language": "SQL",
@@ -274,6 +279,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "short_label": "R2 · Glossary",
       "title": "Knowledge Catalog Business Glossary",
       "pyramid_layer": "Layer 4 · Knowledge Catalog Business Glossary (GA)",
+      "difficulty_tier": "Easy",
       "release_badges": [
         {
           "capability": "Knowledge Catalog Business Glossary",
@@ -313,6 +319,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "Mobile App (SGD 284.10)",
         "answer_detail": "Wrong channel and -53.6% understated AOV: filtering segment_label LIKE '%Premier%' swept in 260 low-value 'Premier_Promo_Trial' mobile/web coupon orders while excluding Enterprise_Corporate B2B Premier accounts.",
+        "stage_delta_pill": "Wrong Channel · -53.6% AOV",
+        "stage_summary": "Wrong winning channel (-53.6% AOV). Mixed promotional trial signups into the Premier VIP segment.",
         "numeric_value": 284.1,
         "unit": "SGD",
         "query_language": "SQL",
@@ -347,6 +355,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "governed": {
         "answer_headline": "B2B Corporate Portal (SGD 612.50)",
         "answer_detail": "B2B Corporate Portal led with SGD 612.50 AOV across 240 orders (SGD 147,000.00), within the 640 total SG PRM_HV completed orders averaging SGD 495.63 (SGD 317,203.20 total).",
+        "stage_delta_pill": "Governed VIP Definition",
+        "stage_summary": "B2B Corporate Portal leads using Finance's official Premier customer definition (640 qualified orders).",
         "numeric_value": 612.5,
         "unit": "SGD",
         "query_language": "SQL",
@@ -404,6 +414,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "short_label": "R3 · Metrics",
       "title": "Grain-Locked Measures & Fan-Trap Elimination",
       "pyramid_layer": "Layer 4 · BigQuery Graph MEASURE() + Verified Query + Semantic Contract",
+      "difficulty_tier": "Medium",
       "release_badges": [
         {
           "capability": "BigQuery Graph MEASURE()",
@@ -453,6 +464,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "14.2%",
         "answer_detail": "Severely distorted by a 1:N Cartesian chasm trap: joining orders -> order_lines (3 lines) -> parcel_legs (2–4 legs) multiplied fulfillment_fee_sgd up to 12x and leg_cost_sgd 3x.",
+        "stage_delta_pill": "-17.6 pts Margin Distortion",
+        "stage_summary": "Margin understated by -17.6 pts. Double-counted delivery and warehouse fees across multi-leg shipments.",
         "numeric_value": 14.2,
         "unit": "%",
         "query_language": "SQL",
@@ -485,6 +498,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "governed": {
         "answer_headline": "31.8% (SGD 131,016.00)",
         "answer_detail": "Exact Same-Day Contribution Margin of SGD 131,016.00 on SGD 412,000.00 net revenue (31.8%), computed via grain-locked BigQuery Graph MEASURE() definitions and AGG().",
+        "stage_delta_pill": "Zero Double-Counting",
+        "stage_summary": "True Same-Day profitability (SGD 131K margin) — every order, item, and parcel cost counted exactly once.",
         "numeric_value": 31.8,
         "unit": "%",
         "query_language": "SQL+GQL",
@@ -541,6 +556,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "short_label": "R4 · Trust & RLS",
       "title": "Certified Data Products, Shadow Sprawl & Row-Level Security",
       "pyramid_layer": "Layers 1 & 5 · Knowledge Catalog Data Products + Auto Data Quality + BigQuery RLS",
+      "difficulty_tier": "Medium",
       "release_badges": [
         {
           "capability": "Knowledge Catalog Data Products",
@@ -590,6 +606,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "24.3% (-410 bps drop)",
         "answer_detail": "False executive alarm: blind discovery scanned uncertified mart_coldchain_q3_r1 (close_batch_code = 'B26Q3_R1') amid 190 identically schemaed shadow_auto_tbl_* tables, missing late-Q3 supplier rebate settlements.",
+        "stage_delta_pill": "False -410 bps Alarm",
+        "stage_summary": "False boardroom panic (-410 bps). Pulled an outdated Oct 11 draft missing late-Q3 supplier rebates.",
         "numeric_value": 24.3,
         "unit": "%",
         "query_language": "SQL",
@@ -624,6 +642,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "governed": {
         "answer_headline": "28.4% (-15 bps YoY) · SGD 842,600.00",
         "answer_detail": "Certified Knowledge Catalog Data Product mart_coldchain_q3_r2 confirms steady 28.4% gross margin (-15 bps YoY, SGD 842,600.00 across 4 SEA markets; SGD 346,480.00 under SG RLS).",
+        "stage_delta_pill": "Certified Close + Role-Scoped",
+        "stage_summary": "Steady 28.4% margin (-15 bps YoY) from the certified Q3 close — automatically scoped to the viewer's role.",
         "numeric_value": 28.4,
         "unit": "%",
         "query_language": "SQL",
@@ -713,6 +733,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "short_label": "R5 · Graph",
       "title": "4-Hop BigQuery Property Graph Lineage (ISO GQL)",
       "pyramid_layer": "Layer 4 · BigQuery Property Graph (CREATE PROPERTY GRAPH + ISO GQL, GA)",
+      "difficulty_tier": "Hard",
       "release_badges": [
         {
           "capability": "BigQuery Property Graph (ISO GQL + MEASURE())",
@@ -752,6 +773,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "SGD 4,120.00 (8 orders)",
         "answer_detail": "Missed 78.7% of exposure (SGD 15,260.00 across 30 orders): brittle heuristic filtered lot_id LIKE '%409%' and segment_label LIKE '%Premier%', dropping LOT-SG-8841/8842 and Enterprise PRM_HV accounts.",
+        "stage_delta_pill": "79% Exposure Missed",
+        "stage_summary": "Missed 79% of customer exposure (30 orders). Only caught warehouse lots whose ID happened to contain '409'.",
         "numeric_value": 4120.0,
         "unit": "SGD",
         "query_language": "SQL",
@@ -784,6 +807,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "governed": {
         "answer_headline": "SGD 19,380.00 (38 SG Premier orders · SGD 510.00 AOV)",
         "answer_detail": "4-hop ISO GQL GRAPH_TABLE traversal from ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and Customer['PRM_HV'] identifies all 38 SG Premier orders totaling SGD 19,380.00.",
+        "stage_delta_pill": "4-Hop Supply Lineage",
+        "stage_summary": "Full 4-hop supply-chain blast radius — traces every affected warehouse lot to all 38 exposed Premier orders.",
         "numeric_value": 19380.0,
         "unit": "SGD",
         "query_language": "SQL+GQL",
@@ -846,6 +871,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "short_label": "R6 · Contracts",
       "title": "Unstructured Contract Overlays & SLA Recovery",
       "pyramid_layer": "Layer 3 · Gemini Enterprise Drive Connector + Object Tables + AI.GENERATE / DocAI (GA)",
+      "difficulty_tier": "Hard",
       "release_badges": [
         {
           "capability": "Gemini Enterprise Drive Connector",
@@ -890,6 +916,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "SGD 1,420.00 (3 breaches)",
         "answer_detail": "Missed SGD 17,540.00 in recoverable credits because base vendor_sla_ledger applies legacy > 4.0 C for >= 90 min (5% credit), overlooking executed ArcticHaul Amendment #2.",
+        "stage_delta_pill": "SGD 17.5K Left Unclaimed",
+        "stage_summary": "Left SGD 17.5K on the table. Used old 2025 contract terms and missed the signed June amendment.",
         "numeric_value": 1420.0,
         "unit": "SGD",
         "query_language": "SQL",
@@ -924,6 +952,8 @@ window.CONTEXT_PACK_BUNDLE = {
       "governed": {
         "answer_headline": "SGD 18,960.00 (14 qualifying chilled shipments)",
         "answer_detail": "Joining structured 480-token sla_overlay extracted from ArcticHaul_Amendment_2.md (> 2.0 C for >= 45 min -> 12% credit, cap SGD 35,000.00) recovers SGD 18,960.00 across 14 shipments.",
+        "stage_delta_pill": "13.4x SLA Recovery",
+        "stage_summary": "13.4x higher SLA recovery (14 shipments) by applying the signed Amendment #2 rules automatically.",
         "numeric_value": 18960.0,
         "unit": "SGD",
         "query_language": "SQL",

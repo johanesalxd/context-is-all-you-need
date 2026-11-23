@@ -178,6 +178,19 @@
     return "badge badge-tier-3";
   }
 
+  function difficultyBadgeClass(tier) {
+    if (tier === "Easy") {
+      return "badge badge-difficulty is-easy";
+    }
+    if (tier === "Medium") {
+      return "badge badge-difficulty is-medium";
+    }
+    if (tier === "Hard") {
+      return "badge badge-difficulty is-hard";
+    }
+    return "badge badge-difficulty";
+  }
+
   function getSavedDemoKey() {
     try {
       return (window.sessionStorage && window.sessionStorage.getItem(DEMO_KEY_STORAGE)) || "";
@@ -1470,9 +1483,17 @@
           },
             el("div", { className: "overview-roadmap-top" },
               el("span", { className: "overview-roadmap-label", text: rung.short_label }),
-              layerTag
-                ? el("span", { className: "badge badge-mono overview-layer-tag", text: layerTag })
-                : null
+              el("div", { className: "overview-roadmap-badges" },
+                rung.difficulty_tier
+                  ? el("span", {
+                      className: `${difficultyBadgeClass(rung.difficulty_tier)} overview-difficulty-tag`,
+                      text: rung.difficulty_tier
+                    })
+                  : null,
+                layerTag
+                  ? el("span", { className: "badge badge-mono overview-layer-tag", text: layerTag })
+                  : null
+              )
             ),
             el("span", { className: "overview-roadmap-question", text: rung.question })
           );
@@ -1695,8 +1716,8 @@
             ),
             el("div", { className: "stage-actions" },
               el("button", {
-                className: "btn",
-                text: "Open Full Workbench [W]",
+                className: "btn btn-accent",
+                text: "Open Full Workbench [W] →",
                 attrs: { type: "button" },
                 onClick: () => setState({ mode: "workbench", stageXrayOpen: false })
               }),
@@ -1709,6 +1730,35 @@
             )
           ),
           el("div", { className: "xray-drawer-body" },
+            el("section", { className: "xray-drawer-section xray-bridge-section", attrs: { "aria-label": "Business Context to Technical Proof Bridge" } },
+              el("h3", { className: "progression-title", text: "Business Context → Technical Proof" }),
+              el("div", { className: "xray-bridge-grid" },
+                el("div", { className: "xray-bridge-card is-blind" },
+                  el("div", { className: "xray-bridge-card-head" },
+                    el("strong", { className: "outcome-role-title", text: "Blind Trap" }),
+                    rung.blind.stage_delta_pill
+                      ? el("span", { className: "stage-delta-pill is-blind", text: rung.blind.stage_delta_pill })
+                      : null
+                  ),
+                  rung.blind.stage_summary
+                    ? el("p", { className: "xray-bridge-summary", text: rung.blind.stage_summary })
+                    : null,
+                  el("p", { className: "xray-bridge-detail", text: `Technical Root Cause: ${rung.blind.answer_detail}` })
+                ),
+                el("div", { className: "xray-bridge-card is-governed" },
+                  el("div", { className: "xray-bridge-card-head" },
+                    el("strong", { className: "outcome-role-title", text: "Governed Fix" }),
+                    rung.governed.stage_delta_pill
+                      ? el("span", { className: "stage-delta-pill is-governed", text: rung.governed.stage_delta_pill })
+                      : null
+                  ),
+                  rung.governed.stage_summary
+                    ? el("p", { className: "xray-bridge-summary", text: rung.governed.stage_summary })
+                    : null,
+                  el("p", { className: "xray-bridge-detail", text: `Technical Mechanism: ${rung.governed.answer_detail}` })
+                )
+              )
+            ),
             el("section", { className: "xray-drawer-section", attrs: { "aria-label": "Injected Knowledge Catalog and Governance Context" } },
               el("h3", { className: "progression-title", text: "1. Injected Knowledge Catalog & Governance Context" }),
               el("div", { className: "context-callout" },
@@ -1921,6 +1971,9 @@
           el("div", { className: "question-meta-row" },
             el("div", { className: "question-eyebrow" },
               el("span", { className: "badge badge-mono", text: rung.short_label }),
+              rung.difficulty_tier
+                ? el("span", { className: difficultyBadgeClass(rung.difficulty_tier), text: rung.difficulty_tier })
+                : null,
               el("span", { className: "badge", text: rung.pyramid_layer })
             )
           ),
@@ -1955,10 +2008,17 @@
                 el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier })
               ),
               el("p", { className: "outcome-kpi", text: rung.blind.answer_headline }),
-              el("p", { className: "outcome-detail", text: rung.blind.answer_detail })
+              rung.blind.stage_delta_pill
+                ? el("div", { className: "stage-delta-row" },
+                    el("span", { className: "stage-delta-pill is-blind", text: rung.blind.stage_delta_pill })
+                  )
+                : null,
+              el("p", { className: "outcome-detail", text: rung.blind.stage_summary || rung.blind.answer_detail })
             ),
             el("div", null,
-              el("p", { className: "outcome-rationale", text: `Failure Mechanism: ${rung.blind.rationale}` }),
+              !rung.blind.stage_summary
+                ? el("p", { className: "outcome-rationale", text: `Failure Mechanism: ${rung.blind.rationale}` })
+                : null,
               buildMetricsStrip(rung.blind)
             )
           );
@@ -1993,7 +2053,12 @@
                     el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
                   ),
                   el("p", { className: "outcome-kpi", text: rung.governed.answer_headline }),
-                  el("p", { className: "outcome-detail", text: rung.governed.answer_detail }),
+                  rung.governed.stage_delta_pill
+                    ? el("div", { className: "stage-delta-row" },
+                        el("span", { className: "stage-delta-pill is-governed", text: rung.governed.stage_delta_pill })
+                      )
+                    : null,
+                  el("p", { className: "outcome-detail", text: rung.governed.stage_summary || rung.governed.answer_detail }),
                   buildIdentitySwitchPanel(rung)
                 ),
                 el("div", null,
@@ -2003,7 +2068,9 @@
                         el("span", { text: rung.governed.context_mechanism })
                       )
                     : null,
-                  el("p", { className: "outcome-rationale", text: `Grounding: ${rung.governed.rationale}` }),
+                  !rung.governed.stage_summary
+                    ? el("p", { className: "outcome-rationale", text: `Grounding: ${rung.governed.rationale}` })
+                    : null,
                   buildMetricsStrip(rung.governed)
                 )
               );
@@ -3431,7 +3498,7 @@
         ["←", "Step back to the previous beat, rung, or Overview"],
         ["P", "Open / close the CDO Myth-Busting QR Poll modal (active on R1–R6)"],
         ["X", "Open / close the Slide-Up Stage X-Ray drawer (Stage R1–R6)"],
-        ["B", "Cycle card focus between Compare, Blind, and Governed"],
+        ["B", "Cycle card focus between Blind, Governed, and Compare"],
         ["W", "Switch between Stage presentation mode and Engineering Workbench"],
         ["T", "Toggle Paper (light) and Dark Stage themes"],
         ["? / H", "Open or close this plain-English Guide drawer (Esc closes)"]
@@ -3503,7 +3570,7 @@
               el("h3", { className: "help-section-title", text: "2. The 5-Layer Enterprise Context Pyramid (L1 → L5)" }),
               el("p", {
                 className: "help-copy",
-                text: "Rungs R1–R6 follow the executive investigation story rather than strict L1→L5 order. Here is how each pyramid layer maps to the live rungs:"
+                text: "Rungs R1–R6 progress by difficulty—Easy (R1–R2) → Medium (R3–R4) → Hard (R5–R6)—across the 5-layer context pyramid (not strict L1→L5 order):"
               }),
               el("div", { className: "help-pyramid-list" },
                 ...pyramidRows.map((row) =>

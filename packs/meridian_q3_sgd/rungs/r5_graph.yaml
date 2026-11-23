@@ -3,6 +3,7 @@ rung_num: 5
 short_label: "R5 · Graph"
 title: "4-Hop BigQuery Property Graph Lineage (ISO GQL)"
 pyramid_layer: "Layer 4 · BigQuery Property Graph (CREATE PROPERTY GRAPH + ISO GQL, GA)"
+difficulty_tier: "Hard"
 release_badges:
   - capability: "BigQuery Property Graph (ISO GQL + MEASURE())"
     stage: "GA"
@@ -30,6 +31,8 @@ poll:
 blind:
   answer_headline: "SGD 4,120.00 (8 orders)"
   answer_detail: "Missed 78.7% of exposure (SGD 15,260.00 across 30 orders): brittle heuristic filtered lot_id LIKE '%409%' and segment_label LIKE '%Premier%', dropping LOT-SG-8841/8842 and Enterprise PRM_HV accounts."
+  stage_delta_pill: "79% Exposure Missed"
+  stage_summary: "Missed 79% of customer exposure (30 orders). Only caught warehouse lots whose ID happened to contain '409'."
   numeric_value: 4120.0
   unit: "SGD"
   query_language: "SQL"
@@ -62,6 +65,8 @@ blind:
 governed:
   answer_headline: "SGD 19,380.00 (38 SG Premier orders · SGD 510.00 AOV)"
   answer_detail: "4-hop ISO GQL GRAPH_TABLE traversal from ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and Customer['PRM_HV'] identifies all 38 SG Premier orders totaling SGD 19,380.00."
+  stage_delta_pill: "4-Hop Supply Lineage"
+  stage_summary: "Full 4-hop supply-chain blast radius — traces every affected warehouse lot to all 38 exposed Premier orders."
   numeric_value: 19380.0
   unit: "SGD"
   query_language: "SQL+GQL"
