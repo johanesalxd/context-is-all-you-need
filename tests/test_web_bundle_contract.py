@@ -193,8 +193,8 @@ def test_app_js_keyboard_url_params_file_safety_and_dom_security() -> None:
     # Required Stage, Workbench, X-Ray, Poll, Horizon, and Beat 4b Identity Switch markers
     for marker in (
         "Beat 4b · Switch Identity",
-        "Act IV Horizon",
-        "Act IV · Architectural Horizon",
+        "What's Next",
+        "What's Next · Horizon & Multi-Cloud",
         "CDO Myth-Busting Poll",
         'attrs: { id: "poll-modal-title" }',
         "Reveal Answer",

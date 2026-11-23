@@ -1239,7 +1239,7 @@
       group.appendChild(
         el("button", {
           className: `seg-btn is-horizon${state.isHorizon ? " is-active" : ""}`,
-          text: "Act IV Horizon",
+          text: "What's Next",
           attrs: {
             type: "button",
             "aria-current": state.isHorizon ? "step" : null,
@@ -1544,11 +1544,11 @@
 
       return el("section", {
         className: "horizon-showcase",
-        attrs: { "aria-label": "Act IV Horizon Architectural Showcase" }
+        attrs: { "aria-label": "What's Next Architectural Horizon Showcase" }
       },
         el("div", { className: "horizon-banner" },
-          el("span", { className: "horizon-banner-eyebrow", text: "Act IV · Architectural Horizon (Decoupled from R1–R6 Live Scope)" }),
-          el("h1", { className: "horizon-banner-title", text: "Act IV · Architectural Horizon" }),
+          el("span", { className: "horizon-banner-eyebrow", text: "What's Next · Architectural Horizon (Decoupled from R1–R6 Live Scope)" }),
+          el("h1", { className: "horizon-banner-title", text: "What's Next · Horizon & Multi-Cloud" }),
           el("p", {
             className: "horizon-banner-subtitle",
             text: subtitleText
@@ -1831,7 +1831,7 @@
         state.isOverview
           ? el("span", { text: `Briefing · ${bundle.rungs.length} Live Rungs` })
           : (state.isHorizon
-              ? el("span", { text: "Act IV · Roadmap Scope" })
+              ? el("span", { text: "What's Next · Roadmap Scope" })
               : [
                   el("span", { text: `Tokens ${formatNumber(rung.blind.tokens_used)} → ` }),
                   el("span", { className: "delta-good", text: formatNumber(rung.governed.tokens_used) }),
@@ -2060,7 +2060,7 @@
         );
       } else if (state.isHorizon) {
         footerLeft = el("div", { className: "eval-trust-group" },
-          el("span", { className: "badge", text: `Act IV Horizon · ${bundle.horizon_cards.length} Architectural Cards` }),
+          el("span", { className: "badge", text: `What's Next · ${bundle.horizon_cards.length} Architectural Cards` }),
           el("span", { className: "eval-label", text: `Live Scope: ${bundle.region}` })
         );
       } else {
@@ -2150,7 +2150,7 @@
               })
             : el("button", {
                 className: "btn btn-primary",
-                text: state.isHorizon ? "End · Act IV" : "Next →",
+                text: state.isHorizon ? "End · What's Next" : "Next →",
                 attrs: { type: "button", disabled: state.isHorizon ? true : null },
                 onClick: () => stepForward()
               })
@@ -3496,7 +3496,7 @@
               ),
               el("p", {
                 className: "help-copy",
-                text: "Use Stage Mode for clean executive storytelling (Overview → R1–R6 → Act IV Horizon), or switch to Workbench [W] for the 3-tab X-Ray inspector, SQL diffs, and live Gemini agent execution."
+                text: "Use Stage Mode for clean executive storytelling (Overview → R1–R6 → What's Next), or switch to Workbench [W] for the 3-tab X-Ray inspector, SQL diffs, and live Gemini agent execution."
               })
             ),
             el("section", { className: "help-section", attrs: { "aria-label": "The 5-Layer Enterprise Context Pyramid" } },
