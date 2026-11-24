@@ -20,19 +20,28 @@ release_badges:
 
 question: "What was Singapore's Q3 Same-Day Contribution Margin %?"
 
+stage_story:
+  step_title: "Is Same-Day Delivery Actually Profitable?"
+  backend_layer: "Step 3 · Certified Multi-Table Metrics"
+  audience_role: "Retail Operations Lead"
+  situation: "Step 2 showed where our best customers buy. Next, Operations digs deeper to check whether our fast Same-Day retail promise actually makes money."
+  business_goal: "Confirm true delivery contribution margin before cutting or expanding Same-Day service."
+  tech_challenge: "Each Same-Day order spans multiple items and delivery legs, causing naive joins to multiply costs."
+  context_unlock: "Certified Graph Metrics & Verified Query"
+
 poll:
-  prompt: "Myth-Buster #3: Every Same-Day order spans 2 to 4 `parcel_legs` and multiple `order_lines`. What happens when an LLM joins `orders`, `order_lines`, and `parcel_legs` directly?"
+  prompt: "Each Same-Day order has multiple items and delivery legs. What happens when AI joins all three tables flat?"
   options:
     - key: "A"
-      text: "SQL engines automatically deduplicate 1:N joins before running SUM()."
+      text: "Duplicate rows multiply delivery fees across every item, making profit look far worse."
     - key: "B"
-      text: "Cartesian fan-out multiplies order fulfillment fees and parcel leg costs across lines, distorting 31.8% margin down to 14.2%."
+      text: "The database automatically deduplicates order fees before adding up delivery costs."
     - key: "C"
-      text: "BigQuery rejects a 3-way JOIN unless LookML is attached."
+      text: "The query fails with an ambiguity error unless a BI semantic layer is installed."
     - key: "D"
-      text: "It only changes row order, never percentages."
-  correct_key: "B"
-  reveal_takeaway: "The 1:N chasm/fan-trap silently corrupts financial ratios by -17.6 percentage points without throwing any SQL error. BigQuery Graph MEASURE() with GRAPH_EXPAND + AGG() locks every metric to its native PK grain, recovering exact 31.8% (SGD 131,016.00 on SGD 412,000.00)."
+      text: "Joining extra delivery legs only affects row order and leaves margin unchanged."
+  correct_key: "A"
+  reveal_takeaway: "A flat 3-way join triggers a fan-trap that silently double-counts fees without any error message. Grain-locked Graph Measures calculate each cost at its own level once, revealing healthy Same-Day profitability."
 
 blind:
   answer_headline: "14.2%"

@@ -1285,6 +1285,19 @@ def test_overview_schema_optional_maxlength_and_no_spoilers(tmp_path: Path) -> N
         if token:
             assert token not in ov_blob, f"Spoiler token {token!r} leaked into bundle.overview"
 
+    # Also ensure stage_story.step_title and stage_story.backend_layer (rendered on Overview) contain zero spoilers
+    for rung in exported["rungs"]:
+        stage_story = rung.get("stage_story")
+        if isinstance(stage_story, dict):
+            overview_story_blob = " ".join(
+                str(stage_story.get(k, "")) for k in ("step_title", "backend_layer")
+            )
+            for token in sorted(forbidden_spoilers):
+                if token:
+                    assert token not in overview_story_blob, (
+                        f"Spoiler token {token!r} leaked into {rung['id']}.stage_story Overview fields"
+                    )
+
 
 def test_stage_readability_schema_enum_and_maxlength_bounds(tmp_path: Path) -> None:
     from copy import deepcopy
@@ -1321,4 +1334,75 @@ def test_stage_readability_schema_enum_and_maxlength_bounds(tmp_path: Path) -> N
     bad_pill["rungs"][0]["governed"]["stage_delta_pill"] = "P" * 49
     with pytest.raises(ValidationError):
         validate_bundle(bad_pill)
+
+
+def test_stage_story_and_closing_takeaways_schema_bounds(tmp_path: Path) -> None:
+    from copy import deepcopy
+    from engine.pack_loader import validate_bundle
+
+    packs_dir = tmp_path / "packs"
+    _write_synthetic_pack(packs_dir, pack_id="story_schema_pack")
+    base_bundle = load_pack("story_schema_pack", packs_dir=packs_dir)
+
+    valid_story = {
+        "step_title": "Verify Q1 Domestic Net Realized Revenue",
+        "backend_layer": "Layers 1–2 · BigQuery Schema & Insights",
+        "audience_role": "Chief Financial Officer",
+        "situation": "Board close requires exact net realized revenue excluding cancelled orders.",
+        "business_goal": "Confirm board-ready revenue before filing.",
+        "tech_challenge": "Raw gross columns sweep in tax and cancellations.",
+        "context_unlock": "Catalog descriptions lock net column and status filter.",
+    }
+    valid_closing = {
+        "eyebrow": "Executive Takeaways",
+        "headline": "Same AI Model. Governed Context Wins.",
+        "repo_url": "https://github.com/example/context-demo",
+        "repo_label": "Run the 6-rung benchmark yourself",
+        "qr_svg_data_uri": "data:image/svg+xml;base64,PHN2Zy8+",
+        "takeaways": [
+            {"title": "Schema Grounding", "detail": "Eliminates gross vs. net guesswork."},
+            {"title": "Semantic Consistency", "detail": "Locks KPI definitions across teams."},
+            {"title": "Policy Enforcement", "detail": "BigQuery RLS enforces identity boundaries."},
+        ],
+    }
+
+    good_bundle = deepcopy(base_bundle)
+    good_bundle["rungs"][0]["stage_story"] = valid_story
+    good_bundle["closing_takeaways"] = valid_closing
+    validate_bundle(good_bundle)
+
+    # stage_story maxLength bounds
+    story_max_lengths = {
+        "step_title": 70,
+        "backend_layer": 56,
+        "audience_role": 56,
+        "situation": 180,
+        "business_goal": 140,
+        "tech_challenge": 140,
+        "context_unlock": 72,
+    }
+    for field, limit in story_max_lengths.items():
+        bad_story_bundle = deepcopy(good_bundle)
+        bad_story_bundle["rungs"][0]["stage_story"] = dict(valid_story, **{field: "X" * (limit + 1)})
+        with pytest.raises(ValidationError):
+            validate_bundle(bad_story_bundle)
+
+    # closing_takeaways.qr_svg_data_uri regex validation
+    for bad_uri in (
+        "data:image/png;base64,iVBORw0KGgo=",
+        "data:image/svg+xml,<svg></svg>",
+        "javascript:alert(1)",
+        "https://example.org/qr.svg",
+        "data:image/svg+xml;base64,not valid!@#",
+    ):
+        bad_qr_bundle = deepcopy(good_bundle)
+        bad_qr_bundle["closing_takeaways"] = dict(valid_closing, qr_svg_data_uri=bad_uri)
+        with pytest.raises(ValidationError):
+            validate_bundle(bad_qr_bundle)
+
+    # closing_takeaways.repo_url must be https://
+    bad_url_bundle = deepcopy(good_bundle)
+    bad_url_bundle["closing_takeaways"] = dict(valid_closing, repo_url="http://example.com/demo")
+    with pytest.raises(ValidationError):
+        validate_bundle(bad_url_bundle)
 

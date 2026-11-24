@@ -419,6 +419,15 @@ def test_stage_executive_readability_xray_bridge_and_bundle_contracts() -> None:
         "sla_overlay",
         "close_batch_code",
     )
+    def _assert_clean_exec_text(text: str, field_path: str) -> None:
+        assert isinstance(text, str) and len(text) > 0, f"Empty or non-string {field_path}"
+        lowered = text.lower()
+        for tok in forbidden_bq_tokens:
+            assert tok not in lowered, f"BigQuery identifier {tok!r} leaked into {field_path}"
+        assert not re.search(r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[A-Z]{2,}_[A-Z_]+\b", text), (
+            f"snake_case identifier leaked into {field_path}: {text!r}"
+        )
+
     for rung in rungs:
         for arm_name in ("blind", "governed"):
             arm = rung[arm_name]
@@ -427,14 +436,42 @@ def test_stage_executive_readability_xray_bridge_and_bundle_contracts() -> None:
             summary = arm.get("stage_summary")
             assert isinstance(pill, str) and 0 < len(pill) <= 48
             assert isinstance(summary, str) and 0 < len(summary) <= 220
-            lowered = summary.lower()
-            for tok in forbidden_bq_tokens:
-                assert tok not in lowered, f"BigQuery identifier {tok!r} leaked into {rung['id']}.{arm_name}.stage_summary"
-            assert not re.search(r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[A-Z]{2,}_[A-Z_]+\b", summary), (
-                f"snake_case identifier leaked into {rung['id']}.{arm_name}.stage_summary: {summary!r}"
-            )
-            assert not re.search(r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[A-Z]{2,}_[A-Z_]+\b", pill), (
-                f"snake_case identifier leaked into {rung['id']}.{arm_name}.stage_delta_pill: {pill!r}"
+            _assert_clean_exec_text(summary, f"{rung['id']}.{arm_name}.stage_summary")
+            _assert_clean_exec_text(pill, f"{rung['id']}.{arm_name}.stage_delta_pill")
+
+        stage_story = rung.get("stage_story")
+        if isinstance(stage_story, dict):
+            for key, val in stage_story.items():
+                _assert_clean_exec_text(val, f"{rung['id']}.stage_story.{key}")
+
+        identity_variants = rung.get("identity_variants")
+        if isinstance(identity_variants, dict):
+            for pid, variant in identity_variants.items():
+                v_summary = variant.get("stage_summary")
+                assert isinstance(v_summary, str) and 0 < len(v_summary) <= 220, (
+                    f"Missing or oversized stage_summary on {rung['id']}.identity_variants.{pid}"
+                )
+                _assert_clean_exec_text(v_summary, f"{rung['id']}.identity_variants.{pid}.stage_summary")
+
+        poll = rung.get("poll")
+        assert isinstance(poll, dict), f"Missing poll on {rung['id']}"
+        _assert_clean_exec_text(poll.get("prompt", ""), f"{rung['id']}.poll.prompt")
+        _assert_clean_exec_text(poll.get("reveal_takeaway", ""), f"{rung['id']}.poll.reveal_takeaway")
+        for idx, opt in enumerate(poll.get("options", [])):
+            _assert_clean_exec_text(opt.get("text", ""), f"{rung['id']}.poll.options[{idx}].text")
+
+    closing_takeaways = bundle.get("closing_takeaways")
+    if isinstance(closing_takeaways, dict):
+        for key in ("eyebrow", "headline", "repo_label"):
+            if key in closing_takeaways and closing_takeaways[key] is not None:
+                _assert_clean_exec_text(closing_takeaways[key], f"closing_takeaways.{key}")
+        for idx, item in enumerate(closing_takeaways.get("takeaways", [])):
+            _assert_clean_exec_text(item.get("title", ""), f"closing_takeaways.takeaways[{idx}].title")
+            _assert_clean_exec_text(item.get("detail", ""), f"closing_takeaways.takeaways[{idx}].detail")
+        qr_uri = closing_takeaways.get("qr_svg_data_uri")
+        if qr_uri is not None:
+            assert isinstance(qr_uri, str) and qr_uri.startswith("data:image/svg+xml;base64,"), (
+                "closing_takeaways.qr_svg_data_uri must start with 'data:image/svg+xml;base64,'"
             )
 
     app_js = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
@@ -450,6 +487,12 @@ def test_stage_executive_readability_xray_bridge_and_bundle_contracts() -> None:
         "Technical Mechanism:",
         "Rungs R1–R6 progress by difficulty—Easy (R1–R2) → Medium (R3–R4) → Hard (R5–R6)—across the 5-layer context pyramid (not strict L1→L5 order):",
         "Cycle card focus between Blind, Governed, and Compare",
+        "You Are Here",
+        "Two Perspectives on Stage",
+        "Business Goal:",
+        "Backend Trap:",
+        "Context Unlocked:",
+        "compactStage",
     ):
         assert marker in app_js, f"Missing expected Stage/X-Ray/Guide marker {marker!r} in web/js/app.js"
 
@@ -459,6 +502,13 @@ def test_stage_executive_readability_xray_bridge_and_bundle_contracts() -> None:
         ".stage-delta-pill",
         ".xray-bridge-grid",
         ".xray-bridge-card",
+        ".overview-perspectives",
+        ".stage-journey-rail",
+        ".stage-story-strip",
+        ".stage-card-subtitle",
+        ".stage-context-unlock",
+        ".closing-takeaways-grid",
+        ".closing-qr-card",
     ):
         assert css_sel in styles_css
 

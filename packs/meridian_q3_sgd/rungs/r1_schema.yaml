@@ -17,25 +17,34 @@ release_badges:
 
 question: "What was Singapore's Closed Q3 Net Realized Revenue?"
 
+stage_story:
+  step_title: "How Much Did Singapore Actually Sell?"
+  backend_layer: "Step 1 · Schema Descriptions & Insights"
+  audience_role: "CFO · Quarter-End Board Close"
+  situation: "Meridian Commerce is closing Q3 in Singapore. Before reviewing channel growth, leadership asks for one trusted baseline sales number."
+  business_goal: "Report the true, board-ready Q3 net sales figure."
+  tech_challenge: "Raw ERP tables hold look-alike revenue columns with zero business labels."
+  context_unlock: "Column Descriptions & Automated Schema Insights"
+
 poll:
-  prompt: "Myth-Buster #1: If we point a frontier model directly at our clean BigQuery `orders` schema, how accurately does it answer Q3 Net Realized Revenue?"
+  prompt: "When an AI reads raw sales tables with no column labels, what goes wrong on Singapore Q3 net revenue?"
   options:
     - key: "A"
-      text: "5/5 — Frontier reasoning models automatically infer ex-GST and completed-order rules from column names."
+      text: "It automatically deducts sales tax and cancelled orders using standard accounting rules."
     - key: "B"
-      text: "0/5 — Without column descriptions and Data Insights predicates, it sums amt_gross_billed_sgd including 9% GST and cancelled orders (+28% inflation)."
+      text: "It picks the largest total column, sweeping in sales tax plus cancelled and returned orders."
     - key: "C"
-      text: "3/5 — It fails only because SQL syntax is wrong in BigQuery Standard SQL."
+      text: "It fails to write valid SQL syntax and stops before returning any revenue figure."
     - key: "D"
-      text: "It refuses to run SQL unless LookML is deployed first."
+      text: "It refuses to run the query until a separate BI dashboard model is published."
   correct_key: "B"
-  reveal_takeaway: "Syntax is easy; financial semantics are invisible in raw column names. Enriched column descriptions plus Data Insights eliminate GST and cancelled-order overcounting (+SGD 371,750 false inflation), lifting eval accuracy from 0/5 to 4/5."
+  reveal_takeaway: "AI writes clean SQL, but column names alone hide accounting rules. Adding column descriptions and schema insights stops tax and cancellations from inflating revenue (+28.3% higher without them)."
 
 blind:
   answer_headline: "SGD 1,684,200.00"
   answer_detail: "Overstated by SGD 371,750.00 (+28.3%) because the blind agent summed amt_gross_billed_sgd (including 9% Singapore GST) across all SG rows including CANCELLED and RETURNED orders."
-  stage_delta_pill: "+28.3% Overstated"
-  stage_summary: "Inflated by +SGD 371.8K (+28.3%). Counted 9% GST plus cancelled and returned orders as real revenue."
+  stage_delta_pill: "Higher ≠ Better · +28% Inflated"
+  stage_summary: "A higher number isn't better—inflated by +SGD 371.8K from counting 9% GST plus cancelled and returned orders as sales."
   numeric_value: 1684200.0
   unit: "SGD"
   query_language: "SQL"
@@ -66,7 +75,7 @@ governed:
   answer_headline: "SGD 1,312,450.00"
   answer_detail: "Exact Singapore Closed Q3 Net Realized Revenue across 3,400 COMPLETED orders (ex-GST, net of returns), reconciled to 0.00 SGD drift against order_lines.net_line_revenue_sgd."
   stage_delta_pill: "Board-Ready · Ex-GST"
-  stage_summary: "Board-ready Q3 revenue across 3,400 completed orders — excluding GST, cancellations, and returns."
+  stage_summary: "Board-ready Q3 revenue across 3,400 completed orders—excluding tax, cancellations, and returns so Finance reports the true baseline."
   numeric_value: 1312450.0
   unit: "SGD"
   query_language: "SQL"

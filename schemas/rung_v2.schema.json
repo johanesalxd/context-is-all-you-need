@@ -273,6 +273,91 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 48
+        },
+        "perspectives": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "speaker",
+              "focus"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "maxLength": 48
+              },
+              "speaker": {
+                "type": "string",
+                "maxLength": 36
+              },
+              "focus": {
+                "type": "string",
+                "maxLength": 140
+              }
+            }
+          }
+        }
+      }
+    },
+    "closing_takeaways": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eyebrow",
+        "headline",
+        "takeaways",
+        "repo_url"
+      ],
+      "properties": {
+        "eyebrow": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "headline": {
+          "type": "string",
+          "maxLength": 90
+        },
+        "repo_url": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 256
+        },
+        "repo_label": {
+          "type": "string",
+          "maxLength": 72
+        },
+        "qr_svg_data_uri": {
+          "type": "string",
+          "pattern": "^data:image/svg\\+xml;base64,[A-Za-z0-9+/]+=*$",
+          "maxLength": 12288
+        },
+        "takeaways": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title",
+              "detail"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "detail": {
+                "type": "string",
+                "maxLength": 160
+              }
+            }
+          }
         }
       }
     }
@@ -507,6 +592,49 @@
         "question": {
           "type": "string",
           "minLength": 10
+        },
+        "stage_story": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "step_title",
+            "backend_layer",
+            "audience_role",
+            "situation",
+            "business_goal",
+            "tech_challenge",
+            "context_unlock"
+          ],
+          "properties": {
+            "step_title": {
+              "type": "string",
+              "maxLength": 70
+            },
+            "backend_layer": {
+              "type": "string",
+              "maxLength": 56
+            },
+            "audience_role": {
+              "type": "string",
+              "maxLength": 56
+            },
+            "situation": {
+              "type": "string",
+              "maxLength": 180
+            },
+            "business_goal": {
+              "type": "string",
+              "maxLength": 140
+            },
+            "tech_challenge": {
+              "type": "string",
+              "maxLength": 140
+            },
+            "context_unlock": {
+              "type": "string",
+              "maxLength": 72
+            }
+          }
         },
         "poll": {
           "type": "object",

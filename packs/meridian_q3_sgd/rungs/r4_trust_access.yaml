@@ -20,19 +20,28 @@ release_badges:
 
 question: "Did Cold-Chain Gross Margin really drop 410 bps in Q3—and what does each role see?"
 
+stage_story:
+  step_title: "Is Margin Crashing—And Who Sees What?"
+  backend_layer: "Step 4 · Trusted Data Products & Access"
+  audience_role: "Regional CFO & SG Ops Lead"
+  situation: "Delivery economics look healthy, yet an alert flags a sharp Cold-Chain margin drop. Leadership asks if the crisis is real—and who can see each country."
+  business_goal: "Verify the official Q3 close and ensure country leads only see their own market."
+  tech_challenge: "Nearly two hundred shadow copies and an uncertified draft sit beside the final close table."
+  context_unlock: "Certified Data Products, Auto DQ & Row-Level Security"
+
 poll:
-  prompt: "Myth-Buster #4: Your dataset has 190 automated clone tables plus `mart_coldchain_q3_r1`. Why did a blind agent raise a board panic over a -410 bps cold-chain margin crash?"
+  prompt: "With nearly two hundred look-alike backup tables in the warehouse, why did the blind AI trigger a margin panic?"
   options:
     - key: "A"
-      text: "The model hallucinated random numbers without running any query."
+      text: "It invented random margin percentages without running any query against the warehouse."
     - key: "B"
-      text: "It queried an uncertified Oct 11 preliminary snapshot (`mart_coldchain_q3_r1`) missing late-Q3 supplier rebates (24.3%) instead of the certified Knowledge Catalog Data Product `mart_coldchain_q3_r2` (28.4%)."
+      text: "It applied Singapore access rules too early, hiding profitable regional markets."
     - key: "C"
-      text: "BigQuery deleted the SG rows automatically."
+      text: "It picked an uncertified preliminary draft missing late-quarter supplier rebates."
     - key: "D"
-      text: "RLS policies alter gross margin percentages globally."
-  correct_key: "B"
-  reveal_takeaway: "Real enterprise lakes accumulate hundreds of uncertified snapshots sharing identical physical schemas (190 shadow_auto_tbl_* tables plus mart_coldchain_q3_r1). Knowledge Catalog Data Products + Auto Data Quality route agents exclusively to certified mart_coldchain_q3_r2 (28.4%, -15 bps YoY), while BigQuery RLS enforces identity-scoped visibility (SGD 842,600.00 vs SGD 346,480.00)."
+      text: "It averaged all shadow backup copies together instead of reading one close table."
+  correct_key: "C"
+  reveal_takeaway: "Identical table schemas fool unguided AI into reading stale drafts. Knowledge Catalog Data Products and Auto Data Quality route queries strictly to the certified final close, while Row-Level Security keeps one query scoped per country role."
 
 blind:
   answer_headline: "24.3% (-410 bps drop)"
@@ -103,6 +112,7 @@ identity_variants:
     persona_id: "cfo_regional"
     answer_headline: "SGD 842,600.00 (4 SEA Markets · 28.4%)"
     answer_detail: "Regional CFO sees all 4 certified SEA market rows (SG, MY, TH, ID) totaling SGD 842,600.00 gross margin under rls_cfo_regional_all_markets."
+    stage_summary: "Regional CFO view: full visibility across all 4 certified ASEAN markets (SG, MY, TH, and ID)."
     numeric_value: 842600.0
     rows_visible: 4
     rls_policy_applied: "rls_cfo_regional_all_markets"
@@ -111,6 +121,7 @@ identity_variants:
     persona_id: "sg_coldchain"
     answer_headline: "SGD 346,480.00 (SG Only · 28.4%)"
     answer_detail: "SG Cold-Chain Ops Lead executes the exact same SQL query and sees only 1 row (SG) totaling SGD 346,480.00 under rls_sg_coldchain_country_sg."
+    stage_summary: "Singapore Ops Lead view: same query automatically restricted to Singapore only—MY, TH, and ID stay hidden."
     numeric_value: 346480.0
     rows_visible: 1
     rls_policy_applied: "rls_sg_coldchain_country_sg"

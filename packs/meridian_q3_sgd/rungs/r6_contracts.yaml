@@ -17,19 +17,28 @@ release_badges:
 
 question: "How much vendor SLA credit is recoverable on Q3 Cold-Chain excursions?"
 
+stage_story:
+  step_title: "How Much Carrier Credit Can We Claim?"
+  backend_layer: "Step 6 · Unstructured Contract Extraction"
+  audience_role: "Procurement & Legal Lead"
+  situation: "Turning to our chilled logistics carrier, ArcticHaul, Procurement digs deeper to calculate total Q3 SLA credit recoverable across qualifying chilled shipments."
+  business_goal: "Recover every dollar owed under the latest signed contract amendment."
+  tech_challenge: "ERP tables still enforce legacy thresholds while the signed June amendment lives in Drive PDFs."
+  context_unlock: "Drive Connector, Object Tables & AI Extraction"
+
 poll:
-  prompt: "Myth-Buster #6: Base `vendor_sla_ledger` captures legacy MSA rules (`> 4.0°C for 90m -> 5%`). Executed `ArcticHaul_Amendment_2.md` sits in Drive (`> 2.0°C for 45m -> 12%`). Should we dump 40-page PDFs into every SQL prompt?"
+  prompt: "Our ERP ledger holds old 2025 SLA terms, while the signed 2026 amendment sits in a Drive PDF. What is the scalable fix?"
   options:
     - key: "A"
-      text: "Yes—paste all raw contract PDFs into the context window at query time."
+      text: "Paste every full contract PDF into the AI prompt each time Finance runs a query."
     - key: "B"
-      text: "No—compile executed amendments once via Object Tables + AI.GENERATE / DocAI into a 480-token `sla_overlay` table, recovering SGD 18,960.00 (14 shipments) vs SGD 1,420.00 (3 breaches)."
+      text: "Extract signed rules once into a compact structured overlay table for SQL to join."
     - key: "C"
-      text: "SQL agents can ignore executed Drive amendments because ERP tables always lead legal."
+      text: "Rely on the ERP table alone because billing systems always override legal PDFs."
     - key: "D"
-      text: "The quarterly cap is exceeded, reducing recovery to zero."
+      text: "Skip automated checks since quarterly claim caps make small breaches worthless."
   correct_key: "B"
-  reveal_takeaway: "Stuffing unstructured PDFs into every prompt burns tokens and fails deterministic arithmetic. Compiling executed Drive amendments via Object Tables + AI.GENERATE / DocAI into a compact 480-token `sla_overlay` table unlocks 13.3x SLA recovery (SGD 18,960.00 across 14 chilled shipments, safely within the SGD 35,000.00 cap)."
+  reveal_takeaway: "Stuffing 40-page PDFs into every prompt wastes tokens and breaks arithmetic. Compiling signed Drive amendments once via Object Tables and AI extraction into a compact rule overlay unlocks 13.4x higher SLA recovery."
 
 blind:
   answer_headline: "SGD 1,420.00 (3 breaches)"

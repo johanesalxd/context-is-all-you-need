@@ -14,25 +14,34 @@ release_badges:
 
 question: "Which sales channel led Closed Q3 Singapore Premier segment AOV?"
 
+stage_story:
+  step_title: "Which Channel Wins Our VIP Customers?"
+  backend_layer: "Step 2 · Shared Business Glossary"
+  audience_role: "Commercial & Marketing Lead"
+  situation: "Now that leadership trusts Step 1's baseline, Commercial digs deeper to see which sales channel drives our highest-value Premier customers."
+  business_goal: "Direct next quarter's marketing budget to the true top-spending VIP channel."
+  tech_challenge: "Raw customer labels mix promotional trial signups with true corporate VIPs."
+  context_unlock: "Knowledge Catalog Business Glossary"
+
 poll:
-  prompt: "Myth-Buster #2: When a customer table has a column called `segment_label` containing `'Premier_Promo_Trial'`, what happens without a governed Business Glossary?"
+  prompt: "If customer labels mix promotional trial signups with true Premier VIPs, how does AI rank our channels?"
   options:
     - key: "A"
-      text: "The model reads our finance committee policy from memory and skips promo rows."
+      text: "It checks Finance committee policy first and automatically excludes trial accounts."
     - key: "B"
-      text: "It filters segment_label LIKE '%Premier%', crowning Mobile App (SGD 284.10) instead of true PRM_HV leader B2B Corporate Portal (SGD 612.50)."
+      text: "It rejects the wildcard text filter because marketing tags cannot be queried."
     - key: "C"
-      text: "BigQuery throws a compilation error on LIKE '%Premier%'."
+      text: "It matches the word Premier everywhere, letting trial signups crown the wrong channel."
     - key: "D"
-      text: "Both queries return the exact same winning channel."
-  correct_key: "B"
-  reveal_takeaway: "Marketing labels are not financial definitions. Binding 'Premier Customer' in Knowledge Catalog Business Glossary to tier_code = 'PRM_HV' (spend >= SGD 5,000 and return_rate < 0.08) recovers B2B Corporate Portal at SGD 612.50 AOV across 240 orders (overall SG PRM_HV AOV SGD 495.63 across 640 orders)."
+      text: "It returns the exact same winning channel whether trial signups are included or not."
+  correct_key: "C"
+  reveal_takeaway: "Marketing labels are not financial definitions. Binding Finance's Premier Customer rule in the Knowledge Catalog Business Glossary recovers B2B Corporate Portal as the true VIP leader (more than double the order value of the blind pick)."
 
 blind:
   answer_headline: "Mobile App (SGD 284.10)"
   answer_detail: "Wrong channel and -53.6% understated AOV: filtering segment_label LIKE '%Premier%' swept in 260 low-value 'Premier_Promo_Trial' mobile/web coupon orders while excluding Enterprise_Corporate B2B Premier accounts."
   stage_delta_pill: "Wrong Channel · -53.6% AOV"
-  stage_summary: "Wrong winning channel (-53.6% AOV). Mixed promotional trial signups into the Premier VIP segment."
+  stage_summary: "Misdirected budget—mixed promotional trial signups into Premier VIPs, crowning the wrong channel (-53.6% lower order value)."
   numeric_value: 284.1
   unit: "SGD"
   query_language: "SQL"

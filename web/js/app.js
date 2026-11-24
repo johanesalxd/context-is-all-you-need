@@ -290,6 +290,7 @@
       personas,
       personaMap,
       overview: raw.overview && typeof raw.overview === "object" ? raw.overview : null,
+      closing_takeaways: raw.closing_takeaways && typeof raw.closing_takeaways === "object" ? raw.closing_takeaways : null,
       horizon_cards: Array.isArray(raw.horizon_cards) ? raw.horizon_cards : []
     };
   }
@@ -1309,7 +1310,8 @@
       return { modeGroup, themeGroup };
     }
 
-    function buildIdentitySwitchPanel(rung) {
+    function buildIdentitySwitchPanel(rung, options) {
+      const compactStage = Boolean(options && options.compactStage);
       const keys = orderedVariantKeys(rung, bundle);
       if (keys.length === 0) {
         return null;
@@ -1344,6 +1346,33 @@
       const variantMetric = variant
         ? formatVariantMetricValue(variant, rung, bundle.currency)
         : null;
+
+      if (compactStage) {
+        const scopeLine = variant
+          ? (variant.stage_summary ||
+              (variant.rows_visible === 1
+                ? "Restricted to 1 authorized market only"
+                : `Full regional visibility (${variant.rows_visible} markets)`))
+          : null;
+        return el("section", {
+          className: "identity-panel is-compact-stage",
+          attrs: { "aria-label": "Beat 4b Identity and Row-Level Security" }
+        },
+          el("div", { className: "identity-header" },
+            el("span", { className: "identity-title", text: "Beat 4b · Switch Identity" }),
+            segGroup
+          ),
+          variant
+            ? el("div", { className: "identity-outcome-box" },
+                el("div", { className: "identity-outcome-head" },
+                  el("strong", { className: "identity-outcome-kpi", text: variant.answer_headline }),
+                  el("span", { className: "badge badge-ga badge-mono", text: `Scoped Metric: ${variantMetric}` })
+                ),
+                el("p", { className: "identity-outcome-detail", text: scopeLine })
+              )
+            : null
+        );
+      }
 
       return el("section", {
         className: "identity-panel",
@@ -1412,101 +1441,165 @@
         el("p", { className: "overview-subheadline", text: ov.subheadline })
       );
 
-      const statsGrid = el("div", { className: "overview-stats-grid" },
-        ...(Array.isArray(ov.estate_stats) ? ov.estate_stats : []).map((stat) =>
-          el("div", { className: "overview-stat-tile" },
-            el("div", { className: "overview-stat-value", text: stat.value }),
-            el("div", { className: "overview-stat-label", text: stat.label }),
-            el("div", { className: "overview-stat-detail", text: stat.detail })
-          )
-        )
-      );
-
-      const leftCard = el("article", {
-        className: "overview-card",
-        attrs: { "aria-label": `Customer profile: ${ov.company_name}` }
-      },
-        el("div", { className: "overview-card-head" },
-          el("h2", { className: "overview-card-title", text: `Meet ${ov.company_name}` }),
-          el("span", { className: "badge badge-mono", text: bundle.region })
-        ),
-        el("p", { className: "overview-body-copy", text: ov.company_profile }),
-        statsGrid,
-        el("div", { className: "overview-problem-box" },
-          el("span", { className: "overview-problem-label", text: "Why Raw Schemas Fail" }),
-          el("p", { className: "overview-problem-copy", text: ov.problem_statement })
-        )
-      );
-
       const exp = ov.experiment || {};
-      const rightCard = el("article", {
-        className: "overview-card",
-        attrs: { "aria-label": "Live experiment design" }
-      },
-        el("div", { className: "overview-card-head" },
-          el("h2", { className: "overview-card-title", text: "The Live Experiment" }),
-          el("span", { className: "badge badge-ga", text: "Zero Spoilers" })
-        ),
-        el("div", { className: "overview-control-box" },
-          el("span", { className: "overview-control-label", text: "Fixed Control" }),
-          el("p", { className: "overview-body-copy", text: exp.fixed_control || "" })
-        ),
-        el("div", { className: "overview-arms-stack" },
-          el("div", { className: "overview-arm-card is-blind" },
-            el("div", { className: "overview-arm-head" },
-              el("span", { className: "overview-arm-badge is-blind", text: "Blind Arm" }),
-              el("span", { className: "badge badge-tier-3", text: "Raw Schema Only" })
-            ),
-            el("p", { className: "overview-arm-copy", text: exp.blind_arm || "" })
+      const hasPerspectives = Array.isArray(ov.perspectives) && ov.perspectives.length > 0;
+      let leftCard;
+      let rightCard;
+
+      if (hasPerspectives) {
+        const compactStats = Array.isArray(ov.estate_stats) ? ov.estate_stats.slice(0, 2) : [];
+        const inlineStatsRow = compactStats.length > 0
+          ? el("div", { className: "overview-inline-stats" },
+              ...compactStats.map((stat) =>
+                el("div", { className: "overview-stat-chip" },
+                  el("span", { className: "overview-stat-chip-value", text: stat.value }),
+                  el("span", { className: "overview-stat-chip-label", text: stat.label })
+                )
+              )
+            )
+          : null;
+
+        leftCard = el("article", {
+          className: "overview-card",
+          attrs: { "aria-label": `Who and the stakes: ${ov.company_name}` }
+        },
+          el("div", { className: "overview-card-head" },
+            el("h2", { className: "overview-card-title", text: `Who & The Stakes · ${ov.company_name}` }),
+            el("span", { className: "badge badge-mono", text: bundle.region })
           ),
-          el("div", { className: "overview-arm-card is-governed" },
-            el("div", { className: "overview-arm-head" },
-              el("span", { className: "overview-arm-badge is-governed", text: "Governed Arm" }),
-              el("span", { className: "badge badge-ga", text: "Progressive Context" })
-            ),
-            el("p", { className: "overview-arm-copy", text: exp.governed_arm || "" })
+          el("p", { className: "overview-body-copy", text: ov.company_profile }),
+          el("div", { className: "overview-problem-box" },
+            el("span", { className: "overview-problem-label", text: "Why Raw Schemas Fail" }),
+            el("p", { className: "overview-problem-copy", text: ov.problem_statement })
+          ),
+          inlineStatsRow
+        );
+
+        rightCard = el("article", {
+          className: "overview-card",
+          attrs: { "aria-label": "Two perspectives on stage" }
+        },
+          el("div", { className: "overview-card-head" },
+            el("h2", { className: "overview-card-title", text: "Two Perspectives on Stage" }),
+            el("span", { className: "badge badge-ga", text: "Zero Spoilers" })
+          ),
+          el("div", { className: "overview-perspectives" },
+            ...ov.perspectives.map((persp) =>
+              el("div", { className: "overview-perspective-card" },
+                el("div", { className: "overview-perspective-head" },
+                  el("strong", { className: "overview-perspective-role", text: persp.role }),
+                  el("span", { className: "badge badge-mono", text: persp.speaker })
+                ),
+                el("p", { className: "overview-perspective-focus", text: persp.focus })
+              )
+            )
+          ),
+          el("div", { className: "overview-control-bar" },
+            el("span", { className: "overview-control-label", text: "Fixed Control" }),
+            el("span", { className: "overview-control-bar-text", text: exp.fixed_control || "" })
           )
-        )
-      );
+        );
+      } else {
+        const statsGrid = el("div", { className: "overview-stats-grid" },
+          ...(Array.isArray(ov.estate_stats) ? ov.estate_stats : []).map((stat) =>
+            el("div", { className: "overview-stat-tile" },
+              el("div", { className: "overview-stat-value", text: stat.value }),
+              el("div", { className: "overview-stat-label", text: stat.label }),
+              el("div", { className: "overview-stat-detail", text: stat.detail })
+            )
+          )
+        );
+
+        leftCard = el("article", {
+          className: "overview-card",
+          attrs: { "aria-label": `Customer profile: ${ov.company_name}` }
+        },
+          el("div", { className: "overview-card-head" },
+            el("h2", { className: "overview-card-title", text: `Meet ${ov.company_name}` }),
+            el("span", { className: "badge badge-mono", text: bundle.region })
+          ),
+          el("p", { className: "overview-body-copy", text: ov.company_profile }),
+          statsGrid,
+          el("div", { className: "overview-problem-box" },
+            el("span", { className: "overview-problem-label", text: "Why Raw Schemas Fail" }),
+            el("p", { className: "overview-problem-copy", text: ov.problem_statement })
+          )
+        );
+
+        rightCard = el("article", {
+          className: "overview-card",
+          attrs: { "aria-label": "Live experiment design" }
+        },
+          el("div", { className: "overview-card-head" },
+            el("h2", { className: "overview-card-title", text: "The Live Experiment" }),
+            el("span", { className: "badge badge-ga", text: "Zero Spoilers" })
+          ),
+          el("div", { className: "overview-control-box" },
+            el("span", { className: "overview-control-label", text: "Fixed Control" }),
+            el("p", { className: "overview-body-copy", text: exp.fixed_control || "" })
+          ),
+          el("div", { className: "overview-arms-stack" },
+            el("div", { className: "overview-arm-card is-blind" },
+              el("div", { className: "overview-arm-head" },
+                el("span", { className: "overview-arm-badge is-blind", text: "Blind Arm" }),
+                el("span", { className: "badge badge-tier-3", text: "Raw Schema Only" })
+              ),
+              el("p", { className: "overview-arm-copy", text: exp.blind_arm || "" })
+            ),
+            el("div", { className: "overview-arm-card is-governed" },
+              el("div", { className: "overview-arm-head" },
+                el("span", { className: "overview-arm-badge is-governed", text: "Governed Arm" }),
+                el("span", { className: "badge badge-ga", text: "Progressive Context" })
+              ),
+              el("p", { className: "overview-arm-copy", text: exp.governed_arm || "" })
+            )
+          )
+        );
+      }
 
       const roadmapGrid = el("div", { className: "overview-roadmap-grid" },
         ...bundle.rungs.map((rung, idx) => {
-          const layerTag = extractLayerTag(rung.pyramid_layer);
+          const story = rung.stage_story && typeof rung.stage_story === "object" ? rung.stage_story : null;
+          const layerTag = (story && story.backend_layer) || extractLayerTag(rung.pyramid_layer);
+          const stepTitle = (story && story.step_title) || rung.question;
           return el("button", {
             className: "overview-roadmap-card",
             attrs: {
               type: "button",
               "data-overview-rung": rung.id,
-              "aria-label": `R${rung.rung_num}: ${rung.question}`
+              "aria-label": `Step ${rung.rung_num}: ${stepTitle}`
             },
             onClick: () => selectRung(idx, { beat: "question" })
           },
             el("div", { className: "overview-roadmap-top" },
-              el("span", { className: "overview-roadmap-label", text: rung.short_label }),
-              el("div", { className: "overview-roadmap-badges" },
-                rung.difficulty_tier
-                  ? el("span", {
-                      className: `${difficultyBadgeClass(rung.difficulty_tier)} overview-difficulty-tag`,
-                      text: rung.difficulty_tier
-                    })
-                  : null,
-                layerTag
-                  ? el("span", { className: "badge badge-mono overview-layer-tag", text: layerTag })
+              el("span", { className: "overview-step-badge-group" },
+                el("span", { className: "overview-step-num", text: String(rung.rung_num) }),
+                idx < bundle.rungs.length - 1
+                  ? el("span", { className: "overview-step-arrow", attrs: { "aria-hidden": "true" }, text: "→" })
                   : null
-              )
+              ),
+              rung.difficulty_tier
+                ? el("span", {
+                    className: `${difficultyBadgeClass(rung.difficulty_tier)} overview-difficulty-tag`,
+                    text: rung.difficulty_tier
+                  })
+                : null
             ),
-            el("span", { className: "overview-roadmap-question", text: rung.question })
+            layerTag
+              ? el("span", { className: "badge badge-mono overview-layer-tag", text: layerTag })
+              : null,
+            el("span", { className: "overview-roadmap-question", text: stepTitle })
           );
         })
       );
 
       const roadmapSection = el("section", {
         className: "overview-roadmap",
-        attrs: { "aria-label": "Boardroom simulation roadmap" }
+        attrs: { "aria-label": "6-Step Context Journey" }
       },
         el("div", { className: "overview-roadmap-header" },
           el("div", { className: "overview-roadmap-title-row" },
-            el("h2", { className: "overview-roadmap-title", text: `${bundle.rungs.length} Live Boardroom Questions` }),
+            el("h2", { className: "overview-roadmap-title", text: `You Are Here · ${bundle.rungs.length}-Step Context Journey` }),
             el("button", {
               className: "overview-guide-link",
               text: "What are Layers 1–5? Open ? Guide",
@@ -1514,7 +1607,7 @@
               onClick: () => toggleHelp()
             })
           ),
-          el("span", { className: "overview-roadmap-hint", text: "Select any card to jump to its question" })
+          el("span", { className: "overview-roadmap-hint", text: "Step 1 → Step 6 · Select any card to jump" })
         ),
         roadmapGrid
       );
@@ -1530,6 +1623,73 @@
     }
 
     function buildHorizonShowcase() {
+      const ct = bundle.closing_takeaways && typeof bundle.closing_takeaways === "object"
+        ? bundle.closing_takeaways
+        : null;
+
+      let closingSection = null;
+      if (ct) {
+        const hasSafeQr =
+          typeof ct.qr_svg_data_uri === "string" &&
+          ct.qr_svg_data_uri.startsWith("data:image/svg+xml;base64,");
+        const safeRepoUrl =
+          typeof ct.repo_url === "string" && /^https?:\/\//i.test(ct.repo_url)
+            ? ct.repo_url
+            : null;
+        const takeawaysList = el("ol", { className: "closing-takeaways-list" },
+          ...(Array.isArray(ct.takeaways) ? ct.takeaways : []).map((item, idx) =>
+            el("li", { className: "closing-takeaway-item" },
+              el("span", { className: "closing-takeaway-num", text: String(idx + 1) }),
+              el("div", { className: "closing-takeaway-body" },
+                el("strong", { className: "closing-takeaway-title", text: item.title }),
+                el("p", { className: "closing-takeaway-detail", text: item.detail })
+              )
+            )
+          )
+        );
+
+        closingSection = el("section", {
+          className: "closing-takeaways-grid",
+          attrs: { "aria-label": "Key Takeaways and Try It Live" }
+        },
+          el("article", { className: "closing-takeaways-card" },
+            el("span", { className: "overview-eyebrow", text: ct.eyebrow }),
+            el("h1", { className: "overview-headline", text: ct.headline }),
+            takeawaysList
+          ),
+          el("aside", { className: "closing-qr-card", attrs: { "aria-label": "Try It Live Repository QR Code" } },
+            el("span", { className: "overview-eyebrow", text: "Try It Live" }),
+            hasSafeQr
+              ? el("div", { className: "closing-qr-img-wrap" },
+                  el("img", {
+                    className: "closing-qr-img",
+                    attrs: {
+                      src: ct.qr_svg_data_uri,
+                      alt: `QR code: ${ct.repo_url || ""}`,
+                      width: "180",
+                      height: "180"
+                    }
+                  })
+                )
+              : null,
+            ct.repo_label
+              ? el("p", { className: "closing-qr-label", text: ct.repo_label })
+              : null,
+            safeRepoUrl
+              ? el("a", {
+                  className: "closing-qr-link badge-mono",
+                  text: safeRepoUrl,
+                  attrs: {
+                    href: safeRepoUrl,
+                    target: "_blank",
+                    rel: "noopener noreferrer"
+                  }
+                })
+              : null
+          )
+        );
+      }
+
       const grid = el("div", { className: "horizon-grid" });
       const cardTitles = [];
       for (const card of bundle.horizon_cards) {
@@ -1564,12 +1724,13 @@
         : `Rungs 1–6 execute strictly within ${bundle.region}. Architectural capabilities below are decoupled from the live rung scope.`;
 
       return el("section", {
-        className: "horizon-showcase",
+        className: `horizon-showcase${closingSection ? " has-closing-takeaways" : ""}`,
         attrs: { "aria-label": "What's Next Architectural Horizon Showcase" }
       },
+        closingSection,
         el("div", { className: "horizon-banner" },
           el("span", { className: "horizon-banner-eyebrow", text: "What's Next · Architectural Horizon (Decoupled from R1–R6 Live Scope)" }),
-          el("h1", { className: "horizon-banner-title", text: "What's Next · Horizon & Multi-Cloud" }),
+          el(closingSection ? "h2" : "h1", { className: "horizon-banner-title", text: "What's Next · Horizon & Multi-Cloud" }),
           el("p", {
             className: "horizon-banner-subtitle",
             text: subtitleText
@@ -1649,34 +1810,6 @@
     /* ----------------------------------------------------------------------
        Stage Mode Renderer (10% / 80% / 10% Quiet Stage V2 + [X] X-Ray Drawer)
        ---------------------------------------------------------------------- */
-
-    function buildMetricsStrip(outcome) {
-      const emp = outcome.empirical_eval;
-      return el("div", { className: "outcome-metrics-strip" },
-        el("div", { className: "metric-chip" },
-          el("span", { className: "metric-chip-label", text: emp ? "Target Eval" : "Golden Eval" }),
-          el("span", { className: "metric-chip-value", text: `${outcome.eval_pass_count}/${outcome.eval_total_runs}` })
-        ),
-        emp
-          ? el("div", { className: "metric-chip is-empirical" },
-              el("span", { className: "metric-chip-label", text: `Empirical N=${emp.runs}` }),
-              el("span", { className: "metric-chip-value", text: `${emp.pass_count}/${emp.runs}` })
-            )
-          : null,
-        el("div", { className: "metric-chip" },
-          el("span", { className: "metric-chip-label", text: "Queries" }),
-          el("span", { className: "metric-chip-value", text: String(outcome.exploratory_queries) })
-        ),
-        el("div", { className: "metric-chip" },
-          el("span", { className: "metric-chip-label", text: "Retries" }),
-          el("span", { className: "metric-chip-value", text: String(outcome.error_retries) })
-        ),
-        el("div", { className: "metric-chip" },
-          el("span", { className: "metric-chip-label", text: "Tokens" }),
-          el("span", { className: "metric-chip-value", text: formatNumber(outcome.tokens_used) })
-        )
-      );
-    }
 
     function buildStageXrayDrawer() {
       if (state.mode !== "stage" || isNonRung() || !state.stageXrayOpen) {
@@ -1874,22 +2007,6 @@
         })
       );
 
-      const tokenRetryPill = el("div", {
-        className: "token-retry-pill",
-        attrs: { "aria-label": "Context tokens and retries delta" }
-      },
-        state.isOverview
-          ? el("span", { text: `Briefing · ${bundle.rungs.length} Live Rungs` })
-          : (state.isHorizon
-              ? el("span", { text: "What's Next · Roadmap Scope" })
-              : [
-                  el("span", { text: `Tokens ${formatNumber(rung.blind.tokens_used)} → ` }),
-                  el("span", { className: "delta-good", text: formatNumber(rung.governed.tokens_used) }),
-                  el("span", { text: ` · Retries ${rung.blind.error_retries} → ` }),
-                  el("span", { className: "delta-good", text: String(rung.governed.error_retries) })
-                ])
-      );
-
       const topbar = el("header", { className: "stage-topbar" },
         el("div", { className: "stage-topbar-row" },
           el("div", { className: "brand-block" },
@@ -1952,8 +2069,7 @@
                     handleRunLiveQuery();
                   }
                 })
-              : null,
-            tokenRetryPill
+              : null
           )
         )
       );
@@ -1964,6 +2080,71 @@
       } else if (state.isHorizon) {
         canvasChildren = [buildHorizonShowcase()];
       } else {
+        const story = rung.stage_story && typeof rung.stage_story === "object" ? rung.stage_story : null;
+        const currentLayerLabel = (story && story.backend_layer) || extractLayerTag(rung.pyramid_layer);
+
+        const journeySteps = [];
+        bundle.rungs.forEach((r, idx) => {
+          const stepStateClass = idx === state.rungIndex
+            ? "is-active"
+            : (idx < state.rungIndex ? "is-completed" : "is-upcoming");
+          const rStory = r.stage_story && typeof r.stage_story === "object" ? r.stage_story : null;
+          journeySteps.push(
+            el("button", {
+              className: `stage-journey-step ${stepStateClass}`,
+              text: String(r.rung_num),
+              attrs: {
+                type: "button",
+                title: `${r.short_label}: ${(rStory && rStory.step_title) || r.question}`,
+                "aria-label": `Step ${r.rung_num}: ${(rStory && rStory.step_title) || r.question}`,
+                "aria-current": idx === state.rungIndex ? "step" : null
+              },
+              onClick: () => selectRung(idx, { beat: "question" })
+            })
+          );
+          if (idx < bundle.rungs.length - 1) {
+            journeySteps.push(
+              el("span", { className: "stage-journey-arrow", attrs: { "aria-hidden": "true" }, text: "→" })
+            );
+          }
+        });
+
+        const journeyRail = el("nav", {
+          className: "stage-journey-rail",
+          attrs: { "aria-label": "You are here context escalation" }
+        },
+          el("div", { className: "stage-journey-steps" },
+            el("span", { className: "stage-journey-eyebrow", text: "You Are Here" }),
+            ...journeySteps
+          ),
+          el("span", { className: "badge badge-mono stage-journey-layer", text: currentLayerLabel })
+        );
+
+        const storyStrip = story
+          ? el("section", {
+              className: "stage-story-strip",
+              attrs: { "aria-label": "Executive scenario context" }
+            },
+              el("div", { className: "stage-story-top" },
+                el("span", { className: "badge badge-accent", text: story.audience_role }),
+                el("p", { className: "stage-story-situation", text: story.situation })
+              ),
+              el("div", { className: "stage-story-chips" },
+                el("div", { className: "stage-story-chip is-goal" },
+                  el("strong", { text: "Business Goal: " }),
+                  el("span", { text: story.business_goal })
+                ),
+                state.beat !== "question"
+                  ? el("div", { className: "stage-story-chip is-trap" },
+                      el("strong", { text: "Backend Trap: " }),
+                      el("span", { text: story.tech_challenge })
+                    )
+                  : null
+              )
+            )
+          : null;
+
+        const heroTitle = (story && story.step_title) || rung.question;
         const questionHero = el("section", {
           className: "question-hero",
           attrs: { "aria-label": "Business question" }
@@ -1974,14 +2155,19 @@
               rung.difficulty_tier
                 ? el("span", { className: difficultyBadgeClass(rung.difficulty_tier), text: rung.difficulty_tier })
                 : null,
-              el("span", { className: "badge", text: rung.pyramid_layer })
+              el("span", { className: "badge", text: (story && story.backend_layer) || rung.pyramid_layer })
             )
           ),
-          el("h1", { className: "question-headline", text: rung.question })
+          el("h1", { className: "question-headline", text: heroTitle }),
+          story && story.step_title
+            ? el("p", { className: "question-prompt-subline", text: `AI Prompt: "${rung.question}"` })
+            : null
         );
 
         if (state.beat === "question") {
           canvasChildren = [
+            journeyRail,
+            storyStrip,
             questionHero,
             el("div", { className: "beat-banner" },
               el("span", { text: "Beat 1 of 3 · Business Question presented. Step forward to inspect the Blind Agent Trap." }),
@@ -2002,10 +2188,9 @@
             el("div", null,
               el("div", { className: "outcome-card-head" },
                 el("div", { className: "outcome-label-group" },
-                  el("span", { className: "outcome-role-title", text: "Blind Agent Trap" }),
-                  el("span", { className: "badge badge-mono", text: rung.blind.query_language })
+                  el("span", { className: "outcome-role-title", text: "Blind Agent Trap" })
                 ),
-                el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier })
+                el("span", { className: "stage-card-subtitle is-blind", text: "Without Context · Misleading" })
               ),
               el("p", { className: "outcome-kpi", text: rung.blind.answer_headline }),
               rung.blind.stage_delta_pill
@@ -2015,12 +2200,11 @@
                 : null,
               el("p", { className: "outcome-detail", text: rung.blind.stage_summary || rung.blind.answer_detail })
             ),
-            el("div", null,
-              !rung.blind.stage_summary
-                ? el("p", { className: "outcome-rationale", text: `Failure Mechanism: ${rung.blind.rationale}` })
-                : null,
-              buildMetricsStrip(rung.blind)
-            )
+            !rung.blind.stage_summary
+              ? el("div", null,
+                  el("p", { className: "outcome-rationale", text: `Failure Mechanism: ${rung.blind.rationale}` })
+                )
+              : null
           );
 
           const govCardClass = `outcome-card is-governed${state.beat === "blind" ? " is-veiled" : ""}`;
@@ -2047,10 +2231,9 @@
                 el("div", null,
                   el("div", { className: "outcome-card-head" },
                     el("div", { className: "outcome-label-group" },
-                      el("span", { className: "outcome-role-title", text: "Governed Enterprise Context" }),
-                      el("span", { className: "badge badge-mono", text: rung.governed.query_language })
+                      el("span", { className: "outcome-role-title", text: "Governed Enterprise Context" })
                     ),
-                    el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
+                    el("span", { className: "stage-card-subtitle is-governed", text: "With Context · Verified" })
                   ),
                   el("p", { className: "outcome-kpi", text: rung.governed.answer_headline }),
                   rung.governed.stage_delta_pill
@@ -2059,19 +2242,18 @@
                       )
                     : null,
                   el("p", { className: "outcome-detail", text: rung.governed.stage_summary || rung.governed.answer_detail }),
-                  buildIdentitySwitchPanel(rung)
+                  buildIdentitySwitchPanel(rung, { compactStage: true })
                 ),
                 el("div", null,
-                  rung.governed.context_mechanism
-                    ? el("div", { className: "context-callout" },
-                        el("span", { className: "context-callout-label", text: "Context Injected:" }),
-                        el("span", { text: rung.governed.context_mechanism })
+                  story && story.context_unlock
+                    ? el("div", { className: "stage-context-unlock" },
+                        el("span", { className: "context-callout-label", text: "Context Unlocked:" }),
+                        el("span", { text: story.context_unlock })
                       )
                     : null,
                   !rung.governed.stage_summary
                     ? el("p", { className: "outcome-rationale", text: `Grounding: ${rung.governed.rationale}` })
-                    : null,
-                  buildMetricsStrip(rung.governed)
+                    : null
                 )
               );
 
@@ -2080,6 +2262,8 @@
             : (state.beat === "governed" ? " is-focus-governed" : "");
 
           canvasChildren = [
+            journeyRail,
+            storyStrip,
             questionHero,
             el("section", {
               className: `comparison-grid${gridModifier}`,
@@ -2105,24 +2289,10 @@
         : null;
       const canvas = el("main", { className: "stage-canvas" }, stageLiveBanner, canvasChildren);
 
-      // Bottom 10% Eval & Trust Bar
-      const evalDots = el("span", { className: "eval-dots", attrs: { "aria-hidden": "true" } });
-      if (!isNonRung()) {
-        for (let i = 0; i < rung.governed.eval_total_runs; i += 1) {
-          const pass = i < rung.governed.eval_pass_count;
-          evalDots.appendChild(el("span", { className: `eval-dot ${pass ? "is-pass" : "is-fail"}` }));
-        }
-      }
-
-      const empiricalBadgeText = isNonRung() ? null : formatEmpiricalHeadline(rung);
-      const targetRateText = isNonRung()
-        ? ""
-        : `${empiricalBadgeText ? "Target: " : ""}${rung.blind.eval_pass_count}/${rung.blind.eval_total_runs} → ${rung.governed.eval_pass_count}/${rung.governed.eval_total_runs}`;
-
       let footerLeft;
       if (state.isOverview) {
         footerLeft = el("div", { className: "eval-trust-group" },
-          el("span", { className: "badge badge-mono", text: `Briefing · ${bundle.rungs.length}-Rung Live Simulation` }),
+          el("span", { className: "badge badge-mono", text: `Briefing · ${bundle.rungs.length}-Step Context Journey` }),
           el("span", { className: "eval-label", text: `Region: ${bundle.region}` })
         );
       } else if (state.isHorizon) {
@@ -2132,34 +2302,10 @@
         );
       } else {
         footerLeft = el("div", { className: "eval-trust-group" },
-          el("div", { className: "eval-block" },
-            el("span", { className: "eval-label", text: "Golden Eval Pass Rate" }),
-            evalDots,
-            el("span", {
-              className: "badge badge-mono",
-              text: targetRateText
-            }),
-            empiricalBadgeText
-              ? el("span", {
-                  className: "badge badge-empirical badge-mono",
-                  attrs: { "data-empirical-badge": "true" },
-                  text: empiricalBadgeText
-                })
-              : null
-          ),
-          el("div", { className: "eval-block" },
-            el("span", { className: "eval-label", text: "TrustTier" }),
-            el("span", { className: trustBadgeClass(rung.blind.trust_tier), text: rung.blind.trust_tier }),
-            el("span", { text: "→" }),
-            el("span", { className: trustBadgeClass(rung.governed.trust_tier), text: rung.governed.trust_tier })
-          ),
-          el("div", { className: "eval-block" },
-            el("span", { className: "eval-label", text: "Exploratory Queries" }),
-            el("span", {
-              className: "badge badge-mono",
-              text: `${rung.blind.exploratory_queries} → ${rung.governed.exploratory_queries}`
-            })
-          )
+          el("span", {
+            className: "badge stage-footer-pill",
+            text: "Same AI Model · Progressive Enterprise Context · Press [X] X-Ray for SQL & Eval Proof"
+          })
         );
       }
 
@@ -3464,23 +3610,23 @@
 
       const glossaryItems = [
         {
-          term: "Target Eval (k/N)",
+          term: "Target Eval (k/N) (in X-Ray [X])",
           desc: "Expected consistency across 5 repeated runs of the same business question."
         },
         {
-          term: "Empirical N=5",
+          term: "Empirical N=5 (in X-Ray [X])",
           desc: "Actual measured pass rate from running the live Gemini agent 5 separate times per arm (proving results aren't a lucky one-off)."
         },
         {
-          term: "Trust Tier (TIER_3 → TIER_2 → TIER_1)",
+          term: "Trust Tier (TIER_3 → TIER_2 → TIER_1) (in Workbench [W])",
           desc: "Automated safety grade from Review Required (unverified SQL / math drift) to Grounded (schema/glossary) up to Verified / Compiled (certified metrics, graphs, RLS, or contracts)."
         },
         {
-          term: "Tokens",
+          term: "Tokens (in X-Ray [X])",
           desc: "Total prompt, schema lookup, and response text processed by the AI—lower wasted exploration means faster, cheaper answers."
         },
         {
-          term: "Exploratory Queries & Retries",
+          term: "Exploratory Queries & Retries (in X-Ray [X])",
           desc: "How many trial-and-error SQL queries the agent ran (and fixed after errors) while guessing what tables/columns mean; governed context reduces retries."
         },
         {

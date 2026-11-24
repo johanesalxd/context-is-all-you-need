@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import base64
 import copy
 import json
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 
 from engine.leak_check import scan_text_for_leaks
 from engine.pack_loader import DEFAULT_REPO_ROOT, validate_bundle
+from engine.poll_store import render_poll_qr_svg
 from engine.rls_impersonation import redact_bundle_data
 
 __all__ = ["LeakDetectedError", "export_bundle"]
@@ -37,6 +39,12 @@ def export_bundle(
         extra_tokens=extra_sensitive_tokens,
         live_project_id=live_project_id,
     )
+    closing = sanitized.get("closing_takeaways")
+    if isinstance(closing, dict) and closing.get("repo_url"):
+        svg = render_poll_qr_svg(str(closing["repo_url"]))
+        encoded_svg = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        closing["qr_svg_data_uri"] = f"data:image/svg+xml;base64,{encoded_svg}"
+
     validate_bundle(sanitized, schema_path=schema_path)
 
     json_payload = json.dumps(sanitized, indent=2, ensure_ascii=False).replace("</", "<\\/")
