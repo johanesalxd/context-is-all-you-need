@@ -1,7 +1,7 @@
 window.CONTEXT_PACK_BUNDLE = {
   "schema_version": "2.0",
   "pack_id": "meridian_q3_sgd",
-  "title": "Meridian Commerce · Closed Q3 Context Benchmark",
+  "title": "Meridian Commerce · Q3 Close Review",
   "subtitle": "6-Rung Enterprise Context Progression in BigQuery & Knowledge Catalog (SGD)",
   "hero_tagline": "Frontier models are table stakes—governed enterprise context is the differentiator.",
   "closed_period_label": "Closed Q3 (2026-07-01 to 2026-09-30)",
@@ -70,7 +70,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "title": "Knowledge Studio (Context Sets & Enrichment Agent)",
       "release_badge": "Preview",
       "region_availability": "US / EU multi-regions (Preview; not yet in asia-southeast1)",
-      "summary": "Curates domain Context Sets and deploys the Enrichment Agent inside Knowledge Catalog to bootstrap glossary bindings, verified queries, and semantic descriptions. Kept strictly decoupled from R1–R6 production scope in asia-southeast1 until regional GA availability.",
+      "summary": "Automatically drafts glossary terms, column descriptions, and verified queries via the Enrichment Agent. Kept separate from Singapore production until regional GA availability.",
       "primitives": [
         "Knowledge Catalog",
         "Knowledge Studio Context Sets",
@@ -82,7 +82,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "title": "Cross-Cloud Lakehouse Catalog Federation",
       "release_badge": "GA",
       "region_availability": "GA (Multi-region & asia-southeast1 via BigQuery / Knowledge Catalog)",
-      "summary": "Federates external Iceberg and Delta lakehouse catalogs directly into Knowledge Catalog and BigQuery governance with distinct cloud-native identity delegation models: Databricks Unity Catalog via per-user OIDC (GA), Snowflake Horizon Catalog via Workload Identity Federation (GA—never per-user OIDC), and AWS Glue Data Catalog via IAM role delegation (GA).",
+      "summary": "Governs external Iceberg and Delta tables across Databricks, Snowflake, and AWS Glue directly from BigQuery and Knowledge Catalog using each platform's native identity model.",
       "primitives": [
         "Knowledge Catalog",
         "Databricks Unity Catalog (per-user OIDC)",
@@ -219,15 +219,15 @@ window.CONTEXT_PACK_BUNDLE = {
           },
           {
             "key": "C",
-            "text": "It fails to write valid SQL syntax and stops before returning any revenue figure."
+            "text": "It gets stuck on database formatting and stops before returning any revenue figure."
           },
           {
             "key": "D",
-            "text": "It refuses to run the query until a separate BI dashboard model is published."
+            "text": "It refuses to answer until a separate executive dashboard is published first."
           }
         ],
         "correct_key": "B",
-        "reveal_takeaway": "AI writes clean SQL, but column names alone hide accounting rules. Adding column descriptions and schema insights stops tax and cancellations from inflating revenue (+28.3% higher without them)."
+        "reveal_takeaway": "AI writes clean queries, but column names alone hide accounting rules. Adding column descriptions and schema insights stops tax and cancellations from inflating revenue (+28.3% higher without them)."
       },
       "blind": {
         "answer_headline": "SGD 1,684,200.00",
@@ -357,7 +357,7 @@ window.CONTEXT_PACK_BUNDLE = {
           },
           {
             "key": "B",
-            "text": "It rejects the wildcard text filter because marketing tags cannot be queried."
+            "text": "It blocks the text search because marketing tags cannot be queried."
           },
           {
             "key": "C",
@@ -374,7 +374,7 @@ window.CONTEXT_PACK_BUNDLE = {
       "blind": {
         "answer_headline": "Mobile App (SGD 284.10)",
         "answer_detail": "Wrong channel and -53.6% understated AOV: filtering segment_label LIKE '%Premier%' swept in 260 low-value 'Premier_Promo_Trial' mobile/web coupon orders while excluding Enterprise_Corporate B2B Premier accounts.",
-        "stage_delta_pill": "Wrong Channel · -53.6% AOV",
+        "stage_delta_pill": "Wrong Channel · -53.6% Avg Order",
         "stage_summary": "Misdirected budget—mixed promotional trial signups into Premier VIPs, crowning the wrong channel (-53.6% lower order value).",
         "numeric_value": 284.1,
         "unit": "SGD",
@@ -499,11 +499,11 @@ window.CONTEXT_PACK_BUNDLE = {
         "audience_role": "Retail Operations Lead",
         "situation": "Step 2 showed where our best customers buy. Next, Operations digs deeper to check whether our fast Same-Day retail promise actually makes money.",
         "business_goal": "Confirm true delivery contribution margin before cutting or expanding Same-Day service.",
-        "tech_challenge": "Each Same-Day order spans multiple items and delivery legs, causing naive joins to multiply costs.",
+        "tech_challenge": "Each Same-Day order spans multiple items and delivery stops, causing flat multi-table joins to multiply costs.",
         "context_unlock": "Certified Graph Metrics & Verified Query"
       },
       "poll": {
-        "prompt": "Each Same-Day order has multiple items and delivery legs. What happens when AI joins all three tables flat?",
+        "prompt": "Each Same-Day order spans multiple items and delivery stops. What happens when AI combines all three tables directly?",
         "options": [
           {
             "key": "A",
@@ -515,7 +515,7 @@ window.CONTEXT_PACK_BUNDLE = {
           },
           {
             "key": "C",
-            "text": "The query fails with an ambiguity error unless a BI semantic layer is installed."
+            "text": "The query fails with an error unless a separate BI reporting layer is installed."
           },
           {
             "key": "D",
@@ -523,7 +523,7 @@ window.CONTEXT_PACK_BUNDLE = {
           }
         ],
         "correct_key": "A",
-        "reveal_takeaway": "A flat 3-way join triggers a fan-trap that silently double-counts fees without any error message. Grain-locked Graph Measures calculate each cost at its own level once, revealing healthy Same-Day profitability."
+        "reveal_takeaway": "Combining tables directly silently double-counts fees without any error message. Certified multi-table measures count each cost once at its own level, revealing healthy Same-Day profitability."
       },
       "blind": {
         "answer_headline": "14.2%",
@@ -651,7 +651,7 @@ window.CONTEXT_PACK_BUNDLE = {
         "situation": "Delivery economics look healthy, yet an alert flags a sharp Cold-Chain margin drop. Leadership asks if the crisis is real—and who can see each country.",
         "business_goal": "Verify the official Q3 close and ensure country leads only see their own market.",
         "tech_challenge": "Nearly two hundred shadow copies and an uncertified draft sit beside the final close table.",
-        "context_unlock": "Certified Data Products, Auto DQ & Row-Level Security"
+        "context_unlock": "Certified Data Products, Automated Quality Checks & Row-Level Security"
       },
       "poll": {
         "prompt": "With nearly two hundred look-alike backup tables in the warehouse, why did the blind AI trigger a margin panic?",
@@ -713,7 +713,7 @@ window.CONTEXT_PACK_BUNDLE = {
         }
       },
       "governed": {
-        "answer_headline": "28.4% (-15 bps YoY) · SGD 842,600.00",
+        "answer_headline": "28.4% (-15 bps YoY)",
         "answer_detail": "Certified Knowledge Catalog Data Product mart_coldchain_q3_r2 confirms steady 28.4% gross margin (-15 bps YoY, SGD 842,600.00 across 4 SEA markets; SGD 346,480.00 under SG RLS).",
         "stage_delta_pill": "Certified Close + Role-Scoped",
         "stage_summary": "Steady 28.4% margin (-15 bps YoY) from the certified Q3 close — automatically scoped to the viewer's role.",
@@ -824,12 +824,12 @@ window.CONTEXT_PACK_BUNDLE = {
       "question": "Which SG Premier orders & revenue are exposed to delayed Tier-2 Batch #LN-409?",
       "stage_story": {
         "step_title": "Which VIP Orders Are Exposed to a Delay?",
-        "backend_layer": "Step 5 · 4-Hop Supply-Chain Graph",
+        "backend_layer": "Step 5 · 4-Step Supply-Chain Graph",
         "audience_role": "Supply Chain & Customer Care",
-        "situation": "Division margin is steady, but Ops flags one delayed upstream chilled batch. Supply Chain digs deeper to find every exposed Singapore VIP order.",
-        "business_goal": "Proactively contact and protect every affected Premier VIP customer before delivery.",
+        "situation": "Division margin is steady, yet a Q3 audit flags one delayed upstream chilled batch. Supply Chain digs deeper to trace every exposed Singapore VIP order.",
+        "business_goal": "Identify every affected Premier VIP order for proactive outreach and customer care.",
         "tech_challenge": "Renamed warehouse lots hide downstream orders across four supply-chain handoffs.",
-        "context_unlock": "BigQuery Property Graph (4-Hop Lineage)"
+        "context_unlock": "BigQuery Property Graph (4-Step Lineage)"
       },
       "poll": {
         "prompt": "A delayed supplier batch splits into renamed warehouse lots across four handoffs. How does a keyword search fare?",
@@ -844,7 +844,7 @@ window.CONTEXT_PACK_BUNDLE = {
           },
           {
             "key": "C",
-            "text": "It requires exporting all BigQuery tables into a separate graph engine before querying."
+            "text": "It must export all warehouse tables into a separate graph tool before checking."
           },
           {
             "key": "D",
@@ -852,7 +852,7 @@ window.CONTEXT_PACK_BUNDLE = {
           }
         ],
         "correct_key": "A",
-        "reveal_takeaway": "Keyword matching breaks whenever warehouse lots are relabeled downstream. Zero-ETL BigQuery Property Graph traverses all four supply-chain hops directly in place, catching all 38 exposed VIP orders instead of missing 79% of the risk."
+        "reveal_takeaway": "Keyword matching breaks whenever warehouse lots are relabeled downstream. Built-in BigQuery Property Graph traces all four supply-chain steps directly in place, catching all 38 exposed VIP orders instead of missing 79% of the risk."
       },
       "blind": {
         "answer_headline": "SGD 4,120.00 (8 orders)",
@@ -889,10 +889,10 @@ window.CONTEXT_PACK_BUNDLE = {
         }
       },
       "governed": {
-        "answer_headline": "SGD 19,380.00 (38 SG Premier orders · SGD 510.00 AOV)",
+        "answer_headline": "SGD 19,380.00 (38 VIP orders)",
         "answer_detail": "4-hop ISO GQL GRAPH_TABLE traversal from ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and Customer['PRM_HV'] identifies all 38 SG Premier orders totaling SGD 19,380.00.",
         "stage_delta_pill": "4-Hop Supply Lineage",
-        "stage_summary": "Full 4-hop supply-chain blast radius—traces every affected warehouse lot to all 38 exposed VIP orders.",
+        "stage_summary": "Full 4-step supply-chain blast radius — traces every affected warehouse lot to 38 exposed Premier VIP orders (SGD 510 avg order).",
         "numeric_value": 19380.0,
         "unit": "SGD",
         "query_language": "SQL+GQL",
@@ -935,7 +935,7 @@ window.CONTEXT_PACK_BUNDLE = {
           "Knowledge Catalog Business Glossary (GA · asia-southeast1)",
           "Gemini PayGo Inference (GA · global endpoint)"
         ],
-        "negative_control_assertion": "Direct string-pattern join misses opaque warehouse lots LOT-SG-8841 and LOT-SG-8842 (80% revenue gap)."
+        "negative_control_assertion": "Direct string-pattern join misses opaque warehouse lots LOT-SG-8841 and LOT-SG-8842 (79% revenue gap)."
       },
       "grading": {
         "target_value": 19380.0,
@@ -978,21 +978,21 @@ window.CONTEXT_PACK_BUNDLE = {
         "step_title": "How Much Carrier Credit Can We Claim?",
         "backend_layer": "Step 6 · Unstructured Contract Extraction",
         "audience_role": "Procurement & Legal Lead",
-        "situation": "Turning to our chilled logistics carrier, ArcticHaul, Procurement digs deeper to calculate total Q3 SLA credit recoverable across qualifying chilled shipments.",
+        "situation": "Still on Q3 cold-chain operations—turning to our chilled carrier, ArcticHaul, Procurement digs deeper to calculate total SLA credit recoverable across qualifying shipments.",
         "business_goal": "Recover every dollar owed under the latest signed contract amendment.",
         "tech_challenge": "ERP tables still enforce legacy thresholds while the signed June amendment lives in Drive PDFs.",
-        "context_unlock": "Drive Connector, Object Tables & AI Extraction"
+        "context_unlock": "Signed Contracts → AI-Extracted Rule Table"
       },
       "poll": {
         "prompt": "Our ERP ledger holds old 2025 SLA terms, while the signed 2026 amendment sits in a Drive PDF. What is the scalable fix?",
         "options": [
           {
             "key": "A",
-            "text": "Paste every full contract PDF into the AI prompt each time Finance runs a query."
+            "text": "Paste every full contract PDF into the AI prompt every time Finance asks a question."
           },
           {
             "key": "B",
-            "text": "Extract signed rules once into a compact structured overlay table for SQL to join."
+            "text": "Extract signed contract rules once into a clean structured rule table the AI can reference."
           },
           {
             "key": "C",
@@ -1004,7 +1004,7 @@ window.CONTEXT_PACK_BUNDLE = {
           }
         ],
         "correct_key": "B",
-        "reveal_takeaway": "Stuffing 40-page PDFs into every prompt wastes tokens and breaks arithmetic. Compiling signed Drive amendments once via Object Tables and AI extraction into a compact rule overlay unlocks 13.4x higher SLA recovery."
+        "reveal_takeaway": "Pasting 40-page PDFs into every question slows answers and breaks arithmetic. Extracting signed amendments once into a governed rule table unlocks 13.4x higher SLA credit recovery."
       },
       "blind": {
         "answer_headline": "SGD 1,420.00 (3 breaches)",

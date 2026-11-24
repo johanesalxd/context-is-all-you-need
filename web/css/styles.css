@@ -2293,6 +2293,62 @@ button, input, select {
   color: var(--text-secondary);
 }
 
+.xray-bridge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.xray-tier-pill {
+  background: var(--gov-badge-bg);
+  color: var(--gov-fg-strong);
+  border-color: var(--gov-border);
+  font-weight: 700;
+  white-space: normal;
+}
+
+.xray-payload-details {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-alt);
+  overflow: hidden;
+}
+
+.xray-payload-details summary {
+  padding: 9px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  list-style-position: inside;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.xray-payload-details summary:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.xray-payload-details[open] summary {
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.xray-payload-details .code-pane {
+  border: none;
+  border-radius: 0;
+}
+
+.xray-honesty-caption {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 .empirical-cards-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

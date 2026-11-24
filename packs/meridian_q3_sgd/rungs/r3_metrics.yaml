@@ -26,22 +26,22 @@ stage_story:
   audience_role: "Retail Operations Lead"
   situation: "Step 2 showed where our best customers buy. Next, Operations digs deeper to check whether our fast Same-Day retail promise actually makes money."
   business_goal: "Confirm true delivery contribution margin before cutting or expanding Same-Day service."
-  tech_challenge: "Each Same-Day order spans multiple items and delivery legs, causing naive joins to multiply costs."
+  tech_challenge: "Each Same-Day order spans multiple items and delivery stops, causing flat multi-table joins to multiply costs."
   context_unlock: "Certified Graph Metrics & Verified Query"
 
 poll:
-  prompt: "Each Same-Day order has multiple items and delivery legs. What happens when AI joins all three tables flat?"
+  prompt: "Each Same-Day order spans multiple items and delivery stops. What happens when AI combines all three tables directly?"
   options:
     - key: "A"
       text: "Duplicate rows multiply delivery fees across every item, making profit look far worse."
     - key: "B"
       text: "The database automatically deduplicates order fees before adding up delivery costs."
     - key: "C"
-      text: "The query fails with an ambiguity error unless a BI semantic layer is installed."
+      text: "The query fails with an error unless a separate BI reporting layer is installed."
     - key: "D"
       text: "Joining extra delivery legs only affects row order and leaves margin unchanged."
   correct_key: "A"
-  reveal_takeaway: "A flat 3-way join triggers a fan-trap that silently double-counts fees without any error message. Grain-locked Graph Measures calculate each cost at its own level once, revealing healthy Same-Day profitability."
+  reveal_takeaway: "Combining tables directly silently double-counts fees without any error message. Certified multi-table measures count each cost once at its own level, revealing healthy Same-Day profitability."
 
 blind:
   answer_headline: "14.2%"

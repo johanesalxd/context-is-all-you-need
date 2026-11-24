@@ -29,7 +29,7 @@ poll:
     - key: "A"
       text: "It checks Finance committee policy first and automatically excludes trial accounts."
     - key: "B"
-      text: "It rejects the wildcard text filter because marketing tags cannot be queried."
+      text: "It blocks the text search because marketing tags cannot be queried."
     - key: "C"
       text: "It matches the word Premier everywhere, letting trial signups crown the wrong channel."
     - key: "D"
@@ -40,7 +40,7 @@ poll:
 blind:
   answer_headline: "Mobile App (SGD 284.10)"
   answer_detail: "Wrong channel and -53.6% understated AOV: filtering segment_label LIKE '%Premier%' swept in 260 low-value 'Premier_Promo_Trial' mobile/web coupon orders while excluding Enterprise_Corporate B2B Premier accounts."
-  stage_delta_pill: "Wrong Channel · -53.6% AOV"
+  stage_delta_pill: "Wrong Channel · -53.6% Avg Order"
   stage_summary: "Misdirected budget—mixed promotional trial signups into Premier VIPs, crowning the wrong channel (-53.6% lower order value)."
   numeric_value: 284.1
   unit: "SGD"

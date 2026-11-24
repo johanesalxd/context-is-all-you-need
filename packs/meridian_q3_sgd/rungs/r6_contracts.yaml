@@ -21,24 +21,24 @@ stage_story:
   step_title: "How Much Carrier Credit Can We Claim?"
   backend_layer: "Step 6 · Unstructured Contract Extraction"
   audience_role: "Procurement & Legal Lead"
-  situation: "Turning to our chilled logistics carrier, ArcticHaul, Procurement digs deeper to calculate total Q3 SLA credit recoverable across qualifying chilled shipments."
+  situation: "Still on Q3 cold-chain operations—turning to our chilled carrier, ArcticHaul, Procurement digs deeper to calculate total SLA credit recoverable across qualifying shipments."
   business_goal: "Recover every dollar owed under the latest signed contract amendment."
   tech_challenge: "ERP tables still enforce legacy thresholds while the signed June amendment lives in Drive PDFs."
-  context_unlock: "Drive Connector, Object Tables & AI Extraction"
+  context_unlock: "Signed Contracts → AI-Extracted Rule Table"
 
 poll:
   prompt: "Our ERP ledger holds old 2025 SLA terms, while the signed 2026 amendment sits in a Drive PDF. What is the scalable fix?"
   options:
     - key: "A"
-      text: "Paste every full contract PDF into the AI prompt each time Finance runs a query."
+      text: "Paste every full contract PDF into the AI prompt every time Finance asks a question."
     - key: "B"
-      text: "Extract signed rules once into a compact structured overlay table for SQL to join."
+      text: "Extract signed contract rules once into a clean structured rule table the AI can reference."
     - key: "C"
       text: "Rely on the ERP table alone because billing systems always override legal PDFs."
     - key: "D"
       text: "Skip automated checks since quarterly claim caps make small breaches worthless."
   correct_key: "B"
-  reveal_takeaway: "Stuffing 40-page PDFs into every prompt wastes tokens and breaks arithmetic. Compiling signed Drive amendments once via Object Tables and AI extraction into a compact rule overlay unlocks 13.4x higher SLA recovery."
+  reveal_takeaway: "Pasting 40-page PDFs into every question slows answers and breaks arithmetic. Extracting signed amendments once into a governed rule table unlocks 13.4x higher SLA credit recovery."
 
 blind:
   answer_headline: "SGD 1,420.00 (3 breaches)"

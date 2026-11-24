@@ -27,7 +27,7 @@ stage_story:
   situation: "Delivery economics look healthy, yet an alert flags a sharp Cold-Chain margin drop. Leadership asks if the crisis is real—and who can see each country."
   business_goal: "Verify the official Q3 close and ensure country leads only see their own market."
   tech_challenge: "Nearly two hundred shadow copies and an uncertified draft sit beside the final close table."
-  context_unlock: "Certified Data Products, Auto DQ & Row-Level Security"
+  context_unlock: "Certified Data Products, Automated Quality Checks & Row-Level Security"
 
 poll:
   prompt: "With nearly two hundred look-alike backup tables in the warehouse, why did the blind AI trigger a margin panic?"
@@ -71,7 +71,7 @@ blind:
   rationale: "Scanned uncertified Oct 11 snapshot (close_batch_code = 'B26Q3_R1') amid 190 identically schemaed shadow tables."
 
 governed:
-  answer_headline: "28.4% (-15 bps YoY) · SGD 842,600.00"
+  answer_headline: "28.4% (-15 bps YoY)"
   answer_detail: "Certified Knowledge Catalog Data Product mart_coldchain_q3_r2 confirms steady 28.4% gross margin (-15 bps YoY, SGD 842,600.00 across 4 SEA markets; SGD 346,480.00 under SG RLS)."
   stage_delta_pill: "Certified Close + Role-Scoped"
   stage_summary: "Steady 28.4% margin (-15 bps YoY) from the certified Q3 close — automatically scoped to the viewer's role."

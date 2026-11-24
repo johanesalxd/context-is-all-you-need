@@ -34,11 +34,11 @@ poll:
     - key: "B"
       text: "It picks the largest total column, sweeping in sales tax plus cancelled and returned orders."
     - key: "C"
-      text: "It fails to write valid SQL syntax and stops before returning any revenue figure."
+      text: "It gets stuck on database formatting and stops before returning any revenue figure."
     - key: "D"
-      text: "It refuses to run the query until a separate BI dashboard model is published."
+      text: "It refuses to answer until a separate executive dashboard is published first."
   correct_key: "B"
-  reveal_takeaway: "AI writes clean SQL, but column names alone hide accounting rules. Adding column descriptions and schema insights stops tax and cancellations from inflating revenue (+28.3% higher without them)."
+  reveal_takeaway: "AI writes clean queries, but column names alone hide accounting rules. Adding column descriptions and schema insights stops tax and cancellations from inflating revenue (+28.3% higher without them)."
 
 blind:
   answer_headline: "SGD 1,684,200.00"

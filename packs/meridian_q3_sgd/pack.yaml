@@ -1,6 +1,6 @@
 schema_version: "2.0"
 pack_id: "meridian_q3_sgd"
-title: "Meridian Commerce · Closed Q3 Context Benchmark"
+title: "Meridian Commerce · Q3 Close Review"
 subtitle: "6-Rung Enterprise Context Progression in BigQuery & Knowledge Catalog (SGD)"
 hero_tagline: "Frontier models are table stakes—governed enterprise context is the differentiator."
 closed_period_label: "Closed Q3 (2026-07-01 to 2026-09-30)"
@@ -65,7 +65,7 @@ horizon_cards:
     title: "Knowledge Studio (Context Sets & Enrichment Agent)"
     release_badge: "Preview"
     region_availability: "US / EU multi-regions (Preview; not yet in asia-southeast1)"
-    summary: "Curates domain Context Sets and deploys the Enrichment Agent inside Knowledge Catalog to bootstrap glossary bindings, verified queries, and semantic descriptions. Kept strictly decoupled from R1–R6 production scope in asia-southeast1 until regional GA availability."
+    summary: "Automatically drafts glossary terms, column descriptions, and verified queries via the Enrichment Agent. Kept separate from Singapore production until regional GA availability."
     primitives:
       - "Knowledge Catalog"
       - "Knowledge Studio Context Sets"
@@ -74,7 +74,7 @@ horizon_cards:
     title: "Cross-Cloud Lakehouse Catalog Federation"
     release_badge: "GA"
     region_availability: "GA (Multi-region & asia-southeast1 via BigQuery / Knowledge Catalog)"
-    summary: "Federates external Iceberg and Delta lakehouse catalogs directly into Knowledge Catalog and BigQuery governance with distinct cloud-native identity delegation models: Databricks Unity Catalog via per-user OIDC (GA), Snowflake Horizon Catalog via Workload Identity Federation (GA—never per-user OIDC), and AWS Glue Data Catalog via IAM role delegation (GA)."
+    summary: "Governs external Iceberg and Delta tables across Databricks, Snowflake, and AWS Glue directly from BigQuery and Knowledge Catalog using each platform's native identity model."
     primitives:
       - "Knowledge Catalog"
       - "Databricks Unity Catalog (per-user OIDC)"

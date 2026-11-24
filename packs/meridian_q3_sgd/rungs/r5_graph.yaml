@@ -16,12 +16,12 @@ question: "Which SG Premier orders & revenue are exposed to delayed Tier-2 Batch
 
 stage_story:
   step_title: "Which VIP Orders Are Exposed to a Delay?"
-  backend_layer: "Step 5 · 4-Hop Supply-Chain Graph"
+  backend_layer: "Step 5 · 4-Step Supply-Chain Graph"
   audience_role: "Supply Chain & Customer Care"
-  situation: "Division margin is steady, but Ops flags one delayed upstream chilled batch. Supply Chain digs deeper to find every exposed Singapore VIP order."
-  business_goal: "Proactively contact and protect every affected Premier VIP customer before delivery."
+  situation: "Division margin is steady, yet a Q3 audit flags one delayed upstream chilled batch. Supply Chain digs deeper to trace every exposed Singapore VIP order."
+  business_goal: "Identify every affected Premier VIP order for proactive outreach and customer care."
   tech_challenge: "Renamed warehouse lots hide downstream orders across four supply-chain handoffs."
-  context_unlock: "BigQuery Property Graph (4-Hop Lineage)"
+  context_unlock: "BigQuery Property Graph (4-Step Lineage)"
 
 poll:
   prompt: "A delayed supplier batch splits into renamed warehouse lots across four handoffs. How does a keyword search fare?"
@@ -31,11 +31,11 @@ poll:
     - key: "B"
       text: "It traces all four warehouse handoffs automatically using standard text pattern matching."
     - key: "C"
-      text: "It requires exporting all BigQuery tables into a separate graph engine before querying."
+      text: "It must export all warehouse tables into a separate graph tool before checking."
     - key: "D"
       text: "It flags every Singapore order regardless of whether the customer holds VIP status."
   correct_key: "A"
-  reveal_takeaway: "Keyword matching breaks whenever warehouse lots are relabeled downstream. Zero-ETL BigQuery Property Graph traverses all four supply-chain hops directly in place, catching all 38 exposed VIP orders instead of missing 79% of the risk."
+  reveal_takeaway: "Keyword matching breaks whenever warehouse lots are relabeled downstream. Built-in BigQuery Property Graph traces all four supply-chain steps directly in place, catching all 38 exposed VIP orders instead of missing 79% of the risk."
 
 blind:
   answer_headline: "SGD 4,120.00 (8 orders)"
@@ -72,10 +72,10 @@ blind:
   rationale: "Drops Tier-2 sku_lot_allocations multi-lot bridge and misapplies legacy segment_label filter."
 
 governed:
-  answer_headline: "SGD 19,380.00 (38 SG Premier orders · SGD 510.00 AOV)"
+  answer_headline: "SGD 19,380.00 (38 VIP orders)"
   answer_detail: "4-hop ISO GQL GRAPH_TABLE traversal from ColdChainBatch '#LN-409' through SkuLotAllocation, OrderLine, CustomerOrder, and Customer['PRM_HV'] identifies all 38 SG Premier orders totaling SGD 19,380.00."
   stage_delta_pill: "4-Hop Supply Lineage"
-  stage_summary: "Full 4-hop supply-chain blast radius—traces every affected warehouse lot to all 38 exposed VIP orders."
+  stage_summary: "Full 4-step supply-chain blast radius — traces every affected warehouse lot to 38 exposed Premier VIP orders (SGD 510 avg order)."
   numeric_value: 19380.0
   unit: "SGD"
   query_language: "SQL+GQL"
@@ -128,7 +128,7 @@ xray_summary:
     - "ISO GQL GRAPH_TABLE Pattern Matching (GA · asia-southeast1)"
     - "Knowledge Catalog Business Glossary (GA · asia-southeast1)"
     - "Gemini PayGo Inference (GA · global endpoint)"
-  negative_control_assertion: "Direct string-pattern join misses opaque warehouse lots LOT-SG-8841 and LOT-SG-8842 (80% revenue gap)."
+  negative_control_assertion: "Direct string-pattern join misses opaque warehouse lots LOT-SG-8841 and LOT-SG-8842 (79% revenue gap)."
 
 grading:
   target_value: 19380.0

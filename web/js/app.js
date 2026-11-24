@@ -1359,14 +1359,13 @@
           attrs: { "aria-label": "Beat 4b Identity and Row-Level Security" }
         },
           el("div", { className: "identity-header" },
-            el("span", { className: "identity-title", text: "Beat 4b · Switch Identity" }),
+            el("span", { className: "identity-title", text: "View as:" }),
             segGroup
           ),
           variant
             ? el("div", { className: "identity-outcome-box" },
                 el("div", { className: "identity-outcome-head" },
-                  el("strong", { className: "identity-outcome-kpi", text: variant.answer_headline }),
-                  el("span", { className: "badge badge-ga badge-mono", text: `Scoped Metric: ${variantMetric}` })
+                  el("strong", { className: "identity-outcome-kpi", text: variant.answer_headline })
                 ),
                 el("p", { className: "identity-outcome-detail", text: scopeLine })
               )
@@ -1480,8 +1479,7 @@
           attrs: { "aria-label": "Two perspectives on stage" }
         },
           el("div", { className: "overview-card-head" },
-            el("h2", { className: "overview-card-title", text: "Two Perspectives on Stage" }),
-            el("span", { className: "badge badge-ga", text: "Zero Spoilers" })
+            el("h2", { className: "overview-card-title", text: "Two Perspectives on Stage" })
           ),
           el("div", { className: "overview-perspectives" },
             ...ov.perspectives.map((persp) =>
@@ -1531,8 +1529,7 @@
           attrs: { "aria-label": "Live experiment design" }
         },
           el("div", { className: "overview-card-head" },
-            el("h2", { className: "overview-card-title", text: "The Live Experiment" }),
-            el("span", { className: "badge badge-ga", text: "Zero Spoilers" })
+            el("h2", { className: "overview-card-title", text: "The Live Experiment" })
           ),
           el("div", { className: "overview-control-box" },
             el("span", { className: "overview-control-label", text: "Fixed Control" }),
@@ -1690,17 +1687,17 @@
         );
       }
 
+      const isStageMode = state.mode === "stage";
+      const dataRegion = (state.health && state.health.bq_location) || bundle.region || "asia-southeast1";
       const grid = el("div", { className: "horizon-grid" });
-      const cardTitles = [];
       for (const card of bundle.horizon_cards) {
-        if (card && card.title) {
-          cardTitles.push(card.title);
-        }
-        const primList = el("ul", { className: "primitives-list" },
-          ...(Array.isArray(card.primitives) ? card.primitives : []).map((p) =>
-            el("li", { className: "primitive-chip", text: p })
-          )
-        );
+        const primList = !isStageMode
+          ? el("ul", { className: "primitives-list" },
+              ...(Array.isArray(card.primitives) ? card.primitives : []).map((p) =>
+                el("li", { className: "primitive-chip", text: p })
+              )
+            )
+          : null;
         grid.appendChild(
           el("article", {
             className: "horizon-card",
@@ -1710,18 +1707,18 @@
               el("h2", { className: "horizon-card-title", text: card.title }),
               el("span", { className: stageBadgeClass(card.release_badge), text: card.release_badge })
             ),
-            el("div", { className: "release-badges-row" },
-              el("span", { className: "badge", text: card.region_availability })
-            ),
+            !isStageMode
+              ? el("div", { className: "release-badges-row" },
+                  el("span", { className: "badge", text: card.region_availability })
+                )
+              : null,
             el("p", { className: "horizon-card-summary", text: card.summary }),
             primList
           )
         );
       }
 
-      const subtitleText = cardTitles.length > 0
-        ? `Rungs 1–6 execute strictly within ${bundle.region}. Horizon cards rendered dynamically from ${bundle.pack_id}: ${cardTitles.join(" · ")}.`
-        : `Rungs 1–6 execute strictly within ${bundle.region}. Architectural capabilities below are decoupled from the live rung scope.`;
+      const subtitleText = `Rungs 1–6 execute strictly within ${dataRegion}. Next-step capabilities beyond the live demo:`;
 
       return el("section", {
         className: `horizon-showcase${closingSection ? " has-closing-takeaways" : ""}`,
@@ -1755,55 +1752,99 @@
         { key: "governed", label: "Governed Arm (Catalog + Contracts)", outcome: rung.governed, emp: govEmp }
       ];
 
-      return el("div", { className: "empirical-cards-grid" },
-        ...arms.map(({ key, label, outcome, emp }) =>
-          el("div", { className: `empirical-arm-card is-${key}` },
-            el("div", { className: "outcome-card-head" },
-              el("strong", { className: "outcome-role-title", text: label }),
+      let honestyCaption = null;
+      if (blindEmp && govEmp) {
+        const passRange = `${blindEmp.pass_count}/${blindEmp.runs} → ${govEmp.pass_count}/${govEmp.runs}`;
+        const hasTokens = blindEmp.median_tokens != null && govEmp.median_tokens != null;
+        const blindTok = hasTokens ? Number(blindEmp.median_tokens) : NaN;
+        const govTok = hasTokens ? Number(govEmp.median_tokens) : NaN;
+        const improved = govEmp.pass_count > blindEmp.pass_count;
+        const accPhrase = improved
+          ? `lift accuracy from ${passRange}`
+          : `recorded accuracy ${passRange}`;
+        if (Number.isFinite(blindTok) && Number.isFinite(govTok) && govTok > blindTok) {
+          honestyCaption = `Governed spends extra catalog-lookup tokens (${formatNumber(govTok)} vs. ${formatNumber(blindTok)} median) to ${accPhrase}.`;
+        } else if (Number.isFinite(blindTok) && Number.isFinite(govTok) && govTok < blindTok) {
+          honestyCaption = `Governed uses fewer tokens (${formatNumber(govTok)} vs. ${formatNumber(blindTok)} median) with ${improved ? `accuracy lifted ${passRange}` : `accuracy ${passRange}`}.`;
+        } else {
+          honestyCaption = improved
+            ? `Governed lifts live empirical accuracy from ${passRange}.`
+            : `Live empirical accuracy: ${passRange}.`;
+        }
+      }
+
+      return el("div", { className: "empirical-summary-block" },
+        el("div", { className: "empirical-cards-grid" },
+          ...arms.map(({ key, label, outcome, emp }) =>
+            el("div", { className: `empirical-arm-card is-${key}` },
+              el("div", { className: "outcome-card-head" },
+                el("strong", { className: "outcome-role-title", text: label }),
+                emp
+                  ? el("span", {
+                      className: emp.pass_count === emp.runs ? "badge badge-ga badge-mono" : "badge badge-tier-3 badge-mono",
+                      text: `Empirical N=${emp.runs}: ${emp.pass_count}/${emp.runs} · Target: ${outcome.eval_pass_count}/${outcome.eval_total_runs}`
+                    })
+                  : el("span", {
+                      className: "badge badge-mono",
+                      text: `Target: ${outcome.eval_pass_count}/${outcome.eval_total_runs}`
+                    })
+              ),
               emp
-                ? el("span", {
-                    className: emp.pass_count === emp.runs ? "badge badge-ga badge-mono" : "badge badge-tier-3 badge-mono",
-                    text: `Empirical N=${emp.runs}: ${emp.pass_count}/${emp.runs} · Target: ${outcome.eval_pass_count}/${outcome.eval_total_runs}`
-                  })
-                : el("span", {
-                    className: "badge badge-mono",
-                    text: `Target: ${outcome.eval_pass_count}/${outcome.eval_total_runs}`
-                  })
-            ),
-            emp
-              ? [
-                  el("div", { className: "empirical-meta-row" },
-                    el("span", { className: "badge badge-mono", text: `${emp.model_id} (${emp.model_location})` }),
-                    el("span", { className: "badge badge-mono", text: `Median Tokens: ${formatNumber(emp.median_tokens)}` }),
-                    el("span", { className: "badge badge-mono", text: `Queries: ${emp.median_exploratory_queries}` }),
-                    el("span", { className: "badge badge-mono", text: `Retries: ${emp.median_error_retries}` }),
-                    el("span", { className: "badge badge-mono", text: `Latency: ${Math.round(emp.median_latency_ms)} ms` })
-                  ),
-                  Array.isArray(emp.observed_signals) && emp.observed_signals.length > 0
-                    ? el("div", { className: "signal-chips" },
-                        ...emp.observed_signals.map((sig) =>
-                          el("span", { className: "badge badge-mono", text: sig })
+                ? [
+                    el("div", { className: "empirical-meta-row" },
+                      el("span", { className: "badge badge-mono", text: `${emp.model_id} (${emp.model_location})` }),
+                      el("span", { className: "badge badge-mono", text: `Median Tokens: ${formatNumber(emp.median_tokens)}` }),
+                      el("span", { className: "badge badge-mono", text: `Queries: ${emp.median_exploratory_queries}` }),
+                      el("span", { className: "badge badge-mono", text: `Retries: ${emp.median_error_retries}` }),
+                      el("span", { className: "badge badge-mono", text: `Latency: ${Math.round(emp.median_latency_ms)} ms` })
+                    ),
+                    Array.isArray(emp.observed_signals) && emp.observed_signals.length > 0
+                      ? el("div", { className: "signal-chips" },
+                          ...emp.observed_signals.map((sig) =>
+                            el("span", { className: "badge badge-mono", text: sig })
+                          )
                         )
-                      )
-                    : null,
-                  emp.sample_sql_or_gql
-                    ? el("div", { className: "code-pane" },
-                        el("div", { className: "code-pane-head" },
-                          el("span", { className: "badge badge-mono", text: "Median-Token Representative SQL / GQL" }),
-                          el("button", {
-                            className: "btn",
-                            text: state.copiedPane === `${copyKeyPrefix}_${key}_emp` ? "Copied" : "Copy",
-                            attrs: { type: "button" },
-                            onClick: () => copyTextToClipboard(`${copyKeyPrefix}_${key}_emp`, emp.sample_sql_or_gql)
-                          })
-                        ),
-                        buildHighlightedCodeNodes(emp.sample_sql_or_gql)
-                      )
-                    : null
-                ]
-              : el("p", { className: "outcome-detail", text: "Empirical runs not recorded for this arm." })
+                      : null,
+                    copyKeyPrefix !== "drawer" && emp.sample_sql_or_gql
+                      ? el("div", { className: "code-pane" },
+                          el("div", { className: "code-pane-head" },
+                            el("span", { className: "badge badge-mono", text: "Median-Token Representative SQL / GQL" }),
+                            el("button", {
+                              className: "btn",
+                              text: state.copiedPane === `${copyKeyPrefix}_${key}_emp` ? "Copied" : "Copy",
+                              attrs: { type: "button" },
+                              onClick: () => copyTextToClipboard(`${copyKeyPrefix}_${key}_emp`, emp.sample_sql_or_gql)
+                            })
+                          ),
+                          buildHighlightedCodeNodes(emp.sample_sql_or_gql)
+                        )
+                      : null
+                  ]
+                : el("p", { className: "outcome-detail", text: "Empirical runs not recorded for this arm." })
+            )
           )
-        )
+        ),
+        honestyCaption
+          ? el("p", { className: "xray-honesty-caption", text: honestyCaption })
+          : null
+      );
+    }
+
+    function buildLiveResultBanner() {
+      if (!state.liveResult) {
+        return null;
+      }
+      return el("div", {
+        className: `live-result-banner is-${state.liveResult.kind}`,
+        attrs: { role: "status", "aria-live": "polite" }
+      },
+        el("span", { text: state.liveResult.message }),
+        el("button", {
+          className: "btn",
+          text: "Dismiss",
+          attrs: { type: "button" },
+          onClick: () => setState({ liveResult: null })
+        })
       );
     }
 
@@ -1816,6 +1857,7 @@
         return null;
       }
       const rung = activeRung();
+      const isFileProtocol = window.location.protocol === "file:";
 
       const backdrop = el("div", {
         className: "xray-drawer-backdrop",
@@ -1848,6 +1890,21 @@
               })
             ),
             el("div", { className: "stage-actions" },
+              !isFileProtocol
+                ? el("button", {
+                    className: "btn btn-primary",
+                    text: state.liveLoading ? "Running..." : "▶ Verify Live BQ",
+                    attrs: {
+                      type: "button",
+                      disabled: state.liveLoading ? true : null,
+                      title: "Execute governed BigQuery / Property Graph / RLS query via /api/run-rung"
+                    },
+                    onClick: () => {
+                      state.liveTargetMode = "governed";
+                      handleRunLiveQuery();
+                    }
+                  })
+                : null,
               el("button", {
                 className: "btn btn-accent",
                 text: "Open Full Workbench [W] →",
@@ -1863,8 +1920,15 @@
             )
           ),
           el("div", { className: "xray-drawer-body" },
+            buildLiveResultBanner(),
             el("section", { className: "xray-drawer-section xray-bridge-section", attrs: { "aria-label": "Business Context to Technical Proof Bridge" } },
-              el("h3", { className: "progression-title", text: "Business Context → Technical Proof" }),
+              el("div", { className: "xray-bridge-head" },
+                el("h3", { className: "progression-title", text: "Business Context → Technical Proof" }),
+                el("span", {
+                  className: "badge badge-mono xray-tier-pill",
+                  text: `${rung.blind.trust_tier} → ${rung.governed.trust_tier}`
+                })
+              ),
               el("div", { className: "xray-bridge-grid" },
                 el("div", { className: "xray-bridge-card is-blind" },
                   el("div", { className: "xray-bridge-card-head" },
@@ -1905,22 +1969,22 @@
                     className: stageBadgeClass(rb.stage),
                     text: `${rb.capability} · ${rb.stage} (${rb.region_scope})`
                   })
-                ),
-                ...rung.xray_summary.gcp_primitives.map((prim) =>
-                  el("span", { className: "primitive-chip", text: prim })
                 )
               ),
-              el("div", { className: "code-pane" },
-                el("div", { className: "code-pane-head" },
-                  el("span", { className: "badge badge-mono", text: "Injected Context Payload" }),
-                  el("button", {
-                    className: "btn",
-                    text: state.copiedPane === "drawer_context" ? "Copied" : "Copy Payload",
-                    attrs: { type: "button" },
-                    onClick: () => copyTextToClipboard("drawer_context", prettyJsonOrText(rung.governed.context_payload))
-                  })
-                ),
-                el("pre", { className: "code-pre", text: prettyJsonOrText(rung.governed.context_payload) })
+              el("details", { className: "xray-payload-details" },
+                el("summary", { text: "Inspect raw governance payload (JSON)" }),
+                el("div", { className: "code-pane" },
+                  el("div", { className: "code-pane-head" },
+                    el("span", { className: "badge badge-mono", text: "Injected Context Payload" }),
+                    el("button", {
+                      className: "btn",
+                      text: state.copiedPane === "drawer_context" ? "Copied" : "Copy Payload",
+                      attrs: { type: "button" },
+                      onClick: () => copyTextToClipboard("drawer_context", prettyJsonOrText(rung.governed.context_payload))
+                    })
+                  ),
+                  el("pre", { className: "code-pre", text: prettyJsonOrText(rung.governed.context_payload) })
+                )
               ),
               el("div", { className: "neg-control-box" },
                 el("h4", { className: "neg-control-title", text: "Negative Control Assertion" }),
@@ -1965,7 +2029,8 @@
             el("section", { className: "xray-drawer-section", attrs: { "aria-label": "Empirical N=5 Telemetry Summary" } },
               el("h3", { className: "progression-title", text: "3. Empirical N=5 Telemetry Summary" }),
               buildEmpiricalSummaryBlock(rung, "drawer")
-            )
+            ),
+            rung.identity_variants ? buildIdentitySwitchPanel(rung) : null
           )
         )
       );
@@ -2013,7 +2078,6 @@
             el("div", { className: "brand-title-row" },
               el("p", { className: "brand-title", text: bundle.title }),
               el("span", { className: "badge badge-mono", text: `${bundle.closed_period_label} · ${bundle.region}` }),
-              buildRegionalHonestyBadge(),
               el("span", { className: "brand-tagline", text: bundle.hero_tagline })
             )
           ),
@@ -2047,28 +2111,13 @@
         el("div", { className: "stage-topbar-row stage-topbar-nav" },
           buildRungStepper(),
           el("div", { className: "stage-actions" },
-            !state.isOverview ? beatToggle : null,
-            !state.isOverview
+            !isNonRung() ? beatToggle : null,
+            !isNonRung()
               ? el("button", {
                   className: "btn",
-                  attrs: { type: "button", title: "Cycle Beat Focus (Key B)", disabled: isNonRung() ? true : null },
+                  attrs: { type: "button", title: "Cycle Beat Focus (Key B)" },
                   onClick: () => cycleBeatB()
                 }, "Focus ", el("span", { className: "kbd-hint", text: "B" }))
-              : null,
-            window.location.protocol !== "file:" && !isNonRung()
-              ? el("button", {
-                  className: "btn btn-primary",
-                  text: state.liveLoading ? "Running..." : "▶ Verify Live BQ",
-                  attrs: {
-                    type: "button",
-                    disabled: state.liveLoading ? true : null,
-                    title: "Execute governed BigQuery / Property Graph / RLS query via /api/run-rung"
-                  },
-                  onClick: () => {
-                    state.liveTargetMode = "governed";
-                    handleRunLiveQuery();
-                  }
-                })
               : null
           )
         )
@@ -2151,11 +2200,7 @@
         },
           el("div", { className: "question-meta-row" },
             el("div", { className: "question-eyebrow" },
-              el("span", { className: "badge badge-mono", text: rung.short_label }),
-              rung.difficulty_tier
-                ? el("span", { className: difficultyBadgeClass(rung.difficulty_tier), text: rung.difficulty_tier })
-                : null,
-              el("span", { className: "badge", text: (story && story.backend_layer) || rung.pyramid_layer })
+              el("span", { className: "badge badge-mono", text: rung.short_label })
             )
           ),
           el("h1", { className: "question-headline", text: heroTitle }),
@@ -2170,10 +2215,10 @@
             storyStrip,
             questionHero,
             el("div", { className: "beat-banner" },
-              el("span", { text: "Beat 1 of 3 · Business Question presented. Step forward to inspect the Blind Agent Trap." }),
+              el("span", { text: "Ready to compare how AI answers without vs. with enterprise context." }),
               el("button", {
                 className: "btn btn-primary",
-                text: "Reveal Blind Agent Trap →",
+                text: "See the answer without context →",
                 attrs: { type: "button" },
                 onClick: () => stepForward()
               })
@@ -2215,7 +2260,7 @@
               },
                 el("div", { className: "veil-placeholder" },
                   el("span", { className: "outcome-role-title", text: "Governed Enterprise Context" }),
-                  el("p", { className: "outcome-detail", text: "Beat 2 of 3 · Blind Agent Trap active. Apply governed metadata, contracts, and policy rules next." }),
+                  el("p", { className: "outcome-detail", text: "Now add business context." }),
                   el("button", {
                     className: "btn btn-primary",
                     text: "Apply Governed Context [Space] →",
@@ -2233,7 +2278,12 @@
                     el("div", { className: "outcome-label-group" },
                       el("span", { className: "outcome-role-title", text: "Governed Enterprise Context" })
                     ),
-                    el("span", { className: "stage-card-subtitle is-governed", text: "With Context · Verified" })
+                    el("span", {
+                      className: "stage-card-subtitle is-governed",
+                      text: rung.governed.trust_tier === "TIER_1_VERIFIED_OR_COMPILED"
+                        ? "With Context · Verified"
+                        : "With Context · Grounded"
+                    })
                   ),
                   el("p", { className: "outcome-kpi", text: rung.governed.answer_headline }),
                   rung.governed.stage_delta_pill
@@ -2273,20 +2323,7 @@
         }
       }
 
-      const stageLiveBanner = state.liveResult
-        ? el("div", {
-            className: `live-result-banner is-${state.liveResult.kind}`,
-            attrs: { role: "status", "aria-live": "polite" }
-          },
-            el("span", { text: state.liveResult.message }),
-            el("button", {
-              className: "btn",
-              text: "Dismiss",
-              attrs: { type: "button" },
-              onClick: () => setState({ liveResult: null })
-            })
-          )
-        : null;
+      const stageLiveBanner = state.stageXrayOpen ? null : buildLiveResultBanner();
       const canvas = el("main", { className: "stage-canvas" }, stageLiveBanner, canvasChildren);
 
       let footerLeft;
@@ -2309,22 +2346,32 @@
         );
       }
 
-      const shortcutItems = state.isOverview
-        ? [
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Start R1"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
-          ]
-        : [
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Advance"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "P" }), "Poll"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "X" }), "X-Ray"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "B" }), "Focus"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
-            el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
-          ];
+      let shortcutItems;
+      if (state.isOverview) {
+        shortcutItems = [
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Start R1"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
+        ];
+      } else if (state.isHorizon) {
+        shortcutItems = [
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "←" }), "Back"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
+        ];
+      } else {
+        shortcutItems = [
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "Space/→" }), "Advance"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "P" }), "Poll"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "X" }), "X-Ray"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "B" }), "Focus"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "W" }), "Workbench"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "T" }), "Theme"),
+          el("span", { className: "shortcut-item" }, el("span", { className: "kbd-hint", text: "?" }), "Guide")
+        ];
+      }
 
       const prevDisabled = state.isOverview || (!hasOverview && !state.isHorizon && state.rungIndex === 0 && state.beat === "question");
 
@@ -3240,20 +3287,7 @@
         )
       );
 
-      const liveBanner = state.liveResult
-        ? el("div", {
-            className: `live-result-banner is-${state.liveResult.kind}`,
-            attrs: { role: "status", "aria-live": "polite" }
-          },
-            el("span", { text: state.liveResult.message }),
-            el("button", {
-              className: "btn",
-              text: "Dismiss",
-              attrs: { type: "button" },
-              onClick: () => setState({ liveResult: null })
-            })
-          )
-        : null;
+      const liveBanner = buildLiveResultBanner();
 
       let mainSection;
       if (state.isHorizon) {
@@ -3623,7 +3657,7 @@
         },
         {
           term: "Tokens (in X-Ray [X])",
-          desc: "Total prompt, schema lookup, and response text processed by the AI—lower wasted exploration means faster, cheaper answers."
+          desc: "Total prompt, catalog lookup, and response text processed—governed runs may spend extra catalog-lookup tokens in exchange for higher accuracy."
         },
         {
           term: "Exploratory Queries & Retries (in X-Ray [X])",
