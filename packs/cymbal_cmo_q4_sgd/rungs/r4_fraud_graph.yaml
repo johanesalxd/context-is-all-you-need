@@ -1,0 +1,162 @@
+id: "r4_fraud_graph"
+rung_num: 4
+short_label: "R4 · Fraud Graph"
+title: "4-Hop BigQuery Property Graph (ISO GQL)"
+pyramid_layer: "Layer 4 · BigQuery Property Graph (CREATE PROPERTY GRAPH + ISO GQL, GA)"
+difficulty_tier: "Medium"
+release_badges:
+  - capability: "BigQuery Property Graph (ISO GQL)"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Verified Query #VQ-M4"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
+
+question: "Are linked accounts gaming Singapore promo codes and driving those heavy returns?"
+
+stage_story:
+  step_title: "Is a Coordinated Ring Gaming Singapore Promo Codes?"
+  backend_layer: "Step 4 · 4-Hop Property Graph (ISO GQL)"
+  audience_role: "Chief Marketing Officer & Fraud Lead"
+  situation: "Step 3 isolated the loss to Singapore Paid Social. Next, Marketing checks if linked burner accounts are abusing trial coupons."
+  business_goal: "Quantify the full promo-fraud ring so spoofed devices can be blocked."
+  tech_challenge: "Throwaway emails appear unique in flat SQL while sharing devices, cards, and addresses."
+  context_unlock: "BigQuery Property Graph (4-Hop ISO GQL)"
+
+poll:
+  prompt: "A fraud ring rotates throwaway email addresses on every coupon order while sharing 28 devices and prepaid cards. What does a flat email check catch?"
+  options:
+    - key: "A"
+      text: "It uncovers all 640 linked burner accounts using approximate email matching."
+    - key: "B"
+      text: "It catches only exact repeat emails—missing 97% of the coordinated promo ring."
+    - key: "C"
+      text: "It automatically blocks the shared payment cards inside the SQL query."
+    - key: "D"
+      text: "It forces the warehouse to export tables into an external graph database first."
+  correct_key: "B"
+  reveal_takeaway: "Exact email matching sees only 14 repeat emails (SGD 2,800). BigQuery Property Graph traverses 4 hops in place (ClickDevice -> Account -> PromoCode -> PaymentCard -> Address) to bust 640 burners and SGD 96,000 in coupons (34x more abuse)."
+
+blind:
+  answer_headline: "SGD 2,800.00 (14 duplicate emails)"
+  answer_detail: "Missed 97% of abuse: flat SQL checked exact duplicate customer_email strings in cymbal_dw.promo_redemptions_raw, flagging only 14 accounts (SGD 2,800.00) while missing 640 unique burner emails."
+  stage_delta_pill: "Missed 97% · 14 Emails Only"
+  stage_summary: "Matched exact duplicate emails only (14 accounts, SGD 2.8K)—concluding there was no organized promo ring."
+  numeric_value: 2800.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Flat exact-email GROUP BY (`cymbal_dw.promo_redemptions_raw`, no entity graph)"
+  context_payload: |
+    No BigQuery Property Graph topology provided.
+    Agent grouped strictly on exact customer_email HAVING COUNT(*) > 1.
+  sql_or_gql: |
+    WITH dup_emails AS (
+      SELECT
+        customer_email,
+        SUM(coupon_discount_sgd) AS coupon_sgd
+      FROM `${PROJECT_ID}.cymbal_dw.promo_redemptions_raw`
+      WHERE country_code = 'SG'
+        AND promo_redeemed = TRUE
+      GROUP BY customer_email
+      HAVING COUNT(*) > 1
+    )
+    SELECT
+      ROUND(SUM(coupon_sgd), 2) AS coupon_sgd,
+      COUNT(DISTINCT customer_email) AS duplicate_emails
+    FROM dup_emails
+  tokens_used: 3300
+  exploratory_queries: 5
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Flat email string matching missed 640 single-use burner accounts connected via devices, cards, and addresses."
+
+governed:
+  answer_headline: "SGD 96,000.00 (640 accounts · 28 devices · 78% returned)"
+  answer_detail: "4-hop ISO GQL GRAPH_TABLE traversal over cymbal_fraud_graph (ClickDevice -> Account -> PromoCode -> PaymentCard -> Address) exposes 28 spoofed devices driving 640 burner accounts, SGD 96,000.00 in stacked coupons (34x), and a 78% return rate."
+  stage_delta_pill: "34x Abuse · 4-Hop Graph"
+  stage_summary: "4-hop graph traversal busted 28 spoofed devices driving 640 burner accounts, SGD 96K stacked coupons, and 78% returns."
+  numeric_value: 96000.0
+  unit: "SGD"
+  query_language: "SQL+GQL"
+  context_mechanism: "BigQuery Property Graph 4-Hop ISO GQL (`GRAPH_TABLE` over `cymbal_fraud_graph`)"
+  context_payload: |
+    {
+      "property_graph": "${PROJECT_ID}.cymbal_commerce.cymbal_fraud_graph",
+      "traversal": "(ClickDevice)-[:SPAWNED]->(Account)-[:REDEEMED]->(PromoCode), (Account)-[:PAID_WITH]->(PaymentCard)-[:SHIPS_TO]->(Address)",
+      "verified_query": "#VQ-M4",
+      "ring_threshold": "COUNT(DISTINCT account_id) > 5"
+    }
+  sql_or_gql: |
+    WITH ring_redemptions AS (
+      SELECT DISTINCT
+        device_id,
+        account_id,
+        promo_id,
+        coupon_sgd,
+        is_returned
+      FROM GRAPH_TABLE(
+        `${PROJECT_ID}.cymbal_commerce.cymbal_fraud_graph`
+        MATCH
+          (d:ClickDevice)-[:SPAWNED]->(a:Account)-[:REDEEMED]->(p:PromoCode),
+          (a)-[:PAID_WITH]->(c:PaymentCard)-[:SHIPS_TO]->(addr:Address)
+        FILTER a.country_code = 'SG'
+        RETURN
+          d.device_id AS device_id,
+          a.account_id AS account_id,
+          p.promo_id AS promo_id,
+          p.coupon_sgd AS coupon_sgd,
+          a.is_returned AS is_returned
+      )
+    ),
+    device_rings AS (
+      SELECT
+        device_id,
+        COUNT(DISTINCT account_id) AS burner_accounts,
+        ROUND(SUM(coupon_sgd), 2) AS stacked_coupons_sgd,
+        COUNT(DISTINCT IF(is_returned, account_id, NULL)) AS returned_accounts
+      FROM ring_redemptions
+      GROUP BY device_id
+      HAVING COUNT(DISTINCT account_id) > 5
+    )
+    SELECT
+      ROUND(SUM(stacked_coupons_sgd), 2) AS stacked_coupons_sgd,
+      SUM(burner_accounts) AS burner_accounts,
+      COUNT(*) AS spoofed_devices,
+      ROUND(100.0 * SUM(returned_accounts) / NULLIF(SUM(burner_accounts), 0), 0) AS return_pct
+    FROM device_rings
+  tokens_used: 670
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Deterministic 4-hop ISO GQL traversal over cymbal_fraud_graph using COUNT(DISTINCT) deduplication (5/5 pass)."
+
+xray_summary:
+  context_added: "BigQuery Property Graph ${PROJECT_ID}.cymbal_commerce.cymbal_fraud_graph across 5 node tables and 4 edge tables in asia-southeast1, queried via ISO GQL GRAPH_TABLE."
+  gcp_primitives:
+    - "BigQuery Property Graph (GA · asia-southeast1)"
+    - "ISO GQL GRAPH_TABLE Pattern Matching (GA · asia-southeast1)"
+    - "Verified Query Template #VQ-M4 (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "Flat email deduplication over cymbal_dw.promo_redemptions_raw detects only 14 accounts / SGD 2,800.00 (97% blind spot)."
+
+grading:
+  target_value: 96000.0
+  tolerance: 0.01
+  unit: "SGD"
+  secondary_numerics:
+    - name: "burner_accounts"
+      value: 640
+      tolerance: 0
+    - name: "spoofed_devices"
+      value: 28
+      tolerance: 0
+    - name: "return_pct"
+      value: 78.0
+      tolerance: 0.5

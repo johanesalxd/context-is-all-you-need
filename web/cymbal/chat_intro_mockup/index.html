@@ -1,0 +1,2046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Chat - Cymbal Commerce</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2300AC47' d='M19 3H5c-1.1 0-2 .9-2 2v14l4-4h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z'/%3E%3C/svg%3E" />
+  <style>
+    :root {
+      --font-sans: 'Google Sans Flex', 'Google Sans', 'Roboto', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      --shell-bg: #f8fafd;
+      --surface: #ffffff;
+      --search-bg: #e9eef6;
+      --search-bg-focus: #ffffff;
+      --pill-hover: #edf2fa;
+      --active-row: #eaf1fb;
+      --active-nav: #d3e3fd;
+      --on-active-nav: #041e49;
+      --text-primary: #1f1f1f;
+      --text-secondary: #444746;
+      --text-muted: #5f6368;
+      --border-subtle: #e1e3e1;
+      --border-light: #eef0f3;
+      --blue-primary: #0b57d0;
+      --blue-bubble: #d3e3fd;
+      --blue-bubble-text: #041e49;
+      --incoming-bubble: #f0f4f9;
+      --external-bg: #fef7e0;
+      --external-fg: #935000;
+      --external-border: #f5d68a;
+      --green-active: #1e8e3e;
+      --red-alert: #d93025;
+      --shadow-fab: 0 1px 3px 0 rgba(60,64,67,0.22), 0 4px 8px 3px rgba(60,64,67,0.10);
+      --shadow-popover: 0 4px 20px rgba(0,0,0,0.14);
+      --shadow-toast: 0 8px 28px rgba(0,0,0,0.18);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--shell-bg);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input { font-family: inherit; color: inherit; }
+    button { background: none; border: none; padding: 0; cursor: pointer; }
+
+    /* ======================== APP SHELL ======================== */
+    .gc-app {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+      background: var(--shell-bg);
+      overflow: hidden;
+    }
+
+    /* ======================== TOP BAR (64px) ======================== */
+    .gc-header {
+      height: 64px;
+      padding: 8px 14px 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      background: var(--shell-bg);
+      position: relative;
+      z-index: 30;
+    }
+
+    .gc-header-left {
+      width: 222px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .gc-icon-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      transition: background-color 140ms ease;
+      flex-shrink: 0;
+    }
+    .gc-icon-btn:hover { background: rgba(68, 71, 70, 0.08); }
+
+    .gc-logo-wrap {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding-left: 2px;
+    }
+
+    .gc-logo-text {
+      font-size: 21px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      letter-spacing: -0.02em;
+    }
+
+    .gc-search-wrap {
+      flex: 1 1 auto;
+      max-width: 560px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .gc-search-bar {
+      flex: 1 1 auto;
+      height: 46px;
+      background: var(--search-bg);
+      border-radius: 24px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid transparent;
+      transition: background-color 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .gc-search-bar:focus-within {
+      background: var(--surface);
+      border-color: #d3e3fd;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    }
+
+    .gc-search-input {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 14.5px;
+      color: var(--text-primary);
+    }
+    .gc-search-input::placeholder { color: var(--text-muted); }
+
+    .gc-ask-gemini-btn {
+      height: 38px;
+      padding: 0 16px 0 12px;
+      border-radius: 20px;
+      background: var(--surface);
+      border: 1px solid #dadce0;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      transition: background-color 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+    }
+    .gc-ask-gemini-btn:hover {
+      background: #f0f6ff;
+      border-color: #a8c7fa;
+      box-shadow: 0 2px 6px rgba(11, 87, 208, 0.14);
+    }
+
+    .gc-header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .gc-status-pill {
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 18px;
+      background: var(--search-bg);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-right: 4px;
+      transition: background-color 140ms ease;
+    }
+    .gc-status-pill:hover { background: #dfe6f2; }
+
+    .gc-status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green-active);
+      flex-shrink: 0;
+    }
+    .gc-status-dot.is-dnd { background: var(--red-alert); }
+    .gc-status-dot.is-away { background: transparent; border: 2px solid #5f6368; }
+
+    .gc-account-pill {
+      height: 44px;
+      padding: 4px 6px 4px 12px;
+      border-radius: 22px;
+      background: var(--surface);
+      border: 1px solid #dadce0;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: 4px;
+      transition: background-color 140ms ease, box-shadow 140ms ease;
+    }
+    .gc-account-pill:hover {
+      background: #f8f9fa;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .gc-company-mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #202124;
+      letter-spacing: -0.01em;
+    }
+
+    .gc-avatar-sm {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      color: #ffffff;
+      font-size: 12.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.02em;
+      flex-shrink: 0;
+    }
+
+    /* ======================== WORKSPACE BODY ======================== */
+    .gc-body {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      padding: 0 0 12px 0;
+      overflow: hidden;
+    }
+
+    /* LEFT NAV RAIL (234px) */
+    .gc-left-rail {
+      width: 234px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 4px 10px 8px 12px;
+      overflow-y: auto;
+    }
+
+    .gc-new-chat-btn {
+      height: 44px;
+      width: 128px;
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow-fab);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin: 2px 0 14px 2px;
+      flex-shrink: 0;
+      transition: box-shadow 150ms ease, background-color 150ms ease;
+    }
+    .gc-new-chat-btn:hover {
+      background: #f3f7fe;
+      box-shadow: 0 2px 6px 1px rgba(60,64,67,0.22);
+    }
+
+    .gc-nav-group-hdr {
+      width: 100%;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-align: left;
+      margin-top: 2px;
+    }
+    .gc-nav-group-hdr:hover { background: rgba(68,71,70,0.06); }
+
+    .gc-caret {
+      font-size: 9px;
+      color: var(--text-muted);
+      width: 10px;
+      display: inline-block;
+      text-align: center;
+    }
+
+    .gc-space-list {
+      margin-top: 2px;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .gc-space-row {
+      width: 100%;
+      height: 30px;
+      padding: 0 8px 0 12px;
+      border-radius: 15px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      text-align: left;
+      transition: background-color 120ms ease;
+    }
+    .gc-space-row:hover { background: rgba(68,71,70,0.06); }
+    .gc-space-row.is-active {
+      background: var(--active-nav);
+      color: var(--on-active-nav);
+      font-weight: 600;
+    }
+    .gc-space-row.is-unread {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .gc-space-badge {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .gc-space-name {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .gc-pin-icon {
+      color: #747775;
+      flex-shrink: 0;
+      opacity: 0.72;
+    }
+
+    /* ======================== MIDDLE HOME FEED (365px) ======================== */
+    .gc-home-pane {
+      width: 368px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      margin-right: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    .gc-home-top {
+      height: 54px;
+      padding: 0 14px 0 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border-light);
+      flex-shrink: 0;
+    }
+
+    .gc-home-title {
+      font-size: 20px;
+      font-weight: 400;
+      color: var(--text-primary);
+      margin-right: auto;
+    }
+
+    .gc-unread-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .gc-switch {
+      width: 32px;
+      height: 18px;
+      border-radius: 9999px;
+      background: #e1e3e1;
+      border: 1px solid #747775;
+      position: relative;
+      transition: background-color 150ms ease, border-color 150ms ease;
+    }
+    .gc-switch::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #747775;
+      transition: transform 150ms ease, background-color 150ms ease;
+    }
+    .gc-switch.is-on {
+      background: var(--blue-primary);
+      border-color: var(--blue-primary);
+    }
+    .gc-switch.is-on::after {
+      transform: translateX(14px);
+      background: #ffffff;
+    }
+
+    .gc-thread-filter-pill {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 8px;
+      border: 1px solid #c4c7c5;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+    .gc-thread-filter-pill:hover { background: var(--pill-hover); }
+
+    .gc-feed-scroll {
+      flex: 1 1 0;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    .gc-feed-item {
+      width: 100%;
+      padding: 10px 14px 10px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      text-align: left;
+      position: relative;
+      transition: background-color 120ms ease;
+      border-bottom: 1px solid #f5f7fa;
+    }
+    .gc-feed-item:hover { background: #f4f7fc; }
+    .gc-feed-item.is-selected { background: var(--active-row); }
+
+    .gc-item-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12.5px;
+      font-weight: 600;
+      flex-shrink: 0;
+      margin-top: 1px;
+      position: relative;
+    }
+    .gc-item-avatar.is-space { border-radius: 9px; }
+
+    .gc-ext-mini {
+      position: absolute;
+      right: -3px;
+      bottom: -3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fef7e0;
+      border: 1.5px solid #ffffff;
+      color: #b06000;
+      font-size: 8px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .gc-item-body {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
+    .gc-item-row1 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .gc-item-title {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .gc-feed-item.is-unread .gc-item-title { font-weight: 700; }
+
+    .gc-item-time {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .gc-feed-item.is-unread .gc-item-time {
+      color: var(--blue-primary);
+      font-weight: 600;
+    }
+
+    .gc-item-snippet {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+      padding-right: 18px;
+    }
+    .gc-feed-item.is-unread .gc-item-snippet {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .gc-item-subreply {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      padding-left: 10px;
+      padding-right: 18px;
+      border-left: 2px solid #c2d7fb;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .gc-unread-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue-primary);
+      position: absolute;
+      right: 12px;
+      bottom: 14px;
+    }
+    .gc-unread-dot.is-urgent { background: var(--red-alert); }
+
+    /* ======================== RIGHT THREAD PANE ======================== */
+    .gc-thread-pane {
+      flex: 1 1 0;
+      min-width: 0;
+      background: var(--surface);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    .gc-thread-hdr {
+      height: 54px;
+      padding: 0 14px 0 18px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .gc-thread-hdr-title {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .gc-ext-badge {
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: var(--external-bg);
+      border: 1px solid var(--external-border);
+      color: var(--external-fg);
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .gc-thread-crumb {
+      font-size: 13px;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gc-following-pill {
+      height: 28px;
+      padding: 0 11px;
+      border-radius: 14px;
+      background: #d3e3fd;
+      color: #0842a0;
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .gc-thread-hdr-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .gc-messages-scroll {
+      flex: 1 1 0;
+      overflow-y: auto;
+      padding: 18px 22px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .gc-date-sep {
+      text-align: center;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin: 2px 0 4px;
+    }
+
+    .gc-msg-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      max-width: 92%;
+    }
+
+    .gc-msg-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .gc-msg-col {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .gc-msg-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .gc-msg-sender { font-weight: 600; color: var(--text-primary); }
+    .gc-msg-role { font-size: 11px; color: var(--text-muted); }
+    .gc-msg-time { font-size: 11px; color: var(--text-muted); }
+
+    .gc-bubble {
+      padding: 11px 15px;
+      border-radius: 16px;
+      background: var(--incoming-bubble);
+      color: var(--text-primary);
+      font-size: 14px;
+      line-height: 1.5;
+      width: fit-content;
+      max-width: 100%;
+    }
+    .gc-bubble.is-me {
+      background: var(--blue-bubble);
+      color: var(--blue-bubble-text);
+    }
+    .gc-bubble.is-urgent {
+      background: #fff5f5;
+      border: 1px solid #f6c8c6;
+    }
+    .gc-bubble p { margin: 0 0 8px 0; }
+    .gc-bubble p:last-child { margin-bottom: 0; }
+
+    .gc-mention {
+      color: #0b57d0;
+      font-weight: 600;
+      background: rgba(11, 87, 208, 0.08);
+      padding: 0 4px;
+      border-radius: 4px;
+    }
+
+    /* Rich Drive / Slides / Sheets / GE Cards inside Chat */
+    .gc-rich-card {
+      margin-top: 4px;
+      width: 360px;
+      max-width: 100%;
+      background: var(--surface);
+      border: 1px solid #dadce0;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .gc-rich-card-top {
+      padding: 9px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #eef0f3;
+      background: #fbfcfe;
+    }
+    .gc-rich-card-title {
+      flex: 1;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #0b57d0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .gc-slide-thumb {
+      background: linear-gradient(135deg, #10141f 0%, #1c2541 62%, #3a1c5e 100%);
+      color: #ffffff;
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .gc-slide-thumb::after {
+      content: "";
+      position: absolute;
+      right: -24px;
+      bottom: -24px;
+      width: 110px;
+      height: 110px;
+      border-radius: 20px;
+      background: radial-gradient(circle, rgba(238,77,93,0.75) 0%, rgba(172,135,235,0.45) 55%, transparent 75%);
+    }
+    .gc-slide-kicker {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #8ab4f8;
+      text-transform: uppercase;
+    }
+    .gc-slide-big {
+      font-size: 26px;
+      font-weight: 700;
+      margin: 4px 0 2px;
+      letter-spacing: -0.02em;
+    }
+    .gc-slide-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.82);
+    }
+    .gc-slide-badges {
+      display: flex;
+      gap: 6px;
+      margin-top: 12px;
+      position: relative;
+      z-index: 2;
+    }
+    .gc-slide-badge {
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-weight: 600;
+      background: rgba(255,255,255,0.14);
+      color: #ffffff;
+    }
+
+    .gc-sheet-thumb {
+      padding: 14px 16px;
+      background: #ffffff;
+    }
+    .gc-sheet-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .gc-sheet-cell {
+      padding: 9px 10px;
+      border-radius: 9px;
+      background: #f8fafc;
+      border: 1px solid #e6eaf0;
+    }
+    .gc-sheet-cell.is-danger {
+      background: #fef2f2;
+      border-color: #fecaca;
+    }
+    .gc-sheet-lbl {
+      font-size: 10px;
+      color: #5f6368;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .gc-sheet-val {
+      font-size: 14.5px;
+      font-weight: 700;
+      margin-top: 2px;
+      color: #1f1f1f;
+    }
+    .gc-sheet-cell.is-danger .gc-sheet-val { color: #b91c1c; }
+
+    .gc-rich-card-foot {
+      padding: 8px 12px;
+      border-top: 1px solid #eef0f3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #ffffff;
+    }
+
+    .gc-summarize-btn {
+      height: 28px;
+      padding: 0 11px;
+      border-radius: 14px;
+      border: 1px solid #dadce0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: background-color 140ms ease;
+    }
+    .gc-summarize-btn:hover { background: #f0f4f9; }
+
+    .gc-summary-box {
+      display: none;
+      padding: 10px 12px;
+      background: #f0f6ff;
+      border-top: 1px solid #d3e3fd;
+      font-size: 12px;
+      color: #0842a0;
+      line-height: 1.45;
+    }
+    .gc-summary-box.is-open { display: block; }
+
+    /* Compact Google Calendar Invite Chip inside CFO DM */
+    .gc-cal-card {
+      margin-top: 4px;
+      width: 430px;
+      max-width: 100%;
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-left: 4px solid #1a73e8;
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .gc-cal-datebox {
+      width: 42px;
+      height: 44px;
+      border-radius: 8px;
+      border: 1px solid #d3e3fd;
+      background: #f0f6ff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .gc-cal-dow {
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #0b57d0;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      line-height: 1.1;
+    }
+    .gc-cal-num {
+      font-size: 16px;
+      font-weight: 700;
+      color: #041e49;
+      line-height: 1.15;
+    }
+    .gc-cal-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .gc-cal-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .gc-cal-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+    .gc-cal-rsvp {
+      padding: 4px 9px;
+      border-radius: 12px;
+      background: #fef7e0;
+      border: 1px solid #f5d68a;
+      color: #935000;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .gc-ge-launch-card {
+      margin-top: 4px;
+      width: 380px;
+      max-width: 100%;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #f0f6ff 0%, #f5f0ff 100%);
+      border: 1px solid #c2d7fb;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .gc-ge-launch-btn {
+      padding: 8px 14px;
+      border-radius: 18px;
+      background: #0b57d0;
+      color: #ffffff;
+      font-size: 12.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .gc-ge-launch-btn:hover { background: #0842a0; }
+
+    .gc-reactions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .gc-react-chip {
+      height: 25px;
+      padding: 0 9px;
+      border-radius: 13px;
+      background: #edf2fa;
+      border: 1px solid #d3e3fd;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #0842a0;
+    }
+    .gc-react-chip:hover { background: #dce8fc; }
+
+    /* Smart Replies + Composer */
+    .gc-smart-replies {
+      padding: 6px 22px 4px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .gc-smart-chip {
+      height: 30px;
+      padding: 0 13px;
+      border-radius: 15px;
+      border: 1px solid #c4c7c5;
+      background: var(--surface);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--blue-primary);
+      transition: background-color 140ms ease;
+    }
+    .gc-smart-chip:hover { background: #edf2fa; }
+
+    .gc-composer-wrap {
+      padding: 8px 18px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .gc-plus-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #d3e3fd;
+      color: #0842a0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .gc-composer-box {
+      flex: 1;
+      height: 42px;
+      border-radius: 21px;
+      background: #f0f4f9;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .gc-composer-input {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 13.5px;
+      color: var(--text-primary);
+    }
+    .gc-composer-icons {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+    }
+
+    /* ======================== FAR-RIGHT WORKSPACE RAIL (52px) ======================== */
+    .gc-right-rail {
+      width: 52px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 8px;
+      gap: 14px;
+    }
+    .gc-rail-app-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 140ms ease;
+    }
+    .gc-rail-app-btn:hover { background: rgba(68,71,70,0.08); }
+    .gc-rail-divider {
+      width: 22px;
+      height: 1px;
+      background: #dadce0;
+    }
+
+    /* ======================== ACCOUNT POPOVER ======================== */
+    .gc-account-popover {
+      position: fixed;
+      top: 60px;
+      right: 18px;
+      width: 320px;
+      background: #e9eef6;
+      border-radius: 24px;
+      padding: 16px;
+      box-shadow: var(--shadow-popover);
+      border: 1px solid #d3e3fd;
+      z-index: 100;
+      display: none;
+    }
+    .gc-account-popover.is-open { display: block; }
+    .gc-acc-email {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+    .gc-acc-card {
+      background: var(--surface);
+      border-radius: 18px;
+      padding: 16px;
+      text-align: center;
+    }
+    .gc-acc-avatar-lg {
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      margin: 0 auto 8px;
+      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      color: #ffffff;
+      font-size: 22px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .gc-acc-name { font-size: 18px; font-weight: 500; color: var(--text-primary); }
+    .gc-acc-role { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+    .gc-acc-badge {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 4px 12px;
+      border-radius: 14px;
+      border: 1px solid #c4c7c5;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--blue-primary);
+    }
+
+    /* ======================== LIVE INCOMING NOTIFICATION TOAST ======================== */
+    .gc-live-notif {
+      position: fixed;
+      top: 72px;
+      right: 64px;
+      width: 370px;
+      background: #ffffff;
+      border: 1px solid #f6c8c6;
+      border-left: 4px solid #d93025;
+      border-radius: 14px;
+      padding: 13px 15px;
+      box-shadow: var(--shadow-toast);
+      display: none;
+      align-items: flex-start;
+      gap: 12px;
+      z-index: 95;
+      cursor: pointer;
+      animation: slideInNotif 220ms ease-out;
+    }
+    .gc-live-notif.is-open { display: flex; }
+    @keyframes slideInNotif {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: rgba(95, 99, 104, 0.28); border-radius: 3px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+  </style>
+</head>
+<body>
+  <div class="gc-app">
+    <!-- TOP WORKSPACE HEADER -->
+    <header class="gc-header">
+      <div class="gc-header-left">
+        <button class="gc-icon-btn" type="button" title="Main menu" aria-label="Main menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="gc-logo-wrap">
+          <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#00AC47" d="M19.5 3h-12C6.67 3 6 3.67 6 4.5v10.5c0 .83.67 1.5 1.5 1.5h9l4 4V4.5c0-.83-.67-1.5-1.5-1.5z"/>
+            <path fill="#00832D" d="M16.5 16.5H19.5L16.5 19.5V16.5z"/>
+            <path fill="#5BB974" d="M15.5 7.5H4.5C3.67 7.5 3 8.17 3 9v10.5l3.5-3.5h9c.83 0 1.5-.67 1.5-1.5V9c0-.83-.67-1.5-1.5-1.5z"/>
+          </svg>
+          <span class="gc-logo-text">Chat</span>
+        </div>
+      </div>
+
+      <div class="gc-search-wrap">
+        <div class="gc-search-bar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+          <input class="gc-search-input" id="searchInput" type="text" placeholder="Search or ask a question" aria-label="Search messages" />
+        </div>
+        <button class="gc-ask-gemini-btn" id="btnAskGemini" type="button" title="Open Gemini Enterprise Data Agent">
+          <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+            <defs>
+              <linearGradient id="gemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#217bfe"/>
+                <stop offset="50%" stop-color="#ac87eb"/>
+                <stop offset="100%" stop-color="#ee4d5d"/>
+              </linearGradient>
+            </defs>
+            <path fill="url(#gemGrad)" d="M12 2C12.8 7.5 16.5 11.2 22 12C16.5 12.8 12.8 16.5 12 22C11.2 16.5 7.5 12.8 2 12C7.5 11.2 11.2 7.5 12 2Z"/>
+          </svg>
+          <span>Ask Gemini</span>
+        </button>
+      </div>
+
+      <div class="gc-header-right">
+        <button class="gc-status-pill" id="btnStatus" type="button" title="Change status">
+          <span class="gc-status-dot" id="statusDot"></span>
+          <span id="statusText">Active</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+
+        <button class="gc-icon-btn" type="button" title="Help">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.7 2.2c-.8.4-1.2.9-1.2 1.8"/><circle cx="12" cy="17" r="0.8" fill="currentColor"/></svg>
+        </button>
+        <button class="gc-icon-btn" type="button" title="Settings">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="gc-icon-btn" type="button" title="Google apps">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="6" r="1.8"/><circle cx="12" cy="6" r="1.8"/><circle cx="18" cy="6" r="1.8"/><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/><circle cx="6" cy="18" r="1.8"/><circle cx="12" cy="18" r="1.8"/><circle cx="18" cy="18" r="1.8"/></svg>
+        </button>
+
+        <button class="gc-account-pill" id="btnAccount" type="button" title="Cymbal Commerce Workspace Account: Samir Gupta (samir.gupta@example.com)">
+          <span class="gc-company-mark">
+            <svg width="16" height="22" viewBox="0 0 24 34" aria-hidden="true" style="display:block; flex-shrink:0;">
+              <path fill="#f2b872" d="M12 2 H22 A10 10 0 0 1 12 12 Z"/>
+              <circle cx="12" cy="22" r="10" fill="#ff1312"/>
+            </svg>
+            <span>Cymbal</span>
+          </span>
+          <span class="gc-avatar-sm">SG</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ACCOUNT POPOVER -->
+    <div class="gc-account-popover" id="accountPopover">
+      <div class="gc-acc-email">samir.gupta@example.com</div>
+      <div class="gc-acc-card">
+        <div class="gc-acc-avatar-lg">SG</div>
+        <div class="gc-acc-name">Hi, Samir!</div>
+        <div class="gc-acc-role">Chief Marketing Officer · Cymbal Commerce (SG & MY)</div>
+        <div class="gc-acc-badge">Manage your Cymbal Workspace Account</div>
+      </div>
+    </div>
+
+    <!-- OPTIONAL LIVE CFO PING NOTIFICATION (Press 'N' on stage!) -->
+    <div class="gc-live-notif" id="liveNotif" title="Click to open message from Claire Tan (CFO)">
+      <div class="gc-msg-avatar" style="background:#fce8e6; color:#b3261e;">CT</div>
+      <div style="flex:1; min-width:0;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="font-size:13px; color:#1f1f1f;">Claire Tan (CFO)</strong>
+          <span style="font-size:11px; color:#b3261e; font-weight:600;">Just now</span>
+        </div>
+        <div style="font-size:12.5px; color:#444746; margin-top:2px;">
+          Samir - saw Apex Digital's deck. Cash didn't move &amp; returns are piling up. Booked Friday 9 AM budget lock - cutting Q4 to SGD 200K unless you prove ROI.
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN 3-COLUMN WORKSPACE + FAR-RIGHT RAIL -->
+    <div class="gc-body">
+      <!-- LEFT NAV RAIL -->
+      <aside class="gc-left-rail">
+        <button class="gc-new-chat-btn" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="12" y1="8" x2="12" y2="14"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
+          <span>New chat</span>
+        </button>
+
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>Shortcuts</button>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>Agents</button>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9662;</span>Direct messages</button>
+        <div class="gc-space-list" id="leftDmList" style="margin-bottom:4px;"></div>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>Marketing &amp; Growth</button>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>12.12 &amp; LNY Launch</button>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>Commercial &amp; Finance</button>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>Regional Ops (SG/MY)</button>
+        <button class="gc-nav-group-hdr" type="button"><span class="gc-caret">&#9656;</span>Analytics &amp; Data</button>
+
+        <button class="gc-nav-group-hdr" type="button" style="margin-top:4px;"><span class="gc-caret">&#9662;</span>Spaces</button>
+        <div class="gc-space-list" id="leftSpacesList"></div>
+      </aside>
+
+      <!-- MIDDLE HOME FEED -->
+      <section class="gc-home-pane" aria-label="Home conversation list">
+        <div class="gc-home-top">
+          <span class="gc-home-title">Home</span>
+          <label class="gc-unread-wrap" id="unreadToggleWrap">
+            <span>Unread</span>
+            <span class="gc-switch" id="unreadSwitch"></span>
+          </label>
+          <button class="gc-thread-filter-pill" type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h14M5 12h14M5 20h10"/></svg>
+            <span>Thread</span>
+          </button>
+        </div>
+        <div class="gc-feed-scroll" id="feedList"></div>
+      </section>
+
+      <!-- RIGHT ACTIVE CONVERSATION PANE -->
+      <main class="gc-thread-pane" aria-label="Active conversation">
+        <div class="gc-thread-hdr" id="threadHeader"></div>
+        <div class="gc-messages-scroll" id="messagesContainer"></div>
+        <div class="gc-smart-replies" id="smartReplies"></div>
+        <div class="gc-composer-wrap">
+          <button class="gc-plus-btn" type="button" title="Add attachment">+</button>
+          <div class="gc-composer-box">
+            <input class="gc-composer-input" id="replyInput" type="text" placeholder="Reply" aria-label="Reply to conversation" />
+            <div class="gc-composer-icons">
+              <span style="font-weight:700; font-size:13px; text-decoration:underline; cursor:pointer;" title="Formatting">A</span>
+              <span style="font-size:15px; cursor:pointer;" title="Emoji">&#9786;</span>
+              <span style="font-size:11px; font-weight:700; border:1px solid #5f6368; border-radius:3px; padding:0 3px; cursor:pointer;" title="GIF">GIF</span>
+              <button id="btnSendMsg" type="button" title="Send message" style="color:#0b57d0; display:inline-flex; align-items:center;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- FAR-RIGHT WORKSPACE SIDE PANEL -->
+      <aside class="gc-right-rail" aria-label="Google Workspace tools">
+        <button class="gc-rail-app-btn" type="button" title="Calendar">
+          <svg width="20" height="20" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="3" fill="#4285f4"/><rect x="6" y="9" width="12" height="9" rx="1" fill="#ffffff"/><text x="12" y="16.5" text-anchor="middle" font-size="7.5" font-weight="700" fill="#1a73e8" font-family="Google Sans, Arial">26</text></svg>
+        </button>
+        <button class="gc-rail-app-btn" type="button" title="Keep">
+          <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#fbbc04" d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/></svg>
+        </button>
+        <button class="gc-rail-app-btn" type="button" title="Tasks">
+          <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#1a73e8"/><path d="M8.5 12.2l2.3 2.3 4.8-5.2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="gc-rail-app-btn" type="button" title="Contacts">
+          <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#1a73e8"/><circle cx="12" cy="9.5" r="2.8" fill="#fff"/><path d="M7.5 17c.9-2.2 2.6-3.2 4.5-3.2s3.6 1 4.5 3.2" fill="#fff"/></svg>
+        </button>
+        <div class="gc-rail-divider"></div>
+        <button class="gc-rail-app-btn" id="btnRailGemini" type="button" title="Launch Gemini Enterprise Data Agent">
+          <svg width="20" height="20" viewBox="0 0 24 24"><path fill="url(#gemGrad)" d="M12 2C12.8 7.5 16.5 11.2 22 12C16.5 12.8 12.8 16.5 12 22C11.2 16.5 7.5 12.8 2 12C7.5 11.2 11.2 7.5 12 2Z"/></svg>
+        </button>
+        <button class="gc-rail-app-btn" type="button" title="Get Add-ons">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const GE_DEMO_URL = "../ui_studio_v5/index.html";
+
+    const THREADS = [
+      {
+        id: "agency",
+        title: "Apex Digital <> Cymbal",
+        isSpace: true,
+        isExternal: true,
+        pinned: true,
+        unread: true,
+        urgent: false,
+        avatarBg: "#e8f0fe",
+        avatarFg: "#174ea6",
+        avatarText: "AD",
+        time: "10 min",
+        snippet: "Marcus Webb (Apex): Huge Q3 win!! SGD 1.85M sales - let's lock SGD 1.2M for 12.12...",
+        subReply: "You: Bold numbers Marcus - aligning with Finance before Friday's lock...",
+        smartReplies: ["Let me verify net returns first", "Hold 12.12 IO until Friday 9 AM", "Thanks Marcus"],
+        messages: [
+          {
+            sender: "Marcus Webb",
+            role: "Account Director · Apex Digital (External)",
+            initials: "MW",
+            avatarBg: "#e8f0fe",
+            avatarFg: "#174ea6",
+            time: "5:52 PM",
+            isMe: false,
+            paragraphs: [
+              "Hi <span class='gc-mention'>@Samir Gupta</span>!! Pop the champagne - our Q3 Early-Bird wrap is officially in and it is a <strong>massive hit</strong> &#127881;",
+              "Campaign revenue hit <strong>SGD 1.85M</strong> across Singapore &amp; Malaysia on our SGD 400K spend! Full deck attached below - recommending we triple down and lock <strong>SGD 1.2M</strong> for the <strong>12.12 Mega Sale through Lunar New Year</strong> push before media rates spike next week."
+            ],
+            card: {
+              type: "slides",
+              title: "Cymbal Q3 Early-Bird Wrap & 12.12 / LNY SGD 1.2M Proposal",
+              kicker: "CYMBAL COMMERCE  ·  Q3 CAMPAIGN WRAP",
+              big: "SGD 1.85M",
+              sub: "Reported Q3 Early-Bird Sales on SGD 400K Spend",
+              badges: ["12.12 & LNY Ask: SGD 1.2M", "SG + MY Paid Social"],
+              summary: "Apex Digital reports SGD 1.85M in gross attributed sales (+362% gross ROAS) and requests approval to scale 12.12 Mega Sale through Lunar New Year Paid Social spend to SGD 1.2M."
+            },
+            reactions: [{ e: "&#127881;", c: 4 }, { e: "&#128640;", c: 3 }, { e: "&#128293;", c: 2 }]
+          },
+          {
+            sender: "You",
+            role: "Chief Marketing Officer · Cymbal Commerce",
+            initials: "SG",
+            avatarBg: "#1a73e8",
+            avatarFg: "#ffffff",
+            time: "5:56 PM",
+            isMe: true,
+            paragraphs: [
+              "Thanks Marcus - bold headline numbers! Let me align with Finance before our Friday 9:00 AM Q4 budget lock."
+            ],
+            reactions: [{ e: "&#128077;", c: 1 }]
+          }
+        ]
+      },
+      {
+        id: "cfo",
+        title: "Claire Tan (CFO)",
+        isSpace: false,
+        isExternal: false,
+        pinned: true,
+        unread: true,
+        urgent: true,
+        avatarBg: "#fce8e6",
+        avatarFg: "#b3261e",
+        avatarText: "CT",
+        time: "4 min",
+        snippet: "Samir - cash didn't move & returns are piling up. Booked Fri 9 AM lock...",
+        subReply: "",
+        smartReplies: ["Pulling real numbers tonight", "Looping in Jo (CDO) right now", "See you Friday 9 AM with proof"],
+        messages: [
+          {
+            sender: "Claire Tan",
+            role: "Chief Financial Officer · Cymbal Commerce",
+            initials: "CT",
+            avatarBg: "#fce8e6",
+            avatarFg: "#b3261e",
+            time: "6:02 PM",
+            isMe: false,
+            isUrgent: true,
+            paragraphs: [
+              "Samir - I just saw Apex Digital's deck claiming <strong>SGD 1.85M</strong> from Early-Bird. I've put a budget lock meeting on your calendar for <strong>tomorrow morning, Friday at 9:00 AM sharp</strong>.",
+              "I am looking at our settled bank cash and it barely moved. Worse, Derrick's team at Tuas says returned Early-Bird boxes are stacked to the warehouse ceiling.",
+              "Unless you can prove this campaign actually made money tomorrow morning, I am recommending we <strong>cut your 12.12 &amp; LNY budget in half - down to SGD 200K.</strong>"
+            ],
+            calInvite: {
+              dow: "FRI",
+              day: "27",
+              title: "12.12 & LNY Budget Lock (CMO / CFO)",
+              sub: "Fri, 27 Nov · 9:00 - 9:45 AM SGT · Marina Bay Rm 4",
+              status: "Needs reply"
+            },
+            card: {
+              type: "sheets",
+              title: "Q3 Cash Flow & Returns Variance - Cymbal Finance",
+              cells: [
+                { lbl: "Net Cash Lift", val: "Flat", danger: true },
+                { lbl: "Warehouse Returns", val: "140% Dock Load", danger: true },
+                { lbl: "CFO Q4 Proposal", val: "SGD 200K", danger: true }
+              ],
+              summary: "Finance cash reconciliation flags flat net settlement growth against SGD 400K Q3 marketing spend and recommends capping Q4 12.12 & LNY marketing at SGD 200K pending P&L verification."
+            },
+            reactions: []
+          }
+        ]
+      },
+      {
+        id: "cdo",
+        title: "Jordan Ang (CDO)",
+        isSpace: false,
+        isExternal: false,
+        pinned: true,
+        unread: true,
+        urgent: false,
+        avatarBg: "#e6f4ea",
+        avatarFg: "#137333",
+        avatarText: "JA",
+        time: "Just now",
+        snippet: "Saw Claire's Friday 9 AM invite. Different numbers again? Open Gemini Enterprise...",
+        subReply: "",
+        smartReplies: ["Opening Gemini Enterprise now!", "Let's verify the real ROI tonight", "Thanks Jo, jumping in now"],
+        messages: [
+          {
+            sender: "Jordan Ang",
+            role: "Chief Data Officer · Cymbal Commerce",
+            initials: "JA",
+            avatarBg: "#e6f4ea",
+            avatarFg: "#137333",
+            time: "6:06 PM",
+            isMe: false,
+            paragraphs: [
+              "Hey Samir - saw Claire's Friday 9:00 AM invite. Looks like Marketing and Finance are reading two very different sets of numbers again.",
+              "Skip the two-week BI ticket so you can actually enjoy your evening. Open <strong>Gemini Enterprise</strong> - I have both our raw warehouse tables and our <strong>Knowledge Catalog</strong> context layer ready so we can settle what really happened right now."
+            ],
+            geCard: true,
+            reactions: [{ e: "&#128591;", c: 1 }]
+          }
+        ]
+      },
+      {
+        id: "warehouse",
+        title: "Warehouse & Returns Ops (SG)",
+        isSpace: true,
+        isExternal: false,
+        pinned: false,
+        unread: false,
+        avatarBg: "#fef7e0",
+        avatarFg: "#b06000",
+        avatarText: "WR",
+        time: "25 min",
+        snippet: "Derrick Ong: Heads up - Tuas returns dock is at 140% capacity from Early-Bird...",
+        smartReplies: ["Thanks Derrick, investigating now", "Can you share batch counts?"],
+        messages: [
+          {
+            sender: "Derrick Ong",
+            role: "Head of Fulfillment Ops · SG",
+            initials: "DO",
+            avatarBg: "#fef7e0",
+            avatarFg: "#b06000",
+            time: "5:41 PM",
+            isMe: false,
+            paragraphs: [
+              "Heads up team - Tuas returns dock is sitting at <strong>140% capacity</strong> this afternoon. Majority of incoming parcels are Q3 Early-Bird orders from Singapore addresses. Already flagged to Finance."
+            ],
+            reactions: [{ e: "&#128064;", c: 3 }]
+          }
+        ]
+      },
+      {
+        id: "warroom",
+        title: "12.12 & LNY Launch War Room",
+        isSpace: true,
+        isExternal: false,
+        pinned: true,
+        unread: false,
+        avatarBg: "#f3e8fd",
+        avatarFg: "#7627bb",
+        avatarText: "12",
+        time: "34 min",
+        snippet: "Priya Nair: Final 12.12 Mega Sale & LNY hero banners signed off for SG & MY",
+        smartReplies: ["Looks great Priya!", "Hold media spend until Friday 9 AM lock"],
+        messages: [
+          {
+            sender: "Priya Nair",
+            role: "VP Brand & Campaigns",
+            initials: "PN",
+            avatarBg: "#f3e8fd",
+            avatarFg: "#7627bb",
+            time: "5:32 PM",
+            isMe: false,
+            paragraphs: [
+              "Final 12.12 Mega Sale through Lunar New Year hero banners are signed off for both Singapore and Malaysia storefronts. Media insertion orders are queued waiting on tomorrow's 9:00 AM budget sign-off."
+            ],
+            reactions: [{ e: "&#128079;", c: 5 }]
+          }
+        ]
+      },
+      {
+        id: "paidmedia",
+        title: "SG & MY Paid Media",
+        isSpace: true,
+        isExternal: false,
+        pinned: false,
+        unread: false,
+        avatarBg: "#e0f2f1",
+        avatarFg: "#00695c",
+        avatarText: "PM",
+        time: "42 min",
+        snippet: "Kelvin Lim: Malaysia Paid Social conversions look solid again this week",
+        smartReplies: ["Good to hear Kelvin", "Let's check SG vs MY split"],
+        messages: [
+          {
+            sender: "Kelvin Lim",
+            role: "Malaysia Growth Lead",
+            initials: "KL",
+            avatarBg: "#e0f2f1",
+            avatarFg: "#00695c",
+            time: "5:24 PM",
+            isMe: false,
+            paragraphs: [
+              "Quick pulse from Kuala Lumpur: Malaysia Paid Social repeat conversions look really healthy again this week. Zero unusual return spikes on our side."
+            ],
+            reactions: [{ e: "&#128170;", c: 2 }]
+          }
+        ]
+      },
+      {
+        id: "elt",
+        title: "Executive Leadership Team",
+        isSpace: true,
+        isExternal: false,
+        pinned: true,
+        unread: false,
+        avatarBg: "#e8eaed",
+        avatarFg: "#3c4043",
+        avatarText: "EL",
+        time: "51 min",
+        snippet: "Mei Ling Choo (CEO): Reminder - 12.12 & LNY budget lock is Fri 9:00 AM sharp",
+        smartReplies: ["Will be ready tomorrow at 9 AM", "Thanks Mei Ling"],
+        messages: [
+          {
+            sender: "Mei Ling Choo",
+            role: "Chief Executive Officer · Cymbal Commerce",
+            initials: "MC",
+            avatarBg: "#e8eaed",
+            avatarFg: "#3c4043",
+            time: "5:15 PM",
+            isMe: false,
+            paragraphs: [
+              "Hi everyone - reminder that our <strong>12.12 &amp; Lunar New Year Budget Lock</strong> starts <strong>tomorrow, Friday at 9:00 AM sharp</strong> in Marina Bay Boardroom 4. Marketing &amp; Finance please come aligned on Q3 ROI before we commit Q4 media cash."
+            ],
+            reactions: [{ e: "&#9989;", c: 6 }]
+          }
+        ]
+      },
+      {
+        id: "promo",
+        title: "Cymbal Promo & Pricing Ops",
+        isSpace: true,
+        isExternal: false,
+        pinned: false,
+        unread: false,
+        avatarBg: "#fff3e0",
+        avatarFg: "#e65100",
+        avatarText: "PP",
+        time: "58 min",
+        snippet: "Wei Jie Tan: Seeing weird spike in first-time SG promo signups since Mon...",
+        smartReplies: ["Pulling this into our audit now", "Flagging to Jo"],
+        messages: [
+          {
+            sender: "Wei Jie Tan",
+            role: "Pricing & Promotions Manager",
+            initials: "WT",
+            avatarBg: "#fff3e0",
+            avatarFg: "#e65100",
+            time: "5:08 PM",
+            isMe: false,
+            paragraphs: [
+              "Strange pattern in the coupon logs from late Q3: huge spike in first-time Singapore promo-code signups, mostly unique throwaway email addresses. Worth a deeper check."
+            ],
+            reactions: [{ e: "&#129300;", c: 2 }]
+          }
+        ]
+      },
+      {
+        id: "financeclose",
+        title: "APAC Finance Close - Q3 FY26",
+        isSpace: true,
+        isExternal: false,
+        pinned: false,
+        unread: false,
+        avatarBg: "#e6f4ea",
+        avatarFg: "#137333",
+        avatarText: "FC",
+        time: "4:42 PM",
+        snippet: "Rachel Koh: Audited Q3 close is certified and published in Knowledge Catalog",
+        smartReplies: ["Thanks Rachel!"],
+        messages: [
+          {
+            sender: "Rachel Koh",
+            role: "Regional Financial Controller",
+            initials: "RK",
+            avatarBg: "#e6f4ea",
+            avatarFg: "#137333",
+            time: "4:42 PM",
+            isMe: false,
+            paragraphs: [
+              "Audited Q3 FY26 regional close passed 100% Data Quality checks and is now marked <strong>Certified</strong> in Knowledge Catalog for executive reporting."
+            ],
+            reactions: [{ e: "&#128077;", c: 4 }]
+          }
+        ]
+      },
+      {
+        id: "creative",
+        title: "Brand & Creative Studio",
+        isSpace: true,
+        isExternal: false,
+        pinned: false,
+        unread: false,
+        avatarBg: "#fce4ec",
+        avatarFg: "#ad1457",
+        avatarText: "BC",
+        time: "4:15 PM",
+        snippet: "Hannah Lee: Sent a GIF",
+        smartReplies: ["Love it!"],
+        messages: [
+          {
+            sender: "Hannah Lee",
+            role: "Creative Lead",
+            initials: "HL",
+            avatarBg: "#fce4ec",
+            avatarFg: "#ad1457",
+            time: "4:15 PM",
+            isMe: false,
+            paragraphs: ["Fresh 12.12 &amp; Lunar New Year motion assets uploaded to Drive for tomorrow's review!"],
+            reactions: [{ e: "&#10024;", c: 3 }]
+          }
+        ]
+      },
+      {
+        id: "social",
+        title: "SG Office Social",
+        isSpace: true,
+        isExternal: false,
+        pinned: false,
+        unread: false,
+        avatarBg: "#e8f0fe",
+        avatarFg: "#1967d2",
+        avatarText: "SG",
+        time: "3:14 PM",
+        snippet: "Arjun Menon: Anyone up for Lau Pa Sat satay after work tonight?",
+        smartReplies: ["Count me in if I survive Claire's 9 AM tomorrow!"],
+        messages: [
+          {
+            sender: "Arjun Menon",
+            role: "Product Marketing Lead",
+            initials: "AM",
+            avatarBg: "#e8f0fe",
+            avatarFg: "#1967d2",
+            time: "3:14 PM",
+            isMe: false,
+            paragraphs: ["Anyone up for Lau Pa Sat satay after work tonight? First round of teh tarik is on me."],
+            reactions: [{ e: "&#127842;", c: 7 }]
+          }
+        ]
+      }
+    ];
+
+    let activeId = "agency";
+    let unreadOnly = false;
+    let statusIdx = 0;
+    const STATUSES = [
+      { label: "Active", cls: "" },
+      { label: "Do not disturb", cls: "is-dnd" },
+      { label: "Away", cls: "is-away" }
+    ];
+
+    function renderLeftSpaces() {
+      const dmMount = document.getElementById("leftDmList");
+      const dms = THREADS.filter(t => !t.isSpace);
+      dmMount.innerHTML = dms.map(t => `
+        <button class="gc-space-row ${t.id === activeId ? 'is-active' : ''} ${t.unread ? 'is-unread' : ''}" data-open="${t.id}" type="button">
+          <span class="gc-space-badge" style="border-radius:50%; background:${t.avatarBg}; color:${t.avatarFg};">${t.avatarText}</span>
+          <span class="gc-space-name">${t.title}</span>
+          ${t.unread ? `<span style="width:7px; height:7px; border-radius:50%; background:${t.urgent ? '#d93025' : '#0b57d0'}; flex-shrink:0;"></span>` : ''}
+        </button>
+      `).join("");
+      dmMount.querySelectorAll("[data-open]").forEach(btn => {
+        btn.addEventListener("click", () => selectThread(btn.dataset.open));
+      });
+
+      const mount = document.getElementById("leftSpacesList");
+      const spaces = THREADS.filter(t => t.isSpace);
+      mount.innerHTML = spaces.map(t => `
+        <button class="gc-space-row ${t.id === activeId ? 'is-active' : ''} ${t.unread ? 'is-unread' : ''}" data-open="${t.id}" type="button">
+          <span class="gc-space-badge" style="background:${t.avatarBg}; color:${t.avatarFg};">${t.avatarText}</span>
+          <span class="gc-space-name">${t.title}</span>
+          ${t.pinned ? `<svg class="gc-pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>` : ''}
+        </button>
+      `).join("");
+      mount.querySelectorAll("[data-open]").forEach(btn => {
+        btn.addEventListener("click", () => selectThread(btn.dataset.open));
+      });
+    }
+
+    function renderFeed() {
+      const mount = document.getElementById("feedList");
+      const q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
+      const list = THREADS.filter(t => {
+        if (unreadOnly && !t.unread) return false;
+        if (q && !(t.title.toLowerCase().includes(q) || t.snippet.toLowerCase().includes(q))) return false;
+        return true;
+      });
+      mount.innerHTML = list.map(t => `
+        <button class="gc-feed-item ${t.id === activeId ? 'is-selected' : ''} ${t.unread ? 'is-unread' : ''}" data-open="${t.id}" type="button">
+          <span class="gc-item-avatar ${t.isSpace ? 'is-space' : ''}" style="background:${t.avatarBg}; color:${t.avatarFg};">
+            ${t.avatarText}
+            ${t.isExternal ? `<span class="gc-ext-mini" title="External">E</span>` : ''}
+          </span>
+          <span class="gc-item-body">
+            <span class="gc-item-row1">
+              <span class="gc-item-title">${t.title}</span>
+              <span class="gc-item-time">${t.time}</span>
+            </span>
+            <div class="gc-item-snippet">${t.snippet}</div>
+            ${t.subReply ? `<div class="gc-item-subreply">${t.subReply}</div>` : ''}
+          </span>
+          ${t.unread ? `<span class="gc-unread-dot ${t.urgent ? 'is-urgent' : ''}"></span>` : ''}
+        </button>
+      `).join("");
+      mount.querySelectorAll("[data-open]").forEach(btn => {
+        btn.addEventListener("click", () => selectThread(btn.dataset.open));
+      });
+    }
+
+    function renderThread() {
+      const t = THREADS.find(x => x.id === activeId) || THREADS[0];
+      const hdr = document.getElementById("threadHeader");
+      hdr.innerHTML = `
+        <span class="gc-item-avatar ${t.isSpace ? 'is-space' : ''}" style="width:28px; height:28px; font-size:11px; background:${t.avatarBg}; color:${t.avatarFg};">${t.avatarText}</span>
+        <span class="gc-thread-hdr-title">${t.title}</span>
+        ${t.isExternal ? `<span class="gc-ext-badge">&#127760; External</span>` : ''}
+        ${t.isSpace ? `<span class="gc-thread-crumb">&rsaquo; <span>Thread</span></span><span class="gc-following-pill">&#128276; Following &#9662;</span>` : ''}
+        <div class="gc-thread-hdr-actions">
+          <button class="gc-icon-btn" type="button" title="Toggle fullscreen (F)" onclick="toggleFullscreen()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
+        </div>
+      `;
+
+      const msgBox = document.getElementById("messagesContainer");
+      msgBox.innerHTML = `<div class="gc-date-sep">Today, Thursday, 26 Nov · 2 weeks before 12.12 Mega Sale</div>` + t.messages.map((m, idx) => {
+        let calHtml = "";
+        if (m.calInvite) {
+          calHtml = `
+            <div class="gc-cal-card">
+              <div class="gc-cal-datebox">
+                <span class="gc-cal-dow">${m.calInvite.dow}</span>
+                <span class="gc-cal-num">${m.calInvite.day}</span>
+              </div>
+              <div class="gc-cal-info">
+                <div class="gc-cal-title">${m.calInvite.title}</div>
+                <div class="gc-cal-sub">${m.calInvite.sub}</div>
+              </div>
+              <span class="gc-cal-rsvp">${m.calInvite.status}</span>
+            </div>
+          `;
+        }
+        let cardHtml = "";
+        if (m.card && m.card.type === "slides") {
+          cardHtml = `
+            <div class="gc-rich-card">
+              <div class="gc-rich-card-top">
+                <svg width="16" height="16" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2" fill="#fbbc04"/><rect x="6" y="8" width="12" height="7" rx="1" fill="#fff"/></svg>
+                <span class="gc-rich-card-title">${m.card.title}</span>
+              </div>
+              <div class="gc-slide-thumb">
+                <div class="gc-slide-kicker">${m.card.kicker}</div>
+                <div class="gc-slide-big">${m.card.big}</div>
+                <div class="gc-slide-sub">${m.card.sub}</div>
+                <div class="gc-slide-badges">
+                  ${m.card.badges.map(b => `<span class="gc-slide-badge">${b}</span>`).join("")}
+                </div>
+              </div>
+              <div class="gc-rich-card-foot">
+                <button class="gc-summarize-btn" type="button" onclick="toggleSummary('sum_${t.id}_${idx}')">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="url(#gemGrad)"><path d="M12 2C12.8 7.5 16.5 11.2 22 12C16.5 12.8 12.8 16.5 12 22C11.2 16.5 7.5 12.8 2 12C7.5 11.2 11.2 7.5 12 2Z"/></svg>
+                  <span>Summarize</span>
+                </button>
+                <span style="font-size:11px; color:#5f6368;">Google Slides · 14 slides</span>
+              </div>
+              <div class="gc-summary-box" id="sum_${t.id}_${idx}"><strong>Gemini Summary:</strong> ${m.card.summary}</div>
+            </div>
+          `;
+        } else if (m.card && m.card.type === "sheets") {
+          cardHtml = `
+            <div class="gc-rich-card">
+              <div class="gc-rich-card-top">
+                <svg width="16" height="16" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2" fill="#34a853"/><rect x="6" y="8" width="12" height="8" rx="1" fill="#fff"/></svg>
+                <span class="gc-rich-card-title">${m.card.title}</span>
+              </div>
+              <div class="gc-sheet-thumb">
+                <div class="gc-sheet-grid">
+                  ${m.card.cells.map(c => `
+                    <div class="gc-sheet-cell ${c.danger ? 'is-danger' : ''}">
+                      <div class="gc-sheet-lbl">${c.lbl}</div>
+                      <div class="gc-sheet-val">${c.val}</div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+              <div class="gc-rich-card-foot">
+                <button class="gc-summarize-btn" type="button" onclick="toggleSummary('sum_${t.id}_${idx}')">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="url(#gemGrad)"><path d="M12 2C12.8 7.5 16.5 11.2 22 12C16.5 12.8 12.8 16.5 12 22C11.2 16.5 7.5 12.8 2 12C7.5 11.2 11.2 7.5 12 2Z"/></svg>
+                  <span>Summarize</span>
+                </button>
+                <span style="font-size:11px; color:#5f6368;">Google Sheets · Cymbal Finance</span>
+              </div>
+              <div class="gc-summary-box" id="sum_${t.id}_${idx}"><strong>Gemini Summary:</strong> ${m.card.summary}</div>
+            </div>
+          `;
+        }
+
+        const geHtml = m.geCard ? `
+          <div class="gc-ge-launch-card">
+            <div>
+              <div style="font-size:13px; font-weight:600; color:#041e49;">Gemini Enterprise · Cymbal Data Agent</div>
+              <div style="font-size:12px; color:#444746; margin-top:2px;">Side-by-side: Raw Schema vs. Knowledge Catalog</div>
+            </div>
+            <a class="gc-ge-launch-btn" href="${GE_DEMO_URL}" target="_blank" rel="noopener">
+              <span>Open Agent</span>
+              <span>&#8599;</span>
+            </a>
+          </div>
+        ` : "";
+
+        const reacts = (m.reactions || []).length ? `
+          <div class="gc-reactions">
+            ${m.reactions.map((r, ri) => `<button class="gc-react-chip" type="button" onclick="bumpReaction('${t.id}', ${idx}, ${ri})">${r.e} <span>${r.c}</span></button>`).join("")}
+          </div>
+        ` : "";
+
+        return `
+          <div class="gc-msg-row">
+            <span class="gc-msg-avatar" style="background:${m.avatarBg}; color:${m.avatarFg};">${m.initials}</span>
+            <div class="gc-msg-col">
+              <div class="gc-msg-meta">
+                <span class="gc-msg-sender">${m.sender}</span>
+                ${m.role ? `<span class="gc-msg-role">${m.role}</span>` : ''}
+                <span class="gc-msg-time">${m.time}</span>
+              </div>
+              <div class="gc-bubble ${m.isMe ? 'is-me' : ''} ${m.isUrgent ? 'is-urgent' : ''}">
+                ${m.paragraphs.map(p => `<p>${p}</p>`).join("")}
+              </div>
+              ${calHtml}
+              ${cardHtml}
+              ${geHtml}
+              ${reacts}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      const sr = document.getElementById("smartReplies");
+      sr.innerHTML = (t.smartReplies || []).map(txt =>
+        `<button class="gc-smart-chip" type="button">${txt}</button>`
+      ).join("");
+      sr.querySelectorAll(".gc-smart-chip").forEach(btn => {
+        btn.addEventListener("click", () => sendReply(btn.textContent));
+      });
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+    function selectThread(id) {
+      activeId = id;
+      const t = THREADS.find(x => x.id === id);
+      if (t) t.unread = false;
+      document.getElementById("liveNotif").classList.remove("is-open");
+      renderLeftSpaces();
+      renderFeed();
+      renderThread();
+    }
+
+    function sendReply(text) {
+      const clean = (text || "").trim();
+      if (!clean) return;
+      const t = THREADS.find(x => x.id === activeId);
+      if (!t) return;
+      t.messages.push({
+        sender: "You",
+        role: "Chief Marketing Officer · Cymbal Commerce",
+        initials: "SG",
+        avatarBg: "#1a73e8",
+        avatarFg: "#ffffff",
+        time: "Just now",
+        isMe: true,
+        paragraphs: [clean],
+        reactions: []
+      });
+      t.snippet = "You: " + clean;
+      t.time = "Just now";
+      document.getElementById("replyInput").value = "";
+      renderFeed();
+      renderThread();
+    }
+
+    window.toggleSummary = function(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle("is-open");
+    };
+
+    window.bumpReaction = function(tid, midx, ridx) {
+      const t = THREADS.find(x => x.id === tid);
+      if (!t) return;
+      t.messages[midx].reactions[ridx].c += 1;
+      renderThread();
+    };
+
+    window.toggleFullscreen = function() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.();
+      } else {
+        document.exitFullscreen?.();
+      }
+    };
+
+    // Event bindings
+    document.getElementById("unreadToggleWrap").addEventListener("click", () => {
+      unreadOnly = !unreadOnly;
+      document.getElementById("unreadSwitch").classList.toggle("is-on", unreadOnly);
+      renderFeed();
+    });
+
+    document.getElementById("searchInput").addEventListener("input", renderFeed);
+
+    document.getElementById("btnSendMsg").addEventListener("click", () => {
+      sendReply(document.getElementById("replyInput").value);
+    });
+    document.getElementById("replyInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") sendReply(e.target.value);
+    });
+
+    document.getElementById("btnStatus").addEventListener("click", () => {
+      statusIdx = (statusIdx + 1) % STATUSES.length;
+      const s = STATUSES[statusIdx];
+      document.getElementById("statusText").textContent = s.label;
+      document.getElementById("statusDot").className = "gc-status-dot " + s.cls;
+    });
+
+    const accPop = document.getElementById("accountPopover");
+    document.getElementById("btnAccount").addEventListener("click", e => {
+      e.stopPropagation();
+      accPop.classList.toggle("is-open");
+    });
+    document.addEventListener("click", () => accPop.classList.remove("is-open"));
+
+    document.getElementById("btnAskGemini").addEventListener("click", () => window.open(GE_DEMO_URL, "_blank"));
+    document.getElementById("btnRailGemini").addEventListener("click", () => window.open(GE_DEMO_URL, "_blank"));
+    document.getElementById("liveNotif").addEventListener("click", () => selectThread("cfo"));
+
+    // Silent stage keyboard shortcuts: 1=Agency, 2=CFO, 3=Jo(CDO), N=CFO live toast, F=Fullscreen
+    document.addEventListener("keydown", e => {
+      if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")) return;
+      if (e.key === "1") selectThread("agency");
+      else if (e.key === "2") selectThread("cfo");
+      else if (e.key === "3") selectThread("cdo");
+      else if (e.key.toLowerCase() === "n") {
+        const n = document.getElementById("liveNotif");
+        n.classList.toggle("is-open");
+      } else if (e.key.toLowerCase() === "f") {
+        toggleFullscreen();
+      }
+    });
+
+    // Optional URL hash support (#cfo, #cdo, #agency) for screenshots & direct links
+    const hash = (window.location.hash || "").replace("#", "");
+    if (["agency", "cfo", "cdo"].includes(hash)) activeId = hash;
+    const initThread = THREADS.find(x => x.id === activeId);
+    if (initThread) initThread.unread = false;
+
+    renderLeftSpaces();
+    renderFeed();
+    renderThread();
+  </script>
+</body>
+</html>

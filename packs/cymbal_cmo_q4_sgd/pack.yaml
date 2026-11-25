@@ -1,0 +1,138 @@
+schema_version: "2.0"
+pack_id: "cymbal_cmo_q4_sgd"
+title: "Cymbal Commerce · Q3 Rescue & Q4 Plan"
+subtitle: "6-Rung CMO Context Progression in BigQuery & Knowledge Catalog (SGD)"
+hero_tagline: "Frontier models are table stakes—governed enterprise context is the differentiator."
+closed_period_label: "Q3 FY26 -> Q4 12.12 & LNY"
+currency: "SGD"
+region: "asia-southeast1"
+rng_seed: 20261126
+generated_mode: "offline_fixture"
+
+personas:
+  - id: "cmo"
+    label: "Chief Marketing Officer (CMO)"
+    principal_display: "cmo-exec@example-project-id.iam.gserviceaccount.com"
+    scope_summary: "Unrestricted SEA marketing visibility across Singapore and Malaysia governed marts, fraud graph, and Q4 reallocation plan."
+  - id: "analyst"
+    label: "SG Marketing Analyst"
+    principal_display: "sg-analyst@example-project-id.iam.gserviceaccount.com"
+    scope_summary: "Singapore-scoped visibility across certified campaign returns and promo attribution under BigQuery Row-Level Security."
+
+invariants:
+  r1_blind_gross_sales_sgd: 1850000.0
+  r1_blind_returns_sgd: 0.0
+  r1_governed_gross_attributed_sgd: 860000.0
+  r1_governed_returns_sgd: 240000.0
+  r1_governed_net_settled_sgd: 620000.0
+  r2_blind_my_mobile_share_pct: 68.0
+  r2_blind_staging_null_pct: 42.0
+  r2_governed_sg_ps_returns_sgd: 198000.0
+  r2_governed_sg_ps_share_pct: 82.5
+  r2_governed_sg_ps_return_rate_pct: 44.0
+  r2_governed_q2_baseline_sg_ps_sgd: 36000.0
+  r2_governed_qoq_surge_sgd: 162000.0
+  r2_governed_my_ps_returns_sgd: 30000.0
+  r2_governed_b2b_returns_sgd: 12000.0
+  r3_blind_fanned_contribution_sgd: 592000.0
+  r3_blind_net_profit_sgd: 192000.0
+  r3_blind_roi_pct: 48.0
+  r3_governed_order_contribution_sgd: 332000.0
+  r3_governed_campaign_spend_sgd: 400000.0
+  r3_governed_net_profit_sgd: -68000.0
+  r3_governed_roi_pct: -17.0
+  r4_blind_duplicate_emails: 14
+  r4_blind_coupons_sgd: 2800.0
+  r4_governed_spoofed_devices: 28
+  r4_governed_burner_accounts: 640
+  r4_governed_coupons_sgd: 96000.0
+  r4_governed_return_rate_pct: 78.0
+  r5_blind_recoverable_sgd: 0.0
+  r5_blind_billed_sgd: 220000.0
+  r5_s3_total_clicks: 1420000
+  r5_s3_invalid_clicks: 568000
+  r5_s3_invalid_pct: 40.0
+  r5_governed_clawback_sgd: 88000.0
+  r5_governed_restored_q3_profit_sgd: 20000.0
+  r6_blind_projected_q4_rev_sgd: 2840000.0
+  r6_governed_q4_spend_plan_sgd: 600000.0
+  r6_governed_q4_net_new_cash_sgd: 512000.0
+  r6_governed_q4_projected_rev_sgd: 1420000.0
+  r6_governed_q4_projected_profit_sgd: 258000.0
+  r6_governed_q4_roi_pct: 43.0
+  r6_governed_unchanged_loss_sgd: -145000.0
+
+horizon_cards:
+  - id: "borderless_s3_iceberg"
+    title: "Borderless AWS S3 Iceberg Federation"
+    release_badge: "Preview"
+    region_availability: "asia-southeast1 & ap-southeast-1 (Cross-Cloud Iceberg REST Catalog Federation)"
+    summary: "Queries 1.42M raw ad-click rows stored in AWS S3 Apache Iceberg directly from BigQuery without ETL pipelines, unifying external telemetry with Knowledge Catalog metadata."
+    primitives:
+      - "Knowledge Catalog Federation"
+      - "BigLake Iceberg REST Catalog (Preview)"
+      - "AWS Glue / S3 Zero-ETL Query"
+  - id: "multimodal_pdf_and_forecast"
+    title: "Multimodal PDF AI.GENERATE() & TimesFM 3.0 AI.FORECAST()"
+    release_badge: "Preview"
+    region_availability: "asia-southeast1 Object Tables + global Gemini PayGo / BigQuery AI.FORECAST (TimesFM 3.0)"
+    summary: "Extracts signed Agency Addendum #2 Clause 7.4 rules from PDFs via BigQuery Object Tables and AI.GENERATE(), then pairs fraud-scrubbed certified history with AI.FORECAST() TimesFM 3.0."
+    primitives:
+      - "BigQuery Object Tables (GA)"
+      - "BigQuery AI.GENERATE() Multimodal PDF (GA)"
+      - "BigQuery AI.FORECAST() TimesFM 3.0 (Preview)"
+
+eval_methodology:
+  regional_honesty_label: "Data, Graph, Catalog & RLS in asia-southeast1 · Gemini PayGo Inference via global Endpoint"
+  data_and_governance_region: "asia-southeast1"
+  llm_inference_endpoint: "global"
+  deterministic_seed: 20261126
+  note: "All Cymbal Commerce tables across cymbal_dw, cymbal_commerce, and cymbal_lake plus cymbal_fraud_graph reside in asia-southeast1; Gemini inference and AI functions route via the global endpoint."
+
+overview:
+  eyebrow: "Executive Briefing · ASEAN Omnichannel Retail"
+  headline: "The Phantom Holiday Boom: Rescue Q4"
+  subheadline: "Same frontier AI model, 6 Q3 campaign questions—why governed context flips a false boom into an actionable Q4 rescue."
+  company_name: "Cymbal Commerce (SG & MY)"
+  company_profile: "An ASEAN omnichannel retail and B2B commerce brand preparing its 12.12 Mega Sale and Lunar New Year budget lock across Singapore and Malaysia."
+  problem_statement: "Pointing an ungrounded AI model at raw warehouse tables mistakes GST, organic sales, 1:N click fan-out, and bot fraud for a breakout Q3 boom."
+  estate_stats:
+    - value: "3 Datasets"
+      label: "Warehouse + Lake"
+      detail: "Raw cymbal_dw, governed cymbal_commerce, and S3 lake copy"
+    - value: "1.42M Clicks"
+      label: "Cross-Cloud S3 Log"
+      detail: "40.0% invalid bot and spoofed-device traffic in Singapore"
+    - value: "4-Hop Graph"
+      label: "Entity Fraud Ring"
+      detail: "28 spoofed devices -> 640 burners -> SGD 96K stacked coupons"
+    - value: "1 Frontier Model"
+      label: "Held Constant"
+      detail: "Same AI model across Raw Schema vs. Knowledge Catalog"
+  experiment:
+    fixed_control: "Held constant: the same frontier AI model, identical 6 CMO Q3/Q4 questions, and identical underlying retail data."
+    blind_arm: "Raw schema only: unannotated cymbal_dw tables with 9% GST inflation, 42% NULL staging copies, click fan-out, and zero S3/PDF context."
+    governed_arm: "Knowledge Catalog + BigQuery governance: Glossary, Verified Queries, Certified tables, grain-locked P&L, 4-hop Graph, S3+PDF rules, and clean forecast."
+  cta_label: "Start Q3 Audit · Rung 1 →"
+  perspectives:
+    - role: "Marketing & Growth POV"
+      speaker: "CMO"
+      focus: "Exposes how ungrounded AI hides a SGD 240K return bleed, blames healthy Malaysia, and recommends scaling bot-inflated SG spend."
+    - role: "Data & AI Governance POV"
+      speaker: "CDO"
+      focus: "Shows the 6 BigQuery and Knowledge Catalog context layers that recover SGD 88K cash and unlock +SGD 258K Q4 profit."
+
+closing_takeaways:
+  eyebrow: "Executive Takeaways · Cymbal Commerce"
+  headline: "Frontier Models Are Table Stakes. Context Is the Differentiator."
+  repo_url: "https://github.com/johanesalxd/context-is-all-you-need"
+  repo_label: "Explore the Context Architecture Repo"
+  takeaways:
+    - title: "Same Model, Opposite Decision"
+      detail: "Without changing the AI model, governed context prevents scaling a losing channel and flips Q3 from a hidden loss into +SGD 20K net profit."
+    - title: "Lock Definitions & Grain"
+      detail: "Business Glossaries, Certified Data Products, and grain-locked metrics eliminate GST overstatement, NULL staging traps, and 1.78x click fan-out."
+    - title: "Connect Entities Across Hops"
+      detail: "BigQuery Property Graph traverses 4 entity hops in place to catch 640 burner accounts (34x more promo abuse than flat email matching)."
+    - title: "Unify S3 Logs & Contract PDFs"
+      detail: "Borderless Iceberg federation and Object Table PDF extraction turn buried agency clauses into SGD 88K cash recovery and a +43% ROI Q4 plan."

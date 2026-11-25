@@ -311,7 +311,8 @@ def create_app(
 
         if pack_id is None or not pack_id.strip():
             configured_pack = str(settings.get("PACK_ID") or "").strip()
-            resolved_pack = configured_pack if configured_pack in available_packs else available_packs[0]
+            default_pack_id = "meridian_q3_sgd" if "meridian_q3_sgd" in available_packs else available_packs[0]
+            resolved_pack = configured_pack if configured_pack in available_packs else default_pack_id
         else:
             resolved_pack = pack_id.strip()
             if not _ID_SLUG_REGEX.match(resolved_pack):

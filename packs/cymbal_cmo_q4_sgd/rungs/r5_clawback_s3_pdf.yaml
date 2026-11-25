@@ -1,0 +1,134 @@
+id: "r5_clawback_s3_pdf"
+rung_num: 5
+short_label: "R5 · S3 + PDF"
+title: "Cross-Cloud S3 Iceberg + Agency PDF Clawback"
+pyramid_layer: "Layer 3 · Borderless S3 Iceberg Federation [Preview] + Object Tables & AI.GENERATE() [GA]"
+difficulty_tier: "Hard"
+release_badges:
+  - capability: "Borderless AWS S3 Iceberg Federation"
+    stage: "Preview"
+    region_scope: "asia-southeast1 / ap-southeast-1"
+  - capability: "BigQuery Object Tables + AI.GENERATE()"
+    stage: "GA"
+    region_scope: "asia-southeast1 + global endpoint"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
+
+question: "How much fraudulent Paid Social spend can we claw back under our contract?"
+
+stage_story:
+  step_title: "How Much Fraudulent Media Spend Can We Claw Back?"
+  backend_layer: "Step 5 · Cross-Cloud S3 + Contract PDF"
+  audience_role: "CMO, Legal & Procurement"
+  situation: "With 28 spoofed devices identified, Marketing checks whether ad-click logs and agency contract terms entitle Cymbal to a refund."
+  business_goal: "Recover invalid media spend in cash to rescue Q3 profitability."
+  tech_challenge: "Click logs sit in AWS S3 and refund clauses sit inside a 45-page signed PDF."
+  context_unlock: "AWS S3 Iceberg Federation + AI-Extracted Contract Clause"
+
+poll:
+  prompt: "Cross-Cloud + PDF Turnaround: Raw click logs live in AWS S3 and refund clauses sit inside a 45-page agency PDF. What is the scalable fix?"
+  options:
+    - key: "A"
+      text: "Check the BigQuery ERP payables table alone since booked invoices settle all disputes."
+    - key: "B"
+      text: "Copy millions of S3 clicks into a spreadsheet and paste the 45-page PDF into every chat prompt."
+    - key: "C"
+      text: "Query S3 Iceberg logs in place via federation and join AI-extracted PDF contract terms in SQL."
+    - key: "D"
+      text: "Skip contract recovery because cross-cloud click logs cannot be joined with PDFs."
+  correct_key: "C"
+  reveal_takeaway: "Cross-Cloud + PDF Turnaround: ERP-only SQL reports SGD 0 recoverable. Federating AWS S3 click logs (40.0% invalid across 1.42M clicks) with AI-extracted Addendum #2 Clause 7.4 (>15% invalid = 100% refund) recovers SGD 88,000 cash and flips Q3 to +SGD 20K net."
+
+blind:
+  answer_headline: "SGD 0.00 recoverable (SGD 220,000.00 billed)"
+  answer_detail: "Blind to cross-cloud telemetry and legal PDFs: ERP payables table erp_agency_invoices shows all SGD 220,000.00 in SG Paid Social media invoices booked as non-refundable with SGD 0.00 recoverable."
+  stage_delta_pill: "SGD 0 · Blind to S3 & PDF"
+  stage_summary: "Saw only paid ERP invoices in the warehouse—missing AWS S3 click logs and the signed agency PDF, reporting SGD 0 recoverable."
+  numeric_value: 0.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "ERP payables table only (`cymbal_dw.erp_agency_invoices`, blind to AWS S3 & Agency PDF)"
+  context_payload: |
+    Table: ${PROJECT_ID}.cymbal_dw.erp_agency_invoices
+    Cross-cloud S3 Iceberg catalog not federated.
+    Signed Agency_Media_MSA_Addendum_2.pdf not compiled into structured rule table.
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(recoverable_sgd), 2) AS recoverable_sgd,
+      ROUND(SUM(billed_media_sgd), 2) AS billed_sgd
+    FROM `${PROJECT_ID}.cymbal_dw.erp_agency_invoices`
+    WHERE market = 'SG'
+      AND channel = 'PAID_SOCIAL'
+  tokens_used: 2000
+  exploratory_queries: 3
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "ERP-only query lacked access to AWS S3 click telemetry and extracted Addendum #2 Clause 7.4 terms."
+
+governed:
+  answer_headline: "SGD 88,000.00 (40.0% invalid > 15.0% threshold)"
+  answer_detail: "Joining 1.42M S3 clicks (568,000 invalid = 40.0% of SGD 220,000.00) with AI-extracted Addendum #2 Clause 7.4 (>15.0% invalid triggers 100.0% cash refund) recovers SGD 88,000.00 cash—flipping Q3 from -SGD 68,000.00 to +SGD 20,000.00 net profit."
+  stage_delta_pill: "+SGD 88K Cash · Q3 Flips +20K"
+  stage_summary: "Proved 40% invalid S3 clicks against Clause 7.4 (>15% = 100% refund) to recover SGD 88K cash and flip Q3 into +SGD 20K profit."
+  numeric_value: 88000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Borderless S3 Iceberg Federation + GCS Object Table & AI.GENERATE() (`agency_msa_clause_7_4`)"
+  context_payload: |
+    {
+      "lake_table": "${PROJECT_ID}.cymbal_lake.q3_paid_social_clicks (1,420,000 rows, 40.0% invalid)",
+      "contract_table": "${PROJECT_ID}.cymbal_commerce.agency_msa_clause_7_4",
+      "clause": "Addendum #2 Clause 7.4: >15.0% invalid traffic triggers 100.0% refund of invalid spend",
+      "q3_profit_bridge": "-68,000.00 + 88,000.00 = +20,000.00 net profit"
+    }
+  sql_or_gql: |
+    WITH s3_invalid AS (
+      SELECT
+        ROUND(SUM(IF(NOT is_valid_human, billed_media_sgd, 0.0)), 2) AS invalid_sgd,
+        ROUND(100.0 * COUNTIF(NOT is_valid_human) / COUNT(*), 1) AS invalid_pct
+      FROM `${PROJECT_ID}.cymbal_lake.q3_paid_social_clicks`
+      WHERE country_code = 'SG'
+    )
+    SELECT
+      ROUND(
+        IF(
+          s.invalid_pct > c.invalid_threshold_pct,
+          s.invalid_sgd * (c.refund_rate_pct / 100.0),
+          0.0
+        ),
+        2
+      ) AS cash_clawback_sgd,
+      s.invalid_pct,
+      c.invalid_threshold_pct,
+      c.refund_rate_pct
+    FROM s3_invalid AS s
+    CROSS JOIN `${PROJECT_ID}.cymbal_commerce.agency_msa_clause_7_4` AS c
+    WHERE c.agency_name = 'Apex Digital'
+  tokens_used: 580
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Unified S3 click telemetry and AI.GENERATE() extracted Clause 7.4 rules in 1 deterministic SQL query (5/5 pass)."
+
+xray_summary:
+  context_added: "Regional S3 click log copy (${PROJECT_ID}.cymbal_lake.q3_paid_social_clicks, 1.42M rows) joined with Object Table AI.GENERATE() contract overlay (${PROJECT_ID}.cymbal_commerce.agency_msa_clause_7_4)."
+  gcp_primitives:
+    - "Borderless AWS S3 Iceberg Federation (Preview · asia-southeast1)"
+    - "BigQuery Object Tables (GA · asia-southeast1)"
+    - "BigQuery AI.GENERATE() Contract Extraction (GA · global endpoint)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "ERP-only query on cymbal_dw.erp_agency_invoices returns SGD 0.00 recoverable and misses 40.0% invalid click traffic."
+
+grading:
+  target_value: 88000.0
+  tolerance: 0.01
+  unit: "SGD"
+  secondary_numerics:
+    - name: "invalid_pct"
+      value: 40.0
+      tolerance: 0.1

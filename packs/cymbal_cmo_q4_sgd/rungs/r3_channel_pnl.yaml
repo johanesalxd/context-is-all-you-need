@@ -1,0 +1,167 @@
+id: "r3_channel_pnl"
+rung_num: 3
+short_label: "R3 · Channel P&L"
+title: "Grain-Locked Channel P&L & MEASURE()"
+pyramid_layer: "Layer 4 · BigQuery Semantic MEASURE() & Grain-Locked Verified Query (GA)"
+difficulty_tier: "Medium"
+release_badges:
+  - capability: "BigQuery Semantic MEASURE()"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Verified Query #VQ-M3"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
+
+question: "After ad spend, discounts, and shipping, which channels actually made money?"
+
+stage_story:
+  step_title: "Which Channels Actually Made Money After Spend?"
+  backend_layer: "Step 3 · Grain-Locked Channel P&L"
+  audience_role: "Chief Marketing Officer (CMO)"
+  situation: "With SGD 400K spent across SG Paid Social, MY Paid Social, and B2B/Search, Marketing checks net profitability before scaling Q4."
+  business_goal: "Measure true channel ROI without join fan-out distorting contribution."
+  tech_challenge: "Each order links to multiple ad clicks, inflating order profit 1.78x in flat SQL joins."
+  context_unlock: "Grain-Locked Semantic MEASURE() & Verified Query"
+
+poll:
+  prompt: "Metric Definition: One order links to multiple ad clicks while campaign spend sits at the campaign level. What happens in a flat SQL join?"
+  options:
+    - key: "A"
+      text: "The database automatically deduplicates order revenue before subtracting ad spend."
+    - key: "B"
+      text: "Order contribution gets multiplied across clicks, turning a real loss into a fake +48% ROI."
+    - key: "C"
+      text: "SQL raises a syntax error whenever two tables have different primary keys."
+    - key: "D"
+      text: "Ad spend gets multiplied equally with order profit so ROI stays unchanged."
+  correct_key: "B"
+  reveal_takeaway: "Metric Definition lesson: Valid SQL silently multiplies order-grain contribution 1.78x across multi-touch clicks (SGD 332K -> SGD 592K) while counting SGD 400K spend once. Locking Order and Campaign grain exposes the -SGD 68K (-17% ROI) truth."
+
+blind:
+  answer_headline: "+SGD 192,000.00 (+48.0% ROI)"
+  answer_detail: "Illusion from 1:N join fan-out: joining campaign_orders to campaign_clicks_raw inflated SGD 332,000.00 order contribution 1.78x to SGD 592,000.00 against SGD 400,000.00 spend, inventing +SGD 192,000.00 profit (+48.0% ROI)."
+  stage_delta_pill: "1.78x Fan-Out · +SGD 260K Mirage"
+  stage_summary: "Click join fan-out inflated profit by +SGD 260K, turning a real -SGD 68K loss into a fake +48% ROI across every channel."
+  numeric_value: 192000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Naive 1:N flat join (`campaign_orders JOIN campaign_clicks_raw JOIN campaign_spend`)"
+  context_payload: |
+    No semantic grain lock or MEASURE() contract provided.
+    Flat join over 1:N multi-touch clicks duplicated order-level net_contribution_sgd to SGD 592,000.00.
+  sql_or_gql: |
+    WITH spend_by_channel AS (
+      SELECT
+        channel,
+        SUM(spend_sgd) AS spend_sgd
+      FROM `${PROJECT_ID}.cymbal_dw.campaign_spend`
+      GROUP BY channel
+    ),
+    fanned_channels AS (
+      SELECT
+        o.channel,
+        MAX(s.spend_sgd) AS spend_sgd,
+        SUM(o.net_contribution_sgd) AS fanned_contribution_sgd,
+        SUM(o.net_contribution_sgd) - MAX(s.spend_sgd) AS net_profit_sgd
+      FROM `${PROJECT_ID}.cymbal_dw.campaign_orders` AS o
+      JOIN `${PROJECT_ID}.cymbal_dw.campaign_clicks_raw` AS clk
+        USING (order_id)
+      JOIN spend_by_channel AS s
+        ON o.channel = s.channel
+      GROUP BY o.channel
+    )
+    SELECT
+      ROUND(SUM(net_profit_sgd), 2) AS portfolio_net_profit_sgd,
+      ROUND(100.0 * SUM(net_profit_sgd) / NULLIF(SUM(spend_sgd), 0.0), 1) AS portfolio_roi_pct,
+      ROUND(SUM(fanned_contribution_sgd), 2) AS fanned_contribution_sgd,
+      ROUND(SUM(spend_sgd), 2) AS total_spend_sgd
+    FROM fanned_channels
+  tokens_used: 2900
+  exploratory_queries: 4
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Un-aggregated 1:N join between campaign_orders and campaign_clicks_raw inflated contribution 1.78x."
+
+governed:
+  answer_headline: "SGD -68,000.00 (-17.0% ROI)"
+  answer_detail: "Grain-locked P&L reveals -SGD 68,000.00 portfolio net loss (-17.0% ROI: SGD 332,000.00 order contribution minus SGD 400,000.00 spend). SG Paid Social bled -SGD 156,000.00 on SGD 220,000.00 spend, while B2B/Search (+SGD 56,000.00) and MY Paid Social (+SGD 32,000.00) won."
+  stage_delta_pill: "Grain-Locked · Zero Fan-Out"
+  stage_summary: "True Q3 P&L is -SGD 68K (-17% ROI) solely because SG Paid Social lost -SGD 156K; B2B (+56K) and MY (+32K) both made money."
+  numeric_value: -68000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Verified Query #VQ-M3 · Grain-Locked Semantic Contract (`MEASURE()` Order vs. Campaign Grain)"
+  context_payload: |
+    {
+      "semantic_contract": "Order-grain contribution (key: order_id) separated from campaign-grain spend (key: campaign_id)",
+      "verified_query": "#VQ-M3",
+      "order_table": "${PROJECT_ID}.cymbal_commerce.channel_pnl_orders",
+      "spend_table": "${PROJECT_ID}.cymbal_commerce.channel_pnl_spend",
+      "expected_tie_out": "332,000.00 - 400,000.00 = -68,000.00 (-17.0% ROI)"
+    }
+  sql_or_gql: |
+    WITH order_grain AS (
+      SELECT
+        channel,
+        SUM(net_contribution_sgd) AS net_contribution_sgd
+      FROM `${PROJECT_ID}.cymbal_commerce.channel_pnl_orders`
+      GROUP BY channel
+    ),
+    spend_grain AS (
+      SELECT
+        channel,
+        SUM(spend_sgd) AS spend_sgd
+      FROM `${PROJECT_ID}.cymbal_commerce.channel_pnl_spend`
+      GROUP BY channel
+    ),
+    channel_pnl AS (
+      SELECT
+        o.channel,
+        s.spend_sgd,
+        o.net_contribution_sgd,
+        o.net_contribution_sgd - s.spend_sgd AS net_profit_sgd
+      FROM order_grain AS o
+      JOIN spend_grain AS s
+        USING (channel)
+    )
+    SELECT
+      ROUND(SUM(net_profit_sgd), 2) AS portfolio_net_profit_sgd,
+      ROUND(100.0 * SUM(net_profit_sgd) / NULLIF(SUM(spend_sgd), 0.0), 1) AS portfolio_roi_pct,
+      ROUND(SUM(net_contribution_sgd), 2) AS order_grain_contribution_sgd,
+      ROUND(SUM(spend_sgd), 2) AS campaign_grain_spend_sgd,
+      ROUND(SUM(IF(channel = 'SG Paid Social', net_profit_sgd, 0.0)), 2) AS sg_ps_profit_sgd,
+      ROUND(SUM(IF(channel = 'B2B / Search', net_profit_sgd, 0.0)), 2) AS b2b_profit_sgd,
+      ROUND(SUM(IF(channel = 'MY Paid Social', net_profit_sgd, 0.0)), 2) AS my_ps_profit_sgd
+    FROM channel_pnl
+  tokens_used: 620
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Grain-locked Verified Query #VQ-M3 aggregates order contribution and campaign spend independently before joining (5/5 pass)."
+
+xray_summary:
+  context_added: "Grain-locked semantic contract & Verified Query #VQ-M3 separating order-grain contribution (${PROJECT_ID}.cymbal_commerce.channel_pnl_orders) from campaign-grain spend (${PROJECT_ID}.cymbal_commerce.channel_pnl_spend) in asia-southeast1."
+  gcp_primitives:
+    - "BigQuery Semantic MEASURE() Pattern (GA · asia-southeast1)"
+    - "Verified Query Template #VQ-M3 (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "Joining orders directly to campaign_clicks_raw triggers 1.78x fan-out (+SGD 192,000.00 mirage) and classifies as TIER_3_REVIEW_REQUIRED."
+
+grading:
+  target_value: -68000.0
+  tolerance: 0.01
+  unit: "SGD"
+  secondary_numerics:
+    - name: "portfolio_roi_pct"
+      value: -17.0
+      tolerance: 0.1
+    - name: "sg_ps_profit_sgd"
+      value: -156000.0
+      tolerance: 0.01

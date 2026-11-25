@@ -1,0 +1,126 @@
+id: "r6_q4_forecast"
+rung_num: 6
+short_label: "R6 · Q4 Forecast"
+title: "Fraud-Scrubbed Q4 Forecast & Budget Reallocation"
+pyramid_layer: "Layers 1, 4 & 5 · Certified Scrubbed History + AI.FORECAST (TimesFM 3.0) [Preview]"
+difficulty_tier: "Hard"
+release_badges:
+  - capability: "BigQuery AI.FORECAST (TimesFM 3.0)"
+    stage: "Preview"
+    region_scope: "asia-southeast1 / global endpoint"
+  - capability: "Knowledge Catalog Context Set"
+    stage: "Preview"
+    region_scope: "asia-southeast1 (Preview)"
+  - capability: "Verified Query #VQ-M6"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
+
+question: "If we block fraud and reallocate Q4 spend, what will Q4 actually deliver?"
+
+stage_story:
+  step_title: "What Will a Fraud-Scrubbed Q4 Plan Deliver?"
+  backend_layer: "Step 6 · Clean Forecast & Budget Reallocation"
+  audience_role: "CMO & Executive Leadership"
+  situation: "With Q3 flipped to +SGD 20K, Marketing locks the 12.12 and Lunar New Year budget for tomorrow's 9 AM deadline."
+  business_goal: "Compare an unscrubbed trend forecast against a fraud-scrubbed, rebalanced SGD 600K Q4 plan."
+  tech_challenge: "Raw history extrapolates September's bot surge into a SGD 2.84M mirage for SG Paid Social."
+  context_unlock: "Fraud-Scrubbed Certified History + AI.FORECAST (TimesFM 3.0)"
+
+poll:
+  prompt: "2027 AI Roadmap Blocker: What is the single biggest blocker keeping enterprises from scaling trusted AI agents into production?"
+  options:
+    - key: "A"
+      text: "Frontier AI models still lack basic SQL syntax and reasoning capability."
+    - key: "B"
+      text: "Missing governed enterprise context—definitions, certified data, entity links, and cross-silo rules."
+    - key: "C"
+      text: "Insufficient cloud GPU compute capacity for running standard analytics queries."
+    - key: "D"
+      text: "Shortage of conversational chat interfaces for business executives."
+  correct_key: "B"
+  reveal_takeaway: "2027 AI Roadmap Blocker: Frontier models are table stakes. Only governed enterprise context—scrubbing bot history and joining the rebalanced SGD 600K plan—delivers SGD 1.42M net revenue and +SGD 258K Q4 profit (+43% ROI) vs. -SGD 145K unchanged."
+
+blind:
+  answer_headline: "SGD 2,840,000.00 (from SGD 1,850,000.00 raw Q3)"
+  answer_detail: "Bot mirage: extrapolating dirty raw Q3 gross sales (SGD 1,850,000.00 including September's bot spike) projects SGD 2,840,000.00 for Q4 and ranks SG Paid Social #1 for budget expansion."
+  stage_delta_pill: "SGD 2.84M Bot Mirage"
+  stage_summary: "Extrapolated September's bot-driven gross spike into a SGD 2.84M mirage—urging us to pour Q4 budget into fraud-ridden SG Social."
+  numeric_value: 2840000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Raw gross trend extrapolation (`cymbal_dw.q3_weekly_gross_raw`, unscrubbed history)"
+  context_payload: |
+    Table: ${PROJECT_ID}.cymbal_dw.q3_weekly_gross_raw
+    No fraud-device scrubbing applied; no Q4 spend reallocation join.
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(naive_projected_q4_sgd), 2) AS projected_q4_gross_sgd,
+      ROUND(SUM(q3_gross_sales_sgd), 2) AS q3_gross_baseline_sgd
+    FROM `${PROJECT_ID}.cymbal_dw.q3_weekly_gross_raw`
+  tokens_used: 2900
+  exploratory_queries: 4
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Extrapolated uncleaned Q3 raw gross series without excluding the 28 spoofed devices or applying Q4 reallocation."
+
+governed:
+  answer_headline: "SGD 1,420,000.00 (+SGD 258,000.00 profit · +43.0% ROI)"
+  answer_detail: "Fraud-scrubbed TimesFM 3.0 forecast joined with the rebalanced SGD 600,000.00 Q4 plan (SGD 512,000.00 net new cash after SGD 88,000.00 clawback) delivers SGD 1,420,000.00 net revenue (90% band 1.31M-1.54M) and +SGD 258,000.00 profit (+43.0% ROI) vs. -SGD 145,000.00 unchanged."
+  stage_delta_pill: "+SGD 258K Profit · +43% ROI"
+  stage_summary: "Rebalanced SGD 600K Q4 plan (512K net cash) forecasts SGD 1.42M revenue and +SGD 258K profit (+43% ROI) vs. -SGD 145K unchanged."
+  numeric_value: 1420000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Certified Scrubbed History + AI.FORECAST (TimesFM 3.0) + Verified Query #VQ-M6 (`cymbal_commerce.q4_forecast`)"
+  context_payload: |
+    {
+      "forecast_table": "${PROJECT_ID}.cymbal_commerce.q4_forecast",
+      "verified_query": "#VQ-M6",
+      "allocation_sgd": {"B2B_Search": 260000, "MY_Paid_Social": 220000, "Clean_SG_Paid_Social": 120000},
+      "confidence_band_sgd": [1310000.0, 1540000.0],
+      "unchanged_counterfactual_sgd": -145000.0
+    }
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(projected_q4_net_rev_sgd), 2) AS projected_q4_net_rev_sgd,
+      ROUND(SUM(projected_q4_profit_sgd), 2) AS projected_q4_profit_sgd,
+      ROUND(100.0 * SUM(projected_q4_profit_sgd) / NULLIF(SUM(planned_q4_spend_sgd), 0.0), 1) AS projected_roi_pct,
+      ROUND(SUM(planned_q4_spend_sgd) - SUM(agency_clawback_offset_sgd), 2) AS net_new_cash_sgd,
+      ROUND(SUM(unchanged_counterfactual_profit_sgd), 2) AS unchanged_profit_sgd
+    FROM `${PROJECT_ID}.cymbal_commerce.q4_forecast`
+  tokens_used: 770
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Executed Verified Query #VQ-M6 over Certified fraud-scrubbed Q4 forecast & reallocation table (5/5 pass)."
+
+xray_summary:
+  context_added: "Fraud-scrubbed Certified history + TimesFM 3.0 AI.FORECAST() + Q4 reallocation plan materialized in ${PROJECT_ID}.cymbal_commerce.q4_forecast via Verified Query #VQ-M6."
+  gcp_primitives:
+    - "BigQuery AI.FORECAST (TimesFM 3.0) (Preview · asia-southeast1)"
+    - "Knowledge Catalog Certified History (GA · asia-southeast1)"
+    - "Verified Query Template #VQ-M6 (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "Raw trend query over cymbal_dw.q3_weekly_gross_raw projects a SGD 2.84M mirage and recommends scaling bot-infected SG Paid Social."
+
+grading:
+  target_value: 1420000.0
+  tolerance: 0.01
+  unit: "SGD"
+  secondary_numerics:
+    - name: "projected_q4_profit_sgd"
+      value: 258000.0
+      tolerance: 0.01
+    - name: "projected_roi_pct"
+      value: 43.0
+      tolerance: 0.1
+    - name: "net_new_cash_sgd"
+      value: 512000.0
+      tolerance: 0.01

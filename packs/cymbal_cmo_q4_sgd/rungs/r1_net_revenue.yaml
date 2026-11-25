@@ -1,0 +1,129 @@
+id: "r1_net_revenue"
+rung_num: 1
+short_label: "R1 · Net Revenue"
+title: "Business Glossary & Verified Query (#VQ-M1)"
+pyramid_layer: "Layers 2 & 4 · Knowledge Catalog Business Glossary + Verified Query (GA)"
+difficulty_tier: "Easy"
+release_badges:
+  - capability: "Knowledge Catalog Business Glossary"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Verified Query #VQ-M1"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Knowledge Catalog lookupContext"
+    stage: "Preview"
+    region_scope: "asia-southeast1 (Preview)"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
+
+question: "How much net revenue did our Q3 campaign actually keep after returns?"
+
+stage_story:
+  step_title: "How Much Q3 Campaign Revenue Did We Actually Keep?"
+  backend_layer: "Step 1 · Business Glossary & Verified Query"
+  audience_role: "Chief Marketing Officer (CMO)"
+  situation: "Two weeks before 12.12 and Lunar New Year budget lock, Marketing sees a breakout Q3 sales number and asks what stayed on the books."
+  business_goal: "Establish the true ex-GST, net-of-returns campaign revenue baseline."
+  tech_challenge: "Raw warehouse tables mix 9% GST with organic traffic and reset settled cash to zero after refunds."
+  context_unlock: "Finance Net Campaign Revenue Glossary + Verified Query"
+
+poll:
+  prompt: "Cold Open: Two teams ask the same AI model for Q3 campaign net revenue on raw tables. What goes wrong?"
+  options:
+    - key: "A"
+      text: "The AI automatically removes sales tax and organic orders using standard retail rules."
+    - key: "B"
+      text: "It sums gross orders with tax and organic sales, and reads zeroed post-refund rows as zero returns."
+    - key: "C"
+      text: "It stops immediately and refuses to write a query without a Finance sign-off."
+    - key: "D"
+      text: "It only misses currency rounding and gets within 1% of the true figure."
+  correct_key: "B"
+  reveal_takeaway: "Cold Open lesson: Models write valid queries, but raw columns hide accounting rules. Storing Finance's Net Campaign Revenue definition in Knowledge Catalog stops tax, organic traffic, and zeroed refunds from inflating revenue 3x."
+
+blind:
+  answer_headline: "SGD 1,850,000.00 (SGD 0.00 returns)"
+  answer_detail: "Overstated 3x: raw query summed gross_order_value (SGD 1.85M, including 9% GST and organic traffic) and read amt_net_settled_sgd on RETURNED rows, which resets to 0.00 once refunds clear."
+  stage_delta_pill: "3x Overstated · SGD 0 Returns"
+  stage_summary: "Inflated 3x by counting 9% GST and organic orders as campaign revenue, while zeroed post-refund rows hid SGD 240K in returns."
+  numeric_value: 1850000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Raw BigQuery schema only (`cymbal_dw.campaign_orders`, zero glossary or verified query)"
+  context_payload: |
+    Table: ${PROJECT_ID}.cymbal_dw.campaign_orders
+    Unannotated columns:
+      order_id STRING, campaign_quarter STRING, order_date DATE,
+      market_code STRING, channel STRING, order_status STRING,
+      gross_order_value FLOAT64, amt_net_settled_sgd FLOAT64, net_contribution_sgd FLOAT64
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(gross_order_value), 2) AS campaign_sales_sgd,
+      ROUND(SUM(IF(order_status = 'RETURNED', amt_net_settled_sgd, 0.0)), 2) AS return_losses_sgd
+    FROM `${PROJECT_ID}.cymbal_dw.campaign_orders`
+    WHERE campaign_quarter = 'FY26_Q3'
+  tokens_used: 3000
+  exploratory_queries: 4
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Ungrounded scan over cymbal_dw.campaign_orders swept in 9% GST, organic sales, and zeroed post-refund balances."
+
+governed:
+  answer_headline: "SGD 620,000.00 (SGD 240,000.00 returns)"
+  answer_detail: "Exact Q3 Net Campaign Revenue of SGD 620,000.00 on SGD 860,000.00 gross attributed orders (ex-9% GST and organic traffic), exposing SGD 240,000.00 in pre-refund returns via return_value_sgd."
+  stage_delta_pill: "Verified Query · Ex-GST"
+  stage_summary: "Separated true SGD 620K net settled revenue on SGD 860K attributed orders while exposing SGD 240K in returns."
+  numeric_value: 620000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Knowledge Catalog Business Glossary + Verified Query #VQ-M1 (`cymbal_commerce.campaign_orders`)"
+  context_payload: |
+    {
+      "glossary_term": "net-campaign-revenue",
+      "verified_query": "#VQ-M1",
+      "table": "${PROJECT_ID}.cymbal_commerce.campaign_orders",
+      "rules": [
+        "Filter attribution_type = 'PAID_CAMPAIGN' to exclude organic traffic.",
+        "Use net_attributed_settled_sgd (ex-9% GST) and return_value_sgd for pre-refund return exposure."
+      ]
+    }
+  sql_or_gql: |
+    SELECT
+      ROUND(SUM(net_attributed_settled_sgd), 2) AS net_settled_sales_sgd,
+      ROUND(SUM(return_value_sgd), 2) AS campaign_returns_sgd,
+      ROUND(SUM(attributed_ex_gst_sgd), 2) AS gross_attributed_sgd
+    FROM `${PROJECT_ID}.cymbal_commerce.campaign_orders`
+    WHERE campaign_quarter = 'FY26_Q3'
+      AND attribution_type = 'PAID_CAMPAIGN'
+  tokens_used: 900
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Compiled Verified Query #VQ-M1 bound to Finance's Net Campaign Revenue glossary term (5/5 pass)."
+
+xray_summary:
+  context_added: "Knowledge Catalog Business Glossary term net-campaign-revenue + Verified Query #VQ-M1 on ${PROJECT_ID}.cymbal_commerce.campaign_orders in asia-southeast1."
+  gcp_primitives:
+    - "Knowledge Catalog Business Glossary (GA · asia-southeast1)"
+    - "Verified Query Template #VQ-M1 (GA · asia-southeast1)"
+    - "Knowledge Catalog lookupContext (Preview · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "Ungrounded scan over cymbal_dw.campaign_orders inflates sales 3x (SGD 1.85M) and reports SGD 0 returns (TIER_3_REVIEW_REQUIRED)."
+
+grading:
+  target_value: 620000.0
+  tolerance: 0.01
+  unit: "SGD"
+  secondary_numerics:
+    - name: "campaign_returns_sgd"
+      value: 240000.0
+      tolerance: 0.01
+    - name: "gross_attributed_sgd"
+      value: 860000.0
+      tolerance: 0.01

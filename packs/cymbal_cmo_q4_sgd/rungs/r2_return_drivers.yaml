@@ -1,0 +1,148 @@
+id: "r2_return_drivers"
+rung_num: 2
+short_label: "R2 · Return Drivers"
+title: "Certified Data Product, AI.KEY_DRIVERS & RLS"
+pyramid_layer: "Layers 1 & 5 · Certified Data Products + Auto Data Quality + BigQuery RLS (GA)"
+difficulty_tier: "Easy"
+release_badges:
+  - capability: "Knowledge Catalog Certified Data Product"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Auto Data Quality & AI.KEY_DRIVERS()"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "BigQuery Row-Level Security"
+    stage: "GA"
+    region_scope: "asia-southeast1"
+  - capability: "Gemini PayGo Inference"
+    stage: "GA"
+    region_scope: "global endpoint"
+
+question: "What actually drove that spike in our Q3 campaign returns?"
+
+stage_story:
+  step_title: "Which Market Actually Drove the Return Spike?"
+  backend_layer: "Step 2 · Certified Data + Root Cause + RLS"
+  audience_role: "Chief Marketing Officer & SG Analyst"
+  situation: "Step 1 exposed SGD 240K in returns. Before pausing any market's ad budget, Marketing must pinpoint the real driver."
+  business_goal: "Isolate the true return culprit without cutting profitable markets."
+  tech_challenge: "A messy staging table has 42% blank tags that skew attribution toward Malaysia Mobile."
+  context_unlock: "Certified 0%-NULL Data Product, Driver Analysis & Row Access"
+
+poll:
+  prompt: "When 42% of country and promo tags are blank in a staging table, what happens when AI diagnoses a return spike?"
+  options:
+    - key: "A"
+      text: "It stops automatically and waits for engineers to repair every missing row."
+    - key: "B"
+      text: "It groups whatever messy segment labels exist, blaming the wrong country and recommending budget cuts there."
+    - key: "C"
+      text: "It reconstructs the missing 42% country tags accurately from memory."
+    - key: "D"
+      text: "It applies Singapore row-level access rules automatically even on staging tables."
+  correct_key: "B"
+  reveal_takeaway: "Without Data Quality certification, AI trusts distorted staging tables. Blocking the 42%-NULL copy and routing to the Certified Data Product isolates Singapore Paid Social (82.5% of returns) and protects profitable Malaysia."
+
+blind:
+  answer_headline: "Malaysia Mobile (68.0%)"
+  answer_detail: "False blame: raw query scanned cymbal_dw.campaign_returns_staging (42% NULL country_code/promo_tier), attributing 68.0% of returns to Malaysia Mobile and recommending pausing profitable Malaysia spend."
+  stage_delta_pill: "Wrong Culprit · 42% NULL"
+  stage_summary: "Blamed Malaysia Mobile (68%) from a 42%-blank staging table—nearly pausing our profitable Malaysia market."
+  numeric_value: 68.0
+  unit: "%"
+  query_language: "SQL"
+  context_mechanism: "Uncertified staging table scan (`cymbal_dw.campaign_returns_staging`, 42% NULL)"
+  context_payload: |
+    Table: ${PROJECT_ID}.cymbal_dw.campaign_returns_staging
+    Data Quality status: UNCERTIFIED (42% NULL in country_code and promo_tier).
+    No BigQuery Row-Level Security applied.
+  sql_or_gql: |
+    SELECT
+      market_segment,
+      ROUND(100.0 * SUM(return_sgd) / SUM(SUM(return_sgd)) OVER(), 1) AS return_share_pct
+    FROM `${PROJECT_ID}.cymbal_dw.campaign_returns_staging`
+    GROUP BY market_segment
+    ORDER BY return_share_pct DESC
+  tokens_used: 3400
+  exploratory_queries: 5
+  error_retries: 0
+  eval_pass_count: 0
+  eval_total_runs: 5
+  trust_tier: "TIER_3_REVIEW_REQUIRED"
+  rationale: "Scanned uncertified 42%-NULL staging table without Auto Data Quality gate or Row-Level Security."
+
+governed:
+  answer_headline: "SGD 198,000.00 (SG Paid Social · 82.5% share)"
+  answer_detail: "Certified 0%-NULL Data Product isolates SG Paid Social Promo-Trial as 82.5% of Q3 returns (SGD 198,000.00; 44.0% return rate; 91% promo usage; +SGD 162,000.00 vs. SGD 36,000.00 Q2 baseline), while MY (13.0%) and B2B (6.7%) stayed healthy."
+  stage_delta_pill: "Certified · Saved MY Market"
+  stage_summary: "Pinned 82.5% of returns (SGD 198K, +162K vs Q2) on SG Paid Social Promo-Trial—saving profitable Malaysia."
+  numeric_value: 198000.0
+  unit: "SGD"
+  query_language: "SQL"
+  context_mechanism: "Knowledge Catalog Certified Data Product + Auto DQ (0% NULL) + AI.KEY_DRIVERS() + BigQuery RLS"
+  context_payload: |
+    {
+      "certified_table": "${PROJECT_ID}.cymbal_commerce.campaign_returns_certified",
+      "data_quality_status": "PASSED (0% NULL)",
+      "blocked_staging": "${PROJECT_ID}.cymbal_dw.campaign_returns_staging (42% NULL)",
+      "key_drivers_baseline": "Q3 vs Q2 (SG Paid Social: SGD 198,000 vs SGD 36,000 = +SGD 162,000)",
+      "rls_enforcement": "End-User Credentials (CMO sees SG + MY; SG Analyst scoped to SG)"
+    }
+  sql_or_gql: |
+    WITH q3_totals AS (
+      SELECT
+        SUM(return_value_sgd) AS total_q3_returns_sgd
+      FROM `${PROJECT_ID}.cymbal_commerce.campaign_returns_certified`
+      WHERE is_q3 = TRUE
+    ),
+    channel_summary AS (
+      SELECT
+        segment_label,
+        SUM(IF(is_q3, return_value_sgd, 0.0)) AS q3_returns_sgd,
+        SUM(IF(NOT is_q3, return_value_sgd, 0.0)) AS q2_returns_sgd,
+        MAX(channel_gross_attributed_sgd) AS gross_attributed_sgd,
+        MAX(promo_usage_pct) AS promo_usage_pct
+      FROM `${PROJECT_ID}.cymbal_commerce.campaign_returns_certified`
+      GROUP BY segment_label
+    )
+    SELECT
+      c.segment_label,
+      ROUND(c.q3_returns_sgd, 2) AS q3_returns_sgd,
+      ROUND(100.0 * c.q3_returns_sgd / NULLIF(t.total_q3_returns_sgd, 0.0), 1) AS return_share_pct,
+      ROUND(100.0 * c.q3_returns_sgd / NULLIF(c.gross_attributed_sgd, 0.0), 1) AS channel_return_rate_pct,
+      ROUND(c.q3_returns_sgd - c.q2_returns_sgd, 2) AS qoq_delta_sgd,
+      c.promo_usage_pct
+    FROM channel_summary AS c
+    CROSS JOIN q3_totals AS t
+    ORDER BY q3_returns_sgd DESC
+  tokens_used: 640
+  exploratory_queries: 1
+  error_retries: 0
+  eval_pass_count: 5
+  eval_total_runs: 5
+  trust_tier: "TIER_1_VERIFIED_OR_COMPILED"
+  rationale: "Routed strictly to 0%-NULL Certified Data Product cymbal_commerce.campaign_returns_certified (5/5 pass)."
+
+xray_summary:
+  context_added: "Knowledge Catalog Certified Data Product aspect, Auto Data Quality (0% NULL gate), AI.KEY_DRIVERS() dimensions, and BigQuery RLS on ${PROJECT_ID}.cymbal_commerce.campaign_returns_certified."
+  gcp_primitives:
+    - "Knowledge Catalog Certified Data Product (GA · asia-southeast1)"
+    - "Knowledge Catalog Auto Data Quality (GA · asia-southeast1)"
+    - "BigQuery AI.KEY_DRIVERS() (GA · asia-southeast1)"
+    - "BigQuery Row-Level Security (GA · asia-southeast1)"
+    - "Gemini PayGo Inference (GA · global endpoint)"
+  negative_control_assertion: "Staging table cymbal_dw.campaign_returns_staging fails 0%-NULL quality gate (42% NULL) and misattributes 68.0% to Malaysia Mobile."
+
+grading:
+  target_value: 198000.0
+  tolerance: 0.01
+  unit: "SGD"
+  disallowed_tables:
+    - "campaign_returns_staging"
+  secondary_numerics:
+    - name: "return_share_pct"
+      value: 82.5
+      tolerance: 0.1
+    - name: "qoq_delta_sgd"
+      value: 162000.0
+      tolerance: 0.01

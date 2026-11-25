@@ -11,7 +11,7 @@ An Apache-2.0 benchmark engine, declarative `ScenarioPack` framework, and dual-m
 The repository enforces a strict separation between **declarative scenario packs**, the **verification, live-agent & eval engine**, and the **zero-build web application**:
 
 - **`schemas/rung_v2.schema.json`** — Authoritative JSON Schema (Draft 2020-12) for `ContextScenarioPackBundleV2` bundles, outcomes, `EmpiricalEval` (`N=5`) telemetry, trust tiers, identity variants, polls, and Horizon cards.
-- **`packs/<pack_id>/`** — Self-contained domain packs (starting with `packs/meridian_q3_sgd/`) housing `pack.yaml`, `rungs/*.yaml`, deterministic synthetic seed generators, BigQuery DDL/SQL/ISO GQL scripts (including `meridian_blind` physical CTAS trap tables alongside governed marts), and unstructured vendor contract fixtures.
+- **`packs/<pack_id>/`** — Self-contained domain packs (`packs/meridian_q3_sgd/` and `packs/cymbal_cmo_q4_sgd/`) housing `pack.yaml`, `rungs/*.yaml`, deterministic synthetic seed generators or pure-SQL seed DDL, BigQuery SQL/ISO GQL scripts, and unstructured contract fixtures.
 - **`engine/`** — Pack-agnostic loader (`pack_loader.py`), stateless 3-tier trust classifier (`trust_classifier.py`), HMAC role-assertion & identifier redaction helpers (`rls_impersonation.py`), deterministic PCRE leak scanner (`leak_check.py`), Firestore Native + in-memory audience poll store & offline `segno` SVG QR generator (`poll_store.py`), live-agent AST `dry_run` + tool-calling harness (`eval_harness.py`), bundle exporter (`bundle_exporter.py`), and CLI runner (`capture_rungs.py`).
 - **`server/app.py`** — Optional FastAPI server serving `web/` statically, exposing `GET /api/health`, allowlisted BigQuery rung verification (`POST /api/run-rung`), Zero-Trust `X-Demo-Key`-protected live Blind vs. Governed agent comparison (`POST /api/run-agent`), and live mobile QR audience polling (`GET /vote`, `GET /api/poll/state`, `POST /api/poll/vote`, `GET /api/poll/qr.svg`, and `X-Demo-Key`-gated `POST /api/poll/reset` + `POST /api/poll/sync-stage`).
 - **`web/`** — Zero-build vanilla HTML5/CSS3/ES6 Stage & Workbench application (`web/index.html`) that opens directly via `file:///.../web/index.html` or over `http://` via `uvicorn server.app:app` / Cloud Run, plus the mobile-first executive voting page (`web/vote.html`, served at `/vote`).
@@ -54,6 +54,19 @@ Architectural roadmap and cross-cloud governance cards are strictly isolated in 
   - `TIER_2_GROUNDED` — Grounded via schema descriptions, Data Insights predicates, or Business Glossary bindings.
   - `TIER_1_VERIFIED_OR_COMPILED` — Executed via Verified Query, BigQuery Property Graph `MEASURE()` / `ISO GQL`, certified Data Product + RLS, or compiled SLA contract overlay.
 - **Golden Eval Pass Rate (`k / N`):** Repeatable evaluation pass count across runs (e.g., `0/5 -> 5/5`), paired with Context Token delta, exploratory query count, and error retries—never an invented scalar trust-percentage score.
+
+---
+
+## Included Scenario Packs & Feature Matrix
+
+Both packs run on the same FastAPI server (`server/app.py`) with zero cross-contamination:
+
+| Pack & Route | Presentation Surface | Live Backend Scope (`asia-southeast1`) | Canned / Stand-In Scope |
+| :--- | :--- | :--- | :--- |
+| **`meridian_q3_sgd`** (`/` & `/vote`, default) | Dual-mode Stage & Workbench UI + live mobile QR poll | Full live BigQuery tables, 190 shadow clones, Knowledge Catalog Glossary/Data Products/Auto DQ, BigQuery RLS (`Beat 4b`), 4-hop Property Graph, GCS Object Table `AI.GENERATE()`, live Gemini Agent (`POST /api/run-agent`), and Firestore `/vote` polls | Offline `file://` replay from `web/data/rungs_bundle.js`; `Act IV Horizon` cards are roadmap reference |
+| **`cymbal_cmo_q4_sgd`** (`/cymbal/`) | 3-screen executive studio (`intro_landing` → `chat_intro_mockup` → `ui_studio_v5`) | On-demand live BigQuery SQL & 4-hop Property Graph ISO GQL (`POST /api/run-rung`) for Q1–Q6 via `live_bridge.js` inside the Context Inspector (`cymbal_dw`, `cymbal_commerce`, `cymbal_lake`) | Main chat cards/SVGs, Q7 Session Audit, and sibling follow-ups are pre-rendered in-browser; Q2 (`AI.KEY_DRIVERS`/RLS), Q5 (S3 federation + PDF `AI.GENERATE`), and Q6 (`AI.FORECAST`) execute honest BigQuery SQL stand-ins |
+
+See [packs/cymbal_cmo_q4_sgd/README.md](packs/cymbal_cmo_q4_sgd/README.md) for the full turn-by-turn Live vs. Stand-In vs. Canned breakdown, SQL-only BigQuery provisioning, dataset-only IAM, and teardown steps.
 
 ---
 
